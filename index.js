@@ -28,6 +28,7 @@ import {
 } from "../../../../script.js";
 import { extension_settings, getContext, saveMetadataDebounced } from "../../../extensions.js";
 import { hideChatMessageRange } from "../../../chats.js";
+import { oai_settings } from "../../../openai.js";
 import { power_user } from "../../../power-user.js";
 import { getSortedEntries } from "../../../world-info.js";
 import { selected_group } from "../../../group-chats.js";
@@ -773,6 +774,28 @@ function listConnectionProfiles() {
     }
 }
 
+/**
+ * 커넥션 매니저는 프로필 경유 요청에 Vertex AI 인증 방식을 실어주지 않는다.
+ * 값이 없으면 서버가 express 모드로 간주해, JSON 서비스 계정(full 모드) 사용자는
+ * "API key is required for Vertex AI Express mode" 오류가 난다.
+ * 프로필이 Vertex AI면 현재 설정된 인증 방식·리전·프로젝트 ID를 직접 실어 보낸다.
+ */
+function buildProfileOverrides(profileId) {
+    try {
+        const profile = listConnectionProfiles().find(p => p.id === profileId);
+        if (profile?.api === 'vertexai') {
+            return {
+                vertexai_auth_mode: oai_settings?.vertexai_auth_mode || 'express',
+                vertexai_region: profile['api-url'] || oai_settings?.vertexai_region || 'us-central1',
+                vertexai_express_project_id: oai_settings?.vertexai_express_project_id || '',
+            };
+        }
+    } catch (e) {
+        console.debug(`[${MODULE_NAME}] 프로필 오버라이드 구성 실패:`, e);
+    }
+    return {};
+}
+
 let llmBusy = false;
 
 /** 커스텀 API URL 정규화: /chat/completions가 없으면 붙여준다 */
@@ -858,7 +881,7 @@ async function callAuxLLM(systemPrompt, userPrompt, { maxTokens } = {}) {
                 extractData: true,
                 includePreset: false,
                 includeInstruct: false,
-            });
+            }, buildProfileOverrides(settings.profileId));
             return String(result?.content ?? '');
         }
     }
