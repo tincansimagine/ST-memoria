@@ -540,12 +540,24 @@ async function callEmbedApi(texts) {
     }
 }
 
-/** 새로 저장된 기억들에 API 임베딩(avec)을 붙인다. 꺼져 있거나 실패하면 조용히 건너뜀 */
+/** 새로 저장된 기억들에 API 임베딩을 붙인다 — 요약 축(avec)과 큐 축(acvec) 모두.
+ * 설정된 임베딩이 있으면 회상의 모든 축이 그 임베딩을 따라간다. 꺼져 있거나 실패하면 조용히 건너뜀 */
 async function attachApiEmbeddings(memories) {
     if (getSettings().embedApi.mode !== 'api' || !memories.length) return;
-    const vecs = await callEmbedApi(memories.map(memoryIndexText));
+    const texts = [];
+    const slots = []; // { m, field }
+    for (const m of memories) {
+        texts.push(memoryIndexText(m));
+        slots.push({ m, field: 'avec' });
+        const cue = memoryCueText(m);
+        if (cue.length >= 4 && !m.acvec) {
+            texts.push(cue);
+            slots.push({ m, field: 'acvec' });
+        }
+    }
+    const vecs = await callEmbedApi(texts);
     if (!vecs) return;
-    memories.forEach((m, i) => { m.avec = encodeVec(vecs[i]); });
+    slots.forEach((s, i) => { s.m[s.field] = encodeVec(vecs[i]); });
 }
 
 /** 질의 임베딩 캐시 (같은 입력으로 여러 번 패킷을 만들 때 API 재호출 방지) */
@@ -575,9 +587,15 @@ function calibrateApiCos(c) {
  * ST 벡터 API에 기억을 색인해 두고, 매 턴 질의로 유사한 기억의 순위를 받아온다.
  * ============================================================ */
 
+/** 로컬 벡터 색인에 넣는 텍스트 — 요약·단서에 원문 인용까지 포함.
+ * 인용은 장면의 언어 그대로라, 의미 임베딩이 유저의 미래 입력과 이어붙일 재료가 된다. */
+function localIndexText(m) {
+    return `${memoryIndexText(m)} ${m.excerpt || ''}`.trim();
+}
+
 /** 기억 하나를 로컬 벡터 색인에서 식별하는 해시 (본문이 바뀌면 해시도 바뀜 → 자동 재색인) */
 function memLocalHash(m) {
-    return getStringHash(memoryIndexText(m));
+    return getStringHash(localIndexText(m));
 }
 
 function localCollectionId() {
@@ -612,7 +630,7 @@ async function syncLocalVectors() {
     const existing = new Set((await vectorApi('list', { collectionId }) || []).map(Number));
     const toInsert = [];
     for (const [hash, m] of wanted) {
-        if (!existing.has(hash)) toInsert.push({ hash, text: memoryIndexText(m), index: m.turnIndex || 0 });
+        if (!existing.has(hash)) toInsert.push({ hash, text: localIndexText(m), index: m.turnIndex || 0 });
     }
     const toDelete = [...existing].filter(h => !wanted.has(h));
     if (toDelete.length) await vectorApi('delete', { collectionId, hashes: toDelete });
@@ -1624,7 +1642,9 @@ async function runConsolidation(store) {
             removeIds.add(a.id);
         }
         keep.vec = encodeVec(embedText(memoryIndexText(keep)));
+        keep.cvec = memoryCueText(keep).length >= 4 ? encodeVec(embedText(memoryCueText(keep))) : '';
         keep.avec = null; // 임베딩 API 사용 시 다음 재계산 때 갱신
+        keep.acvec = null;
         stats.merged += absorb.length;
     }
 
@@ -1829,11 +1849,15 @@ async function retrieveMemories(queryText, recentUserTexts, sceneText = '') {
             if (sceneVec) cueCos = Math.max(cueCos, cosine(sceneVec, cv) * 0.85);
             cos = Math.max(cos, cueCos * 0.97);
         }
-        // API 임베딩이 양쪽 다 있으면 의미 유사도를 보정 스케일로 반영
+        // API 임베딩이 양쪽 다 있으면 의미 유사도를 보정 스케일로 반영 — 요약 축과 큐 축 모두
         if (apiQueryVec && m.avec) {
             const av = decodeVec(m.avec);
             let apiCos = calibrateApiCos(cosine(apiQueryVec, av));
             for (const aq of apiAuxVecs) { if (aq) apiCos = Math.max(apiCos, calibrateApiCos(cosine(aq, av)) * 0.92); }
+            if (m.acvec) {
+                const acv = decodeVec(m.acvec);
+                apiCos = Math.max(apiCos, calibrateApiCos(cosine(apiQueryVec, acv)) * 0.97);
+            }
             cos = Math.max(cos, apiCos);
         }
         // 로컬 임베딩 순위가 있으면 의미 유사도로 반영
@@ -1919,7 +1943,7 @@ function chapterVec(c) {
 }
 
 /** 최근 주입 창(마지막 3개) 밖의 청크 요약 중 지금 질의와 가장 맞는 하나 (문턱 미달 시 null) */
-function pickRecalledChapter(store, query, sceneText) {
+async function pickRecalledChapter(store, query, sceneText) {
     const old = store.chunkSummaries.slice(0, -3);
     const q = String(query || '').trim();
     if (!old.length || q.length < 4) return null;
@@ -1928,12 +1952,27 @@ function pickRecalledChapter(store, query, sceneText) {
     const qTokens = new Set((q.toLowerCase().match(/[\p{L}\p{N}]+/gu) || []));
     const pastQ = PAST_QUERY_RE.test(q.toLowerCase());
 
+    // 임베딩 API가 설정돼 있으면 챕터 축도 그 임베딩을 따른다 (챕터 벡터는 저장소에 1회 캐시)
+    let apiQ = null;
+    if (getSettings().embedApi.mode === 'api') {
+        apiQ = (await embedQueriesViaApi([q]))?.[0] || null;
+        const missing = old.filter(c => !c.avec);
+        if (apiQ && missing.length) {
+            const vecs = await callEmbedApi(missing.map(c => String(c.text || '').slice(0, 2000)));
+            if (vecs) {
+                missing.forEach((c, i) => { c.avec = encodeVec(vecs[i]); });
+                persistStore();
+            }
+        }
+    }
+
     let best = null;
     let bestScore = 0;
     for (const c of old) {
         const v = chapterVec(c);
         let cos = cosine(qv, v);
         if (sv) cos = Math.max(cos, cosine(sv, v) * 0.85);
+        if (apiQ && c.avec) cos = Math.max(cos, calibrateApiCos(cosine(apiQ, decodeVec(c.avec))));
         const lex = lexicalOverlap(qTokens, c.text || '');
         const s = cos + lex * 2;
         if (s > bestScore) { bestScore = s; best = c; }
@@ -2131,7 +2170,7 @@ async function buildPacketSections(query, supervisorPlan) {
     ];
     // 챕터 회상: 주입 창(최근 3개)에서 밀려난 옛 챕터도 지금 질의와 강하게 맞으면 한 자리 소환 —
     // 기억 조각은 파편이지만 챕터 레코드는 그 시절의 연결된 맥락을 준다
-    const recalledChapter = pickRecalledChapter(store, query, lastAssistantText);
+    const recalledChapter = await pickRecalledChapter(store, query, lastAssistantText);
     if (recalledChapter) summaries.unshift({ ...recalledChapter, level: 'chunk', recalled: true });
 
     // 서사 시계 지도 (기억 줄의 "얼마나 옛일" 표기용)
@@ -3453,6 +3492,7 @@ function bindUI() {
         const edited = await ctx.callGenericPopup('요약 수정', ctx.POPUP_TYPE.INPUT, s.text, { rows: 8 });
         if (!edited || typeof edited !== 'string') return;
         s.text = cleanMultiline(edited, 2400);
+        s.avec = null; // 본문이 바뀌었으니 챕터 API 임베딩은 다음 회상 때 재계산
         persistStore(); renderSummariesPanel(); updateInjection();
     });
     $('#memoria_settings').on('click', '.memoria-digest-edit', async function () {
@@ -3659,9 +3699,21 @@ function bindUI() {
             let done = 0, failed = false;
             for (let i = 0; i < targets.length; i += 48) {
                 const batch = targets.slice(i, i + 48);
-                const vecs = await callEmbedApi(batch.map(memoryIndexText));
+                // 요약 축(avec)과 큐 축(acvec)을 함께 재계산
+                const texts = [];
+                const slots = [];
+                for (const m of batch) {
+                    texts.push(memoryIndexText(m));
+                    slots.push({ m, field: 'avec' });
+                    const cue = memoryCueText(m);
+                    if (cue.length >= 4) {
+                        texts.push(cue);
+                        slots.push({ m, field: 'acvec' });
+                    }
+                }
+                const vecs = await callEmbedApi(texts);
                 if (!vecs) { failed = true; break; }
-                batch.forEach((m, j) => { m.avec = encodeVec(vecs[j]); });
+                slots.forEach((s, j) => { s.m[s.field] = encodeVec(vecs[j]); });
                 done += batch.length;
                 $prog.text(`${done}/${targets.length}`);
             }
