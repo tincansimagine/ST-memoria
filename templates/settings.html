@@ -1,0 +1,463 @@
+<div id="memoria_settings" class="memoria">
+    <div class="inline-drawer">
+        <div class="inline-drawer-toggle inline-drawer-header">
+            <b><i class="fa-solid fa-book-bookmark"></i> Memoria — 장기기억 서고 <span class="memoria__version">v0.5.0</span></b>
+            <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
+        </div>
+        <div class="inline-drawer-content">
+
+            <div class="memoria__status">
+                <div>
+                    <strong>상태: <span id="memoria_status_state">대기 중</span></strong>
+                    <span id="memoria_status_counts">캐릭터/채팅을 열면 이 채팅의 기억이 표시됩니다.</span>
+                </div>
+                <div class="memoria__status-actions">
+                    <div class="menu_button" id="memoria_record_now" title="마지막 어시스턴트 턴을 지금 바로 기억으로 기록합니다.">
+                        <i class="fa-solid fa-feather"></i>
+                        <span>지금 기록</span>
+                    </div>
+                    <div class="menu_button" id="memoria_refresh_packet" title="현재 맥락 기준으로 주입 내용을 다시 생성합니다.">
+                        <i class="fa-solid fa-arrows-rotate"></i>
+                        <span>주입 갱신</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="memoria__tabs" role="tablist" aria-label="Memoria 설정">
+                <button class="memoria__tab is-active" type="button" data-tab="overview">
+                    <i class="fa-solid fa-gauge-high"></i><span>개요</span>
+                </button>
+                <button class="memoria__tab" type="button" data-tab="memories">
+                    <i class="fa-solid fa-brain"></i><span>기억</span>
+                </button>
+                <button class="memoria__tab" type="button" data-tab="world">
+                    <i class="fa-solid fa-globe"></i><span>세계</span>
+                </button>
+                <button class="memoria__tab" type="button" data-tab="summaries">
+                    <i class="fa-solid fa-scroll"></i><span>요약</span>
+                </button>
+                <button class="memoria__tab" type="button" data-tab="config">
+                    <i class="fa-solid fa-sliders"></i><span>설정</span>
+                </button>
+                <button class="memoria__tab" type="button" data-tab="tools">
+                    <i class="fa-solid fa-screwdriver-wrench"></i><span>도구</span>
+                </button>
+            </div>
+
+            <!-- ===== 개요 ===== -->
+            <section class="memoria__panel is-active" data-panel="overview">
+                <div class="memoria__section">
+                    <div class="memoria__section-head">
+                        <div>
+                            <h4>주입 미리보기</h4>
+                            <p>다음 응답 생성 시 프롬프트에 들어갈 장기기억입니다.</p>
+                        </div>
+                        <span id="memoria_packet_tokens" class="memoria__token-badge"></span>
+                    </div>
+                    <textarea id="memoria_packet_preview" class="memoria__preview" rows="12" readonly></textarea>
+                </div>
+                <div class="memoria__section">
+                    <div class="memoria__section-head">
+                        <div>
+                            <h4>서고에 질문</h4>
+                            <p>저장된 기억만 근거로 답합니다. "우리 처음 만난 게 언제였지?" 같은 걸 물어보세요. (<code>/memoria-ask</code>로도 가능)</p>
+                        </div>
+                    </div>
+                    <div class="memoria__ask-row">
+                        <input type="text" id="memoria_ask_input" placeholder="이 스토리에 대해 물어보기…">
+                        <div class="menu_button" id="memoria_ask_btn"><i class="fa-solid fa-comment-dots"></i><span>질문</span></div>
+                    </div>
+                    <div id="memoria_ask_answer" class="memoria__ask-answer" style="display:none;"></div>
+                </div>
+                <div class="memoria__hint">
+                    <b>작동 방식</b> — AI 응답이 끝날 때마다 그 턴을 자동으로 기록해 구조화된 기억으로 보관하고,
+                    매 턴 현재 대화와 관련 있는 기억만 골라 토큰 예산 안에서 주입합니다.
+                    스와이프·편집·삭제 시 해당 턴의 기억은 자동으로 무효화됩니다.
+                </div>
+            </section>
+
+            <!-- ===== 기억 ===== -->
+            <section class="memoria__panel" data-panel="memories">
+                <div class="memoria__section">
+                    <div class="memoria__section-head">
+                        <div>
+                            <h4>기억 브라우저</h4>
+                            <p>고정(📌)한 기억은 매 턴 반드시 주입됩니다.</p>
+                        </div>
+                        <div class="memoria__compact-actions">
+                            <div class="menu_button" id="memoria_memory_add">
+                                <i class="fa-solid fa-plus"></i>
+                                <span>기억 추가</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="memoria__toolbar">
+                        <div class="memoria__search">
+                            <i class="fa-solid fa-magnifying-glass"></i>
+                            <input type="text" id="memoria_memory_search" placeholder="요약·발췌·개체·태그 검색…">
+                        </div>
+                        <select id="memoria_memory_kind_filter" class="memoria__kind-select">
+                            <option value="">전체</option>
+                            <option value="event">사건</option>
+                            <option value="relationship">관계</option>
+                            <option value="fact">사실</option>
+                            <option value="preference">취향</option>
+                            <option value="promise">약속</option>
+                            <option value="goal">목표</option>
+                            <option value="item">물건</option>
+                            <option value="place">장소</option>
+                            <option value="secret">비밀</option>
+                            <option value="impression">인상</option>
+                        </select>
+                    </div>
+                    <div id="memoria_memory_list" class="memoria__mem-list"></div>
+                </div>
+            </section>
+
+            <!-- ===== 세계 ===== -->
+            <section class="memoria__panel" data-panel="world">
+                <div class="memoria__section">
+                    <div class="memoria__section-head">
+                        <div>
+                            <h4>인물 도감</h4>
+                            <p>대화에 등장한 인물의 프로필과 관계입니다. 새 인물이 등장하면 자동으로 기록되고, 매 턴 AI에게 전달됩니다.</p>
+                        </div>
+                        <div class="memoria__compact-actions">
+                            <div class="menu_button" id="memoria_character_add">
+                                <i class="fa-solid fa-user-plus"></i>
+                                <span>인물 추가</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div id="memoria_characters_list" class="memoria__char-list"></div>
+                </div>
+                <div class="memoria__section">
+                    <div class="memoria__section-head">
+                        <div>
+                            <h4>아이템 도감</h4>
+                            <p>스토리에 의미 있는 물건들. 소유자와 상태가 자동으로 갱신됩니다.</p>
+                        </div>
+                    </div>
+                    <div id="memoria_items_list" class="memoria__row-list"></div>
+                </div>
+                <div class="memoria__section">
+                    <div class="memoria__section-head">
+                        <div>
+                            <h4>서약</h4>
+                            <p>비밀·미해결 떡밥·건너뛰면 안 되는 전개 등, 이야기가 지켜야 할 약속. 토큰이 부족해도 가장 마지막까지 유지됩니다.</p>
+                        </div>
+                    </div>
+                    <div id="memoria_locks_list" class="memoria__row-list"></div>
+                </div>
+                <div class="memoria__section">
+                    <div class="memoria__section-head">
+                        <div>
+                            <h4>캐논 (세계 설정)</h4>
+                            <p>세계관의 지속적 사실. 같은 키가 다시 기록되면 덮어씁니다.</p>
+                        </div>
+                    </div>
+                    <div id="memoria_rules_list" class="memoria__row-list"></div>
+                </div>
+                <div class="memoria__section">
+                    <div class="memoria__section-head">
+                        <div>
+                            <h4>상태 보드</h4>
+                            <p>인물·사물·장면의 현재 값(위치, 복장, 부상, 목표…). 슬롯별 최신 값만 유지됩니다.</p>
+                        </div>
+                    </div>
+                    <div id="memoria_scene_line" class="memoria__scene-line" style="display:none;"></div>
+                    <div id="memoria_states_list" class="memoria__row-list"></div>
+                </div>
+            </section>
+
+            <!-- ===== 요약 ===== -->
+            <section class="memoria__panel" data-panel="summaries">
+                <div class="memoria__section">
+                    <div class="memoria__section-head">
+                        <div>
+                            <h4>지금까지의 이야기</h4>
+                            <p>N턴마다 자동 요약되고, 오래된 요약은 연대기로 병합됩니다. {{memoria_story}} 매크로로도 쓸 수 있습니다.</p>
+                        </div>
+                        <div class="memoria__compact-actions">
+                            <div class="menu_button" id="memoria_summarize_now">
+                                <i class="fa-solid fa-wand-magic-sparkles"></i>
+                                <span>지금 요약</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div id="memoria_summary_list" class="memoria__summary-list"></div>
+                </div>
+                <div class="memoria__section">
+                    <div class="memoria__section-head">
+                        <div>
+                            <h4>턴별 기록</h4>
+                            <p>사서가 남긴 턴 단위 기록입니다. 요약은 이 기록을 엮어 만들어지므로, 여기서 고치면 다음 요약부터 반영됩니다.</p>
+                        </div>
+                    </div>
+                    <div id="memoria_digest_list" class="memoria__row-list"></div>
+                </div>
+                <div class="memoria__section">
+                    <div class="memoria__section-head">
+                        <div>
+                            <h4>주요 사건 연표</h4>
+                            <p>이야기의 방향을 바꾼 결정적 순간들을 시간순으로 정리한 연표입니다.</p>
+                        </div>
+                    </div>
+                    <div id="memoria_milestone_list" class="memoria__row-list"></div>
+                </div>
+            </section>
+
+            <!-- ===== 설정 ===== -->
+            <section class="memoria__panel" data-panel="config">
+                <div class="memoria__section">
+                    <div class="memoria__section-head">
+                        <div><h4>기본</h4></div>
+                    </div>
+                    <label class="memoria__toggle-row" for="memoria_enabled">
+                        <input type="checkbox" id="memoria_enabled">
+                        <span><strong>Memoria 사용</strong><small>끄면 기록과 주입이 모두 중단됩니다.</small></span>
+                    </label>
+                    <label class="memoria__toggle-row" for="memoria_auto_record">
+                        <input type="checkbox" id="memoria_auto_record">
+                        <span><strong>자동 기록</strong><small>AI 응답이 끝날 때마다 자동으로 턴을 기록합니다. 끄면 [지금 기록]으로 수동 기록.</small></span>
+                    </label>
+                    <label class="memoria__toggle-row" for="memoria_supervisor">
+                        <input type="checkbox" id="memoria_supervisor">
+                        <span><strong>장면 연출 (실험적)</strong><small>매 턴 생성 전에 연출 LLM이 장면의 목표·피해야 할 전개를 짧게 계획해 함께 주입합니다. 응답 대기 시간이 늘어나며, <b>별도 연결 프로필 또는 커스텀 API가 지정된 경우에만</b> 동작합니다.</small></span>
+                    </label>
+                    <label class="memoria__toggle-row" for="memoria_authorize_private">
+                        <input type="checkbox" id="memoria_authorize_private">
+                        <span><strong>캐릭터 비공개 기억 허용</strong><small>현재 캐릭터가 소유한 비공개/비밀 기억을 서브텍스트 용도로만 주입에 포함합니다.</small></span>
+                    </label>
+                    <label class="memoria__toggle-row" for="memoria_auto_hide">
+                        <input type="checkbox" id="memoria_auto_hide">
+                        <span><strong>요약된 메시지 자동 숨김</strong><small>"지금까지의 이야기" 요약이 커버한 옛 메시지를 채팅에서 숨겨 컨텍스트 토큰을 크게 절약합니다. 최근 메시지는 아래 설정만큼 항상 남고, 도구 탭에서 언제든 해제할 수 있습니다.</small></span>
+                    </label>
+                    <label class="memoria__toggle-row" for="memoria_ref_profile">
+                        <input type="checkbox" id="memoria_ref_profile">
+                        <span><strong>카드·페르소나 참고</strong><small>사서·요약이 캐릭터 카드와 페르소나 요지를 배경 자료로 참고합니다. 이름·설정 오해가 줄어듭니다.</small></span>
+                    </label>
+                    <label class="memoria__toggle-row" for="memoria_ref_worldinfo">
+                        <input type="checkbox" id="memoria_ref_worldinfo">
+                        <span><strong>월드인포 참고</strong><small>활성 월드인포(로어북)를 배경 자료로 참고합니다. 로어북이 크면 사서 호출 토큰이 늘어납니다.</small></span>
+                    </label>
+                    <div class="memoria__field-grid">
+                        <div class="memoria__field">
+                            <label for="memoria_summary_language" title="요약·기억이 기록될 언어">요약 언어</label>
+                            <select id="memoria_summary_language">
+                                <option value="auto">자동 (채팅 언어)</option>
+                                <option value="ko">한국어</option>
+                                <option value="en">영어</option>
+                                <option value="ja">일본어</option>
+                                <option value="hybrid">하이브리드 (영어 서술 + 대사 원문)</option>
+                            </select>
+                        </div>
+                        <div class="memoria__field">
+                            <label for="memoria_summary_context" title="새 요약을 만들 때 참조할 이전 요약 수 (0 = 안 함, -1 = 전체)">이전 요약 참조 수</label>
+                            <input type="number" id="memoria_summary_context" min="-1" max="50" step="1">
+                        </div>
+                        <div class="memoria__field">
+                            <label for="memoria_preserve_recent" title="자동 숨김 시 항상 표시로 남길 최근 메시지 수">최근 메시지 보존 수</label>
+                            <input type="number" id="memoria_preserve_recent" min="1" max="50" step="1">
+                        </div>
+                    </div>
+                </div>
+                <div class="memoria__section">
+                    <div class="memoria__section-head">
+                        <div>
+                            <h4>추적 도감</h4>
+                            <p>켜면 사서가 대화에서 자동으로 골라내 도감에 기록하고, 매 턴 주입에 포함합니다.</p>
+                        </div>
+                    </div>
+                    <label class="memoria__toggle-row" for="memoria_character_tracking">
+                        <input type="checkbox" id="memoria_character_tracking">
+                        <span><strong>인물 도감</strong><small>새 인물의 프로필과 인물 간 관계를 자동 기록합니다. (세계 탭에서 관리)</small></span>
+                    </label>
+                    <label class="memoria__toggle-row" for="memoria_event_tracking">
+                        <input type="checkbox" id="memoria_event_tracking">
+                        <span><strong>이벤트 연표</strong><small>고백·정체 폭로·죽음·되돌릴 수 없는 선택 등 결정적 전환점만 연표로 기록합니다. (요약 탭에서 관리)</small></span>
+                    </label>
+                    <label class="memoria__toggle-row" for="memoria_item_tracking">
+                        <input type="checkbox" id="memoria_item_tracking">
+                        <span><strong>아이템 도감</strong><small>의미 있는 선물·전개상 중요한 물건의 소유자와 상태를 추적합니다. (세계 탭에서 관리)</small></span>
+                    </label>
+                </div>
+                <div class="memoria__section">
+                    <div class="memoria__section-head">
+                        <div>
+                            <h4>모델 (사서 API)</h4>
+                            <p>기억 기록·요약을 담당하는 사서가 쓸 API입니다. 저렴하고 빠른 모델을 권장합니다.</p>
+                        </div>
+                        <div class="memoria__compact-actions">
+                            <div class="menu_button" id="memoria_api_test"><i class="fa-solid fa-plug-circle-check"></i><span>연결 테스트</span></div>
+                        </div>
+                    </div>
+                    <div class="memoria__field">
+                        <label for="memoria_api_mode">API 소스</label>
+                        <select id="memoria_api_mode">
+                            <option value="st">실리태번 (현재 API / 연결 프로필)</option>
+                            <option value="custom">커스텀 API (OpenAI 호환)</option>
+                        </select>
+                    </div>
+                    <div id="memoria_st_api_block">
+                        <div class="memoria__field">
+                            <label for="memoria_profile">연결 프로필</label>
+                            <select id="memoria_profile"></select>
+                        </div>
+                    </div>
+                    <div id="memoria_custom_api_block" style="display:none;">
+                        <div class="memoria__field">
+                            <label for="memoria_custom_url" title="예: https://api.openai.com/v1 (뒤의 /chat/completions는 자동으로 붙습니다)">API URL</label>
+                            <input type="text" id="memoria_custom_url" placeholder="https://api.openai.com/v1" autocomplete="off">
+                        </div>
+                        <div class="memoria__field">
+                            <label for="memoria_custom_key">API Key</label>
+                            <input type="password" id="memoria_custom_key" placeholder="sk-..." autocomplete="off">
+                        </div>
+                        <div class="memoria__field">
+                            <label for="memoria_custom_model">모델</label>
+                            <input type="text" id="memoria_custom_model" placeholder="gpt-4o-mini" autocomplete="off">
+                        </div>
+                        <div class="memoria__field-grid">
+                            <div class="memoria__field">
+                                <label for="memoria_custom_temp">Temperature</label>
+                                <input type="number" id="memoria_custom_temp" min="0" max="2" step="0.1">
+                            </div>
+                            <div class="memoria__field">
+                                <label for="memoria_custom_timeout">타임아웃(초)</label>
+                                <input type="number" id="memoria_custom_timeout" min="10" max="600" step="10">
+                            </div>
+                        </div>
+                    </div>
+                    <div class="memoria__field-grid">
+                        <div class="memoria__field">
+                            <label for="memoria_response_tokens" title="사서 응답의 최대 토큰. 요약·기록이 중간에 잘리지 않도록 넉넉하게 잡으세요 (기본 30000)">사서 최대 토큰</label>
+                            <input type="number" id="memoria_response_tokens" min="256" max="65536" step="512">
+                        </div>
+                    </div>
+                </div>
+                <div class="memoria__section">
+                    <div class="memoria__section-head">
+                        <div><h4>주입 · 검색</h4></div>
+                    </div>
+                    <div class="memoria__field-grid">
+                        <div class="memoria__field">
+                            <label for="memoria_budget" title="주입되는 장기기억이 차지할 수 있는 최대 토큰">주입 토큰 예산</label>
+                            <input type="number" id="memoria_budget" min="200" max="24000" step="100">
+                        </div>
+                        <div class="memoria__field">
+                            <label for="memoria_depth" title="채팅 내 주입 깊이 (0 = 가장 마지막)">주입 깊이</label>
+                            <input type="number" id="memoria_depth" min="0" max="20" step="1">
+                        </div>
+                        <div class="memoria__field">
+                            <label for="memoria_topk" title="한 턴에 회상할 기억 수">회상 개수</label>
+                            <input type="number" id="memoria_topk" min="1" max="30" step="1">
+                        </div>
+                        <div class="memoria__field">
+                            <label for="memoria_chunk_turns" title="몇 턴마다 자동 요약할지">요약 주기(턴)</label>
+                            <input type="number" id="memoria_chunk_turns" min="3" max="40" step="1">
+                        </div>
+                        <div class="memoria__field">
+                            <label for="memoria_max_memories" title="초과 시 중요도 낮은 오래된 기억부터 정리 (고정/수동 제외)">최대 기억 수</label>
+                            <input type="number" id="memoria_max_memories" min="50" max="2000" step="50">
+                        </div>
+                    </div>
+                </div>
+                <div class="memoria__section">
+                    <div class="memoria__section-head">
+                        <div>
+                            <h4>프롬프트</h4>
+                            <p>각 역할의 시스템 프롬프트를 수정할 수 있습니다.</p>
+                        </div>
+                    </div>
+                    <details class="memoria__details">
+                        <summary>사서 (턴 → 구조화 기억)</summary>
+                        <textarea id="memoria_prompt_archivist" rows="10"></textarea>
+                        <div class="menu_button memoria-prompt-reset" data-key="archivist"><i class="fa-solid fa-undo"></i><span>기본값</span></div>
+                    </details>
+                    <details class="memoria__details">
+                        <summary>장면 연출</summary>
+                        <textarea id="memoria_prompt_supervisor" rows="8"></textarea>
+                        <div class="menu_button memoria-prompt-reset" data-key="supervisor"><i class="fa-solid fa-undo"></i><span>기본값</span></div>
+                    </details>
+                    <details class="memoria__details">
+                        <summary>요약 (청크)</summary>
+                        <textarea id="memoria_prompt_chunk" rows="5"></textarea>
+                        <div class="menu_button memoria-prompt-reset" data-key="chunk"><i class="fa-solid fa-undo"></i><span>기본값</span></div>
+                    </details>
+                    <details class="memoria__details">
+                        <summary>연대기 병합</summary>
+                        <textarea id="memoria_prompt_arc" rows="5"></textarea>
+                        <div class="menu_button memoria-prompt-reset" data-key="arc"><i class="fa-solid fa-undo"></i><span>기본값</span></div>
+                    </details>
+                </div>
+            </section>
+
+            <!-- ===== 도구 ===== -->
+            <section class="memoria__panel" data-panel="tools">
+                <div class="memoria__section">
+                    <div class="memoria__section-head">
+                        <div>
+                            <h4>과거 채팅 색인</h4>
+                            <p>아직 기록되지 않은 턴과 기록에 실패한 턴을 순서대로 기록합니다. 범위를 비우면 전체를 색인합니다.</p>
+                        </div>
+                    </div>
+                    <div class="memoria__button-row">
+                        <div class="memoria__range">
+                            <input type="number" id="memoria_bulk_from" min="0" step="1" placeholder="시작 #">
+                            <span>~</span>
+                            <input type="number" id="memoria_bulk_to" min="0" step="1" placeholder="끝 #">
+                        </div>
+                        <div class="menu_button" id="memoria_bulk_index"><i class="fa-solid fa-clock-rotate-left"></i><span>색인 시작</span></div>
+                        <div class="menu_button" id="memoria_bulk_cancel" style="display:none;"><i class="fa-solid fa-stop"></i><span>중단</span></div>
+                        <span id="memoria_bulk_progress" class="memoria__progress"></span>
+                    </div>
+                </div>
+                <div class="memoria__section">
+                    <div class="memoria__section-head">
+                        <div>
+                            <h4>다른 채팅에서 이어가기 (인계)</h4>
+                            <p>다른 채팅에서 내보낸 Memoria 파일을 불러와 요약·고정 기억·인물·캐논·서약을 이어받습니다. A→B→C처럼 계속 누적할 수 있습니다.</p>
+                        </div>
+                    </div>
+                    <input type="file" id="memoria_carry_input" accept=".json" style="display:none;">
+                    <div class="memoria__button-row">
+                        <div class="menu_button" id="memoria_carry_btn"><i class="fa-solid fa-people-arrows"></i><span>인계 파일 가져오기</span></div>
+                    </div>
+                </div>
+                <div class="memoria__section">
+                    <div class="memoria__section-head">
+                        <div>
+                            <h4>스토리 바이블</h4>
+                            <p>인물·캐논·서약·타임라인·요약을 한 편의 마크다운 문서로 정리해 내려받습니다. 봇카드 공유나 설정 정리에 쓰기 좋습니다.</p>
+                        </div>
+                    </div>
+                    <div class="memoria__button-row">
+                        <div class="menu_button" id="memoria_bible"><i class="fa-solid fa-book"></i><span>스토리 바이블 내보내기</span></div>
+                    </div>
+                </div>
+                <div class="memoria__section">
+                    <div class="memoria__section-head">
+                        <div>
+                            <h4>백업 · 복원</h4>
+                            <p>이 채팅의 기억 전체를 JSON으로 내보내거나 복원합니다. 내보낸 파일은 인계에도 쓸 수 있습니다.</p>
+                        </div>
+                    </div>
+                    <input type="file" id="memoria_import_input" accept=".json" style="display:none;">
+                    <div class="memoria__button-row">
+                        <div class="menu_button" id="memoria_export"><i class="fa-solid fa-file-export"></i><span>내보내기</span></div>
+                        <div class="menu_button" id="memoria_import_btn"><i class="fa-solid fa-file-import"></i><span>가져오기</span></div>
+                        <div class="menu_button" id="memoria_unhide_all"><i class="fa-solid fa-eye"></i><span>숨긴 메시지 모두 표시</span></div>
+                        <div class="menu_button memoria__danger" id="memoria_reset"><i class="fa-solid fa-trash"></i><span>이 채팅 기억 초기화</span></div>
+                    </div>
+                </div>
+                <div class="memoria__hint">
+                    <b>슬래시 명령어</b> — <code>/memoria</code> 켜기/끄기 · <code>/memoria-remember 내용</code> 수동 기억 ·
+                    <code>/memoria-search 검색어</code> 기억 검색 · <code>/memoria-ask 질문</code> 서고에 질문 · <code>/memoria-index</code> 전체 색인<br>
+                    <b>매크로</b> — <code>{{memoria_story}}</code> 지금까지의 이야기 · <code>{{memoria_count}}</code> 기억 수
+                </div>
+            </section>
+
+        </div>
+    </div>
+</div>
