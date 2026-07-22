@@ -24,10 +24,9 @@
     }
 }
 
-#memoria_settings .inline-drawer-content {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
+/* display는 ST 기본 드로어 동작(초기 접힘 + slideToggle)에 맡기고, 간격만 마진으로 준다 */
+#memoria_settings .inline-drawer-content > * + * {
+    margin-top: 8px;
 }
 
 #memoria_settings .menu_button {
@@ -417,15 +416,18 @@
     display: flex;
     align-items: center;
     gap: 8px;
-    flex-wrap: wrap;
 }
 
-.memoria__char-name { font-size: 0.95em; }
+.memoria__char-name {
+    font-size: 0.95em;
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
 
 .memoria__char-meta {
+    margin-top: 2px;
     font-size: 0.8em;
     color: var(--mm-muted);
-    min-width: 0;
     overflow-wrap: anywhere;
 }
 
