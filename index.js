@@ -99,9 +99,10 @@ SHELVING RULES
 - visibility marks who may know a memory: "public" (open knowledge), "private" (only the holder — inner thoughts, personal facts), "secret" (deliberately hidden). "owner" names the holder.
 - Small talk shelves nothing; empty arrays are a valid answer. Caps: 8 memories, 4 canon, 6 status, 4 pledges, 3 cast.
 - "digest" and every "summary" are written in YOUR OWN words — condensed, factual, shorter than the source. Never copy sentences or whole passages from the scene into them; verbatim text belongs only in "quote".
+- "recall" lists 2-4 cue words for finding this memory again later: synonyms, related situations, things someone might say that should surface it. Same language as the chat. Example: a ring gifted at the pier → ["proposal","jewelry","seaside"].
 
 Reply with ONE minified JSON object and nothing else (no code fences, no notes):
-{"digest":"1-2 sentence factual summary of this exchange","weight":0.0,"memories":[{"kind":"event|relationship|fact|preference|promise|goal|item|place|secret|impression","summary":"...","quote":"..or null","importance":0.0,"entities":["Name"],"tags":["snake_case"],"visibility":"public|private|secret","owner":"Name or null"}],"canon":[{"scope":"session|world|region|location|faction|system","key":"snake_case_key","value":"..."}],"status":[{"entity":"Name","slot":"snake_case_slot","value":"...","claim":"objective|belief","owner":"Name or null"}],"pledges":[{"kind":"keep_unresolved|keep_secret|knowledge_gap|consent|world_limit|loose_end","summary":"...","status":"active|resolved","priority":2}],"cast":[{"name":"Name","role":"role in story or null","age":"25 or null","occupation":"... or null","appearance":"... or null","traits":["trait"],"relationships":[{"target":"OtherName","relation":"..."}]}]}`;
+{"digest":"1-2 sentence factual summary of this exchange","weight":0.0,"memories":[{"kind":"event|relationship|fact|preference|promise|goal|item|place|secret|impression","summary":"...","quote":"..or null","importance":0.0,"entities":["Name"],"tags":["snake_case"],"recall":["cue"],"visibility":"public|private|secret","owner":"Name or null"}],"canon":[{"scope":"session|world|region|location|faction|system","key":"snake_case_key","value":"..."}],"status":[{"entity":"Name","slot":"snake_case_slot","value":"...","claim":"objective|belief","owner":"Name or null"}],"pledges":[{"kind":"keep_unresolved|keep_secret|knowledge_gap|consent|world_limit|loose_end","summary":"...","status":"active|resolved","priority":2}],"cast":[{"name":"Name","role":"role in story or null","age":"25 or null","occupation":"... or null","appearance":"... or null","traits":["trait"],"relationships":[{"target":"OtherName","relation":"..."}]}]}`;
 
 const DEFAULT_SUPERVISOR_PROMPT = `You are Memoria's stage director for a roleplay chat. Given the player's latest input, the recent messages, and the archive ledger, sketch a short plan for the next assistant reply. You never write the reply itself.
 
@@ -112,6 +113,14 @@ Hard rules:
 
 Output ONLY one minified JSON object, no code fences:
 {"scene_goal":"one sentence: what this reply should achieve","avoid":["up to 4 things the reply must not do"],"ideas":["up to 3 concrete suggestions"],"tension":"low|medium|high"}`;
+
+const CURATOR_PROMPT = `You are Memoria's shelf curator. Below is a list of archived memories from one roleplay chat, each tagged with an id like [m3]. Tidy the shelf:
+1. merge — entries recording the SAME fact or moment. Keep the most precise one, absorb the duplicates, and write one combined summary in the same language as the entries.
+2. drop — pure noise only: greetings, filler, trivially superseded states. When unsure, KEEP.
+3. reweight — entries whose importance is clearly wrong (a life-changing vow at 0.3, small talk at 0.9). Value 0.0-1.0.
+Never invent facts. Never use ids missing from the list. Most shelves need little or no tidying — empty arrays are a good answer.
+Reply with ONE minified JSON object and nothing else:
+{"merge":[{"keep":"m1","absorb":["m2"],"summary":"..."}],"drop":["m9"],"reweight":[{"id":"m4","importance":0.7}]}`;
 
 const ASK_LIBRARIAN_PROMPT = `You are Memoria's Librarian. The player asks a question about the history of this roleplay chat. Answer using ONLY the archive records provided — never invent, never fill gaps with guesses. When a record supports your answer, cite its turn like (t12). If the archive does not contain the answer, say plainly that nothing is filed about it. Answer in the same language as the question. Be concise and direct.`;
 
@@ -171,7 +180,9 @@ const DEFAULT_SETTINGS = Object.freeze({
     summaryContextCount: 3,   // 요약 생성 시 참조할 이전 요약 수 (0 = 안 함, -1 = 전체)
     apiMode: 'st',            // 'st' = 실리태번(현재 API/연결 프로필), 'custom' = 커스텀 OpenAI 호환 API
     customApi: { url: '', key: '', model: '', temperature: 0.7, timeoutSec: 90 },
-    promptRev: 6,
+    embedApi: { enabled: false, url: '', key: '', model: '' }, // 선택: OpenAI 호환 임베딩 API (의미 검색 정확도 향상)
+    consolidateEvery: 30,     // N턴마다 서고 정리(중복 병합·중요도 재조정). 0 = 끔
+    promptRev: 7,
     settingsRev: 2,
     fossil: { settling: 12, fossilized: 40, deep: 120 },
     prompts: {
@@ -196,6 +207,9 @@ function getSettings() {
     }
     for (const [k, v] of Object.entries(DEFAULT_SETTINGS.customApi)) {
         if (typeof s.customApi[k] === 'undefined') s.customApi[k] = v;
+    }
+    for (const [k, v] of Object.entries(DEFAULT_SETTINGS.embedApi)) {
+        if (typeof s.embedApi[k] === 'undefined') s.embedApi[k] = v;
     }
     // 프롬프트 개정: 구버전 기본 프롬프트를 새 기본값으로 갱신
     if ((s.promptRev || 1) < DEFAULT_SETTINGS.promptRev) {
@@ -387,16 +401,17 @@ function embedText(text) {
     return v;
 }
 
-/** Float32(정규화됨) → int8 → base64 (저장 용량 절약) */
+/** Float32(정규화됨) → int8 → base64 (저장 용량 절약). 벡터 길이 무관 */
 function encodeVec(v) {
+    const n = v.length;
     let maxAbs = 1e-9;
-    for (let i = 0; i < EMB_DIM; i++) maxAbs = Math.max(maxAbs, Math.abs(v[i]));
-    const bytes = new Uint8Array(EMB_DIM);
-    for (let i = 0; i < EMB_DIM; i++) {
+    for (let i = 0; i < n; i++) maxAbs = Math.max(maxAbs, Math.abs(v[i]));
+    const bytes = new Uint8Array(n);
+    for (let i = 0; i < n; i++) {
         bytes[i] = Math.max(0, Math.min(255, Math.round(v[i] / maxAbs * 127) + 128));
     }
     let bin = '';
-    for (let i = 0; i < EMB_DIM; i++) bin += String.fromCharCode(bytes[i]);
+    for (let i = 0; i < n; i++) bin += String.fromCharCode(bytes[i]);
     return btoa(bin);
 }
 
@@ -407,14 +422,15 @@ function decodeVec(b64) {
     if (vecCache.has(b64)) return vecCache.get(b64);
     try {
         const bin = atob(b64);
-        const v = new Float32Array(EMB_DIM);
+        const n = bin.length;
+        const v = new Float32Array(n);
         let norm = 0;
-        for (let i = 0; i < Math.min(EMB_DIM, bin.length); i++) {
+        for (let i = 0; i < n; i++) {
             v[i] = bin.charCodeAt(i) - 128;
             norm += v[i] * v[i];
         }
         norm = Math.sqrt(norm) || 1;
-        for (let i = 0; i < EMB_DIM; i++) v[i] /= norm;
+        for (let i = 0; i < n; i++) v[i] /= norm;
         if (vecCache.size > 3000) vecCache.clear();
         vecCache.set(b64, v);
         return v;
@@ -424,10 +440,95 @@ function decodeVec(b64) {
 }
 
 function cosine(a, b) {
-    if (!a || !b) return 0;
+    if (!a || !b || a.length !== b.length) return 0;
     let dot = 0;
-    for (let i = 0; i < EMB_DIM; i++) dot += a[i] * b[i];
+    for (let i = 0; i < a.length; i++) dot += a[i] * b[i];
     return dot;
+}
+
+/** 기억을 색인할 때 임베딩·어휘 매칭에 쓰는 텍스트 (검색 힌트 포함) */
+function memoryIndexText(m) {
+    return `${m.summary} ${(m.entities || []).join(' ')} ${(m.tags || []).join(' ')} ${(m.hints || []).join(' ')}`;
+}
+
+/* ============================================================
+ * 선택적 임베딩 API (OpenAI 호환 /embeddings — 의미 검색 정확도 향상)
+ * ============================================================ */
+
+function normalizeEmbedApiUrl(url) {
+    let u = String(url || '').trim().replace(/\/+$/, '');
+    if (!u) return '';
+    if (!/\/embeddings$/.test(u)) {
+        if (/\/v1$/.test(u)) u += '/embeddings';
+        else u += '/v1/embeddings';
+    }
+    return u;
+}
+
+/** 텍스트 배열 → 정규화된 Float32Array 배열. 실패 시 null (해시 임베딩으로 폴백) */
+async function callEmbedApi(texts) {
+    const cfg = getSettings().embedApi;
+    const url = normalizeEmbedApiUrl(cfg.url);
+    if (!cfg.enabled || !url || !texts.length) return null;
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 20000);
+    try {
+        const headers = { 'Content-Type': 'application/json' };
+        if (cfg.key) headers['Authorization'] = `Bearer ${cfg.key}`;
+        const res = await fetch(url, {
+            method: 'POST', headers, signal: controller.signal,
+            body: JSON.stringify({ model: cfg.model || 'text-embedding-3-small', input: texts }),
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        const rows = Array.isArray(data?.data) ? data.data : [];
+        if (rows.length !== texts.length) throw new Error('임베딩 응답 개수 불일치');
+        return rows
+            .sort((a, b) => (a.index ?? 0) - (b.index ?? 0))
+            .map(r => {
+                const arr = Float32Array.from(r.embedding || []);
+                let norm = 0;
+                for (let i = 0; i < arr.length; i++) norm += arr[i] * arr[i];
+                norm = Math.sqrt(norm) || 1;
+                for (let i = 0; i < arr.length; i++) arr[i] /= norm;
+                return arr;
+            });
+    } catch (e) {
+        console.warn(`[${MODULE_NAME}] 임베딩 API 실패 (해시 임베딩으로 폴백):`, e);
+        return null;
+    } finally {
+        clearTimeout(timeoutId);
+    }
+}
+
+/** 새로 저장된 기억들에 API 임베딩(avec)을 붙인다. 꺼져 있거나 실패하면 조용히 건너뜀 */
+async function attachApiEmbeddings(memories) {
+    if (!getSettings().embedApi.enabled || !memories.length) return;
+    const vecs = await callEmbedApi(memories.map(memoryIndexText));
+    if (!vecs) return;
+    memories.forEach((m, i) => { m.avec = encodeVec(vecs[i]); });
+}
+
+/** 질의 임베딩 캐시 (같은 입력으로 여러 번 패킷을 만들 때 API 재호출 방지) */
+const queryEmbedCache = new Map();
+
+async function embedQueriesViaApi(texts) {
+    if (!getSettings().embedApi.enabled) return null;
+    const misses = texts.filter(t => !queryEmbedCache.has(t));
+    if (misses.length) {
+        const vecs = await callEmbedApi(misses);
+        if (!vecs) return null;
+        misses.forEach((t, i) => queryEmbedCache.set(t, vecs[i]));
+        if (queryEmbedCache.size > 60) {
+            for (const k of [...queryEmbedCache.keys()].slice(0, 30)) queryEmbedCache.delete(k);
+        }
+    }
+    return texts.map(t => queryEmbedCache.get(t) || null);
+}
+
+/** API 코사인(대개 0.5~1.0에 몰림)을 해시 코사인 스케일로 보정 */
+function calibrateApiCos(c) {
+    return Math.max(0, (c - 0.5) * 1.1);
 }
 
 function lexicalOverlap(queryTokens, text) {
@@ -646,10 +747,15 @@ function sanitizeExtraction(raw, userText, assistantText) {
             importance: clamp01(m?.importance, 0.5),
             entities: (Array.isArray(m?.entities) ? m.entities : []).map(e => cleanStr(e, 60)).filter(Boolean).slice(0, 6),
             tags: (Array.isArray(m?.tags) ? m.tags : []).map(toSnake).filter(Boolean).slice(0, 6),
+            hints: (Array.isArray(m?.recall) ? m.recall : []).map(h => cleanStr(h, 40)).filter(Boolean).slice(0, 5),
             visibility: normVisibility(m?.visibility),
             owner: cleanStr(m?.owner, 60) || null,
         });
     }
+
+    // 서약 자동 해소: 프롬프트에 준 [p1] 꼬리표 목록에서 이번 턴에 해소된 것
+    out.settledPledges = (Array.isArray(raw?.settled) ? raw.settled : [])
+        .map(t => String(t || '').trim().toLowerCase()).filter(Boolean).slice(0, 8);
 
     const rawCanon = Array.isArray(raw?.canon) ? raw.canon : (Array.isArray(raw?.world_rules) ? raw.world_rules : []);
     for (const r of rawCanon.slice(0, 8)) {
@@ -762,6 +868,13 @@ function removeDerivedForTurn(store, turnIndex) {
     store.worldRules = store.worldRules.filter(r => r.turnIndex !== turnIndex);
     store.entityStates = store.entityStates.filter(s => s.turnIndex !== turnIndex);
     store.locks = store.locks.filter(l => l.turnIndex !== turnIndex);
+    // 이 턴에서 "해소됨" 판정을 받은 서약은 다시 활성으로 (스와이프/삭제 롤백)
+    for (const l of store.locks) {
+        if (l.status === 'resolved' && l.resolvedTurn === turnIndex) {
+            l.status = 'active';
+            l.resolvedTurn = null;
+        }
+    }
     // 인물 도감: 이 턴에서 처음 만들어졌고 이후 갱신이 없는 인물만 제거 (병합된 프로필은 유지)
     if (Array.isArray(store.characters)) {
         store.characters = store.characters.filter(c => c.manual || c.firstTurn !== turnIndex || c.updatedTurn !== turnIndex);
@@ -891,9 +1004,22 @@ async function commitTurn(mesId, { silent = true, force = false } = {}) {
     const userLabel = userMes?.name || name1 || 'User';
     const charLabel = assistantMes.name || name2 || 'Assistant';
 
+    // 활성 서약 목록 — 사서가 이번 턴에 해소된 서약을 판정할 수 있게 꼬리표를 붙여 전달
+    const openPledges = store.locks.filter(l => l.status === 'active').slice(0, 12);
+    const pledgeTagMap = new Map();
+    const pledgeLines = openPledges.map((l, i) => {
+        const tag = `p${i + 1}`;
+        pledgeTagMap.set(tag, l);
+        return `[${tag}] (${normLockKind(l.kind)}) ${l.summary}`;
+    });
+    const pledgeDirective = pledgeLines.length
+        ? '\n\nPLEDGE CHECK: the file below lists open pledges with tags like [p1]. If this exchange clearly settles one ON-SCREEN (the secret is revealed, the promise is kept, the thread is closed), include a top-level array "settled" with those tags, e.g. "settled":["p1"]. Only what actually happened — never predict, never guess.'
+        : '';
+
     const refBlock = await buildReferenceBlock();
     const userPrompt = [
         refBlock,
+        pledgeLines.length ? `Open pledges on file:\n${pledgeLines.join('\n')}\n` : '',
         recent ? `Already shelved (do not refile) — recent turn digests:\n${recent}\n` : '',
         `The exchange to shelve (turn t${turn.turnIndex}):`,
         `<user name="${userLabel}">\n${userText.slice(0, 4000)}\n</user>`,
@@ -904,7 +1030,7 @@ async function commitTurn(mesId, { silent = true, force = false } = {}) {
     try {
         llmBusy = true;
         updateStatusUI('기록 중…');
-        const response = await callAuxLLM(`${settings.prompts.archivist}${archivistTrackingDirective()}\n\n${languageDirective()}`, userPrompt);
+        const response = await callAuxLLM(`${settings.prompts.archivist}${archivistTrackingDirective()}${pledgeDirective}\n\n${languageDirective()}`, userPrompt);
         extracted = sanitizeExtraction(parseJsonLoose(response), userText, assistantText);
     } catch (e) {
         console.error(`[${MODULE_NAME}] 사서 호출 실패:`, e);
@@ -952,19 +1078,30 @@ async function commitTurn(mesId, { silent = true, force = false } = {}) {
             importance: m.importance,
             entities: m.entities || [],
             tags: m.tags || [],
+            hints: m.hints || [],
             visibility: m.visibility || 'public',
             owner: m.owner || null,
             pinned: false,
             disabled: false,
             manual: false,
             trigger: '',
-            vec: encodeVec(embedText(`${m.summary} ${(m.entities || []).join(' ')} ${(m.tags || []).join(' ')}`)),
+            vec: encodeVec(embedText(memoryIndexText(m))),
         });
     }
+    await attachApiEmbeddings(store.memories.slice(-rows.length));
 
     for (const r of extracted.worldRules) upsertWorldRule(store, r, turn.turnIndex);
     for (const s of extracted.entityStates) upsertEntityState(store, s, turn.turnIndex);
     for (const l of extracted.locks) upsertLock(store, l, turn.turnIndex);
+
+    // 사서가 해소됐다고 판정한 서약 처리 (스와이프 시 되돌릴 수 있게 턴 기록)
+    for (const tag of (extracted.settledPledges || [])) {
+        const lock = pledgeTagMap.get(tag);
+        if (lock && lock.status === 'active') {
+            lock.status = 'resolved';
+            lock.resolvedTurn = turn.turnIndex;
+        }
+    }
     if (settings.characterTracking) {
         for (const c of (extracted.characters || [])) upsertCharacter(store, c, turn.turnIndex);
     }
@@ -977,6 +1114,7 @@ async function commitTurn(mesId, { silent = true, force = false } = {}) {
 
     pruneMemories(store);
     await maybeSummarizeChunk(store);
+    await maybeConsolidate(store);
     persistStore();
     updateStatusUI();
     refreshOverviewUI();
@@ -1068,6 +1206,98 @@ async function maybeMergeArc(store) {
 }
 
 /* ============================================================
+ * 서고 정리 (기억 통합 — 중복 병합·소음 제거·중요도 재조정)
+ * ============================================================ */
+
+/** 통합 대상: 고정·수동·최근 기억은 건드리지 않는다 */
+function consolidationCandidates(store) {
+    const currentTurn = store.turnCounter;
+    return store.memories
+        .filter(m => !m.pinned && !m.manual && !m.disabled && (currentTurn - m.turnIndex) >= 4)
+        .slice(0, 120);
+}
+
+/** 서고 정리 실행. 반환: {merged, dropped, reweighted} 또는 null(실패/대상 없음) */
+async function runConsolidation(store) {
+    const candidates = consolidationCandidates(store);
+    if (candidates.length < 12) return null;
+
+    const idMap = new Map();
+    const lines = candidates.map((m, i) => {
+        const tag = `m${i + 1}`;
+        idMap.set(tag, m);
+        return `[${tag}] (${m.kind}, t${m.turnIndex}, imp ${Number(m.importance).toFixed(2)}) ${m.summary}`;
+    });
+
+    const response = await callAuxLLM(CURATOR_PROMPT, lines.join('\n'), { maxTokens: 8000 });
+    const plan = parseJsonLoose(response);
+    if (!plan || typeof plan !== 'object') return null;
+
+    const stats = { merged: 0, dropped: 0, reweighted: 0 };
+    const removeIds = new Set();
+
+    for (const mg of (Array.isArray(plan.merge) ? plan.merge : []).slice(0, 20)) {
+        const keep = idMap.get(String(mg?.keep || '').trim());
+        const absorb = (Array.isArray(mg?.absorb) ? mg.absorb : [])
+            .map(t => idMap.get(String(t || '').trim()))
+            .filter(m => m && m !== keep && !removeIds.has(m.id));
+        if (!keep || removeIds.has(keep.id) || !absorb.length) continue;
+        const newSummary = cleanStr(mg?.summary, 300);
+        if (newSummary) keep.summary = newSummary;
+        // 병합: 흡수되는 기억의 개체·태그·힌트를 합치고, 중요도는 최댓값 유지
+        for (const a of absorb) {
+            keep.entities = [...new Set([...(keep.entities || []), ...(a.entities || [])])].slice(0, 8);
+            keep.tags = [...new Set([...(keep.tags || []), ...(a.tags || [])])].slice(0, 8);
+            keep.hints = [...new Set([...(keep.hints || []), ...(a.hints || [])])].slice(0, 6);
+            keep.importance = Math.max(keep.importance, a.importance);
+            if (!keep.excerpt && a.excerpt) keep.excerpt = a.excerpt;
+            removeIds.add(a.id);
+        }
+        keep.vec = encodeVec(embedText(memoryIndexText(keep)));
+        keep.avec = null; // 임베딩 API 사용 시 다음 재계산 때 갱신
+        stats.merged += absorb.length;
+    }
+
+    for (const tag of (Array.isArray(plan.drop) ? plan.drop : []).slice(0, 30)) {
+        const m = idMap.get(String(tag || '').trim());
+        if (m && !removeIds.has(m.id)) { removeIds.add(m.id); stats.dropped++; }
+    }
+
+    for (const rw of (Array.isArray(plan.reweight) ? plan.reweight : []).slice(0, 40)) {
+        const m = idMap.get(String(rw?.id || '').trim());
+        const imp = Number(rw?.importance);
+        if (m && !removeIds.has(m.id) && Number.isFinite(imp)) {
+            m.importance = Math.max(0, Math.min(1, imp));
+            stats.reweighted++;
+        }
+    }
+
+    if (removeIds.size) store.memories = store.memories.filter(m => !removeIds.has(m.id));
+    if (getSettings().embedApi.enabled) {
+        await attachApiEmbeddings(store.memories.filter(m => !m.avec));
+    }
+    return stats;
+}
+
+/** N턴마다 자동 서고 정리 (설정 0 = 끔) */
+async function maybeConsolidate(store) {
+    const every = getSettings().consolidateEvery;
+    if (!every || every < 1) return;
+    if (store.turnCounter - (store.lastConsolidateTurn || 0) < every) return;
+    store.lastConsolidateTurn = store.turnCounter; // 실패해도 다음 주기까지 대기 (호출 폭주 방지)
+    try {
+        updateStatusUI('서고 정리 중…');
+        const stats = await runConsolidation(store);
+        if (stats && (stats.merged || stats.dropped || stats.reweighted)) {
+            console.info(`[${MODULE_NAME}] 서고 정리: 병합 ${stats.merged} · 정리 ${stats.dropped} · 재조정 ${stats.reweighted}`);
+            renderMemoriesPanel();
+        }
+    } catch (e) {
+        console.warn(`[${MODULE_NAME}] 서고 정리 실패 (다음 주기에 재시도):`, e);
+    }
+}
+
+/* ============================================================
  * 자동 숨김 (요약이 커버한 옛 메시지를 컨텍스트에서 제외)
  * ============================================================ */
 
@@ -1146,7 +1376,10 @@ function authorizedEntities() {
     return names;
 }
 
-function retrieveMemories(queryText, recentUserTexts) {
+/** "우리 처음 만났을 때", "remember when" 같은 과거 회상형 질의 감지 */
+const PAST_QUERY_RE = /(처음|예전|옛날|그때|그 때|지난번|언제였|언제 였|기억나|기억 나|기억해|기억하|첫날|첫 만남|만났을 때|했었|였었|하던 때|remember when|back then|first met|first time|used to|at first|way back|昔|最初|あの時|あのとき|覚えて)/i;
+
+async function retrieveMemories(queryText, recentUserTexts) {
     const settings = getSettings();
     const store = getStore();
     const currentTurn = store.turnCounter;
@@ -1162,9 +1395,18 @@ function retrieveMemories(queryText, recentUserTexts) {
     const triggered = [];
 
     const queryVec = embedText(queryText);
-    const auxVecs = (recentUserTexts || []).slice(0, settings.multiQueryRecent).map(embedText);
+    const auxTexts = (recentUserTexts || []).slice(0, settings.multiQueryRecent);
+    const auxVecs = auxTexts.map(embedText);
     const queryTokens = new Set((String(queryText).toLowerCase().match(/[\p{L}\p{N}]+/gu) || []));
     const queryLower = String(queryText).toLowerCase();
+
+    // 과거 회상형 질의면 최신성 페널티(화석화)를 걸지 않는다 — 오래된 기억도 동등하게 경쟁
+    const pastQuery = PAST_QUERY_RE.test(queryLower);
+
+    // 임베딩 API가 켜져 있으면 질의도 API로 임베딩 (실패 시 해시만 사용)
+    const apiQueryVecs = await embedQueriesViaApi([queryText, ...auxTexts]);
+    const apiQueryVec = apiQueryVecs?.[0] || null;
+    const apiAuxVecs = apiQueryVecs?.slice(1) || [];
 
     for (const m of active) {
         const isProtected = m.visibility !== 'public';
@@ -1182,13 +1424,22 @@ function retrieveMemories(queryText, recentUserTexts) {
         const vec = decodeVec(m.vec);
         let cos = cosine(queryVec, vec);
         for (const av of auxVecs) cos = Math.max(cos, cosine(av, vec) * 0.92);
-        const lex = lexicalOverlap(queryTokens, `${m.summary} ${(m.entities || []).join(' ')} ${(m.tags || []).join(' ')}`);
+        // API 임베딩이 양쪽 다 있으면 의미 유사도를 보정 스케일로 반영
+        if (apiQueryVec && m.avec) {
+            const av = decodeVec(m.avec);
+            let apiCos = calibrateApiCos(cosine(apiQueryVec, av));
+            for (const aq of apiAuxVecs) { if (aq) apiCos = Math.max(apiCos, calibrateApiCos(cosine(aq, av)) * 0.92); }
+            cos = Math.max(cos, apiCos);
+        }
+        const lex = lexicalOverlap(queryTokens, memoryIndexText(m));
         const entityHit = (m.entities || []).some(e => queryLower.includes(String(e).toLowerCase()));
-        if (cos < settings.minCosine && lex < 0.035 && !entityHit) continue;
+        const hintHit = (m.hints || []).some(h => h.length >= 2 && queryLower.includes(String(h).toLowerCase()));
+        if (cos < settings.minCosine && lex < 0.035 && !entityHit && !hintHit) continue;
 
         const age = Math.max(0, currentTurn - m.turnIndex);
-        const recency = Math.exp(-age / 18) * fossilWeight(age, settings);
-        const score = 0.62 * Math.max(0, cos) + 0.18 * lex + 0.12 * m.importance + 0.08 * recency + (entityHit ? 0.08 : 0);
+        const recency = pastQuery ? 0.55 : Math.exp(-age / 18) * fossilWeight(age, settings);
+        const score = 0.62 * Math.max(0, cos) + 0.18 * lex + 0.12 * m.importance + 0.08 * recency
+            + (entityHit ? 0.08 : 0) + (hintHit ? 0.07 : 0);
         if (score < settings.minScore) continue;
         candidates.push({ m, score, vec });
     }
@@ -1253,7 +1504,7 @@ function getSceneSnapshot(store) {
     return { location, date, time, any: Boolean(location || date || time) };
 }
 
-function buildPacketSections(query, supervisorPlan) {
+async function buildPacketSections(query, supervisorPlan) {
     const store = getStore();
     const settings = getSettings();
 
@@ -1262,7 +1513,7 @@ function buildPacketSections(query, supervisorPlan) {
         if (chat[i]?.is_user && chat[i].mes) recentUserTexts.push(chat[i].mes);
     }
 
-    const { selected, hiddenProtected, pinned, triggered } = retrieveMemories(query, recentUserTexts.slice(1));
+    const { selected, hiddenProtected, pinned, triggered } = await retrieveMemories(query, recentUserTexts.slice(1));
 
     const publicRecall = [];
     const protectedRecall = [];
@@ -1390,7 +1641,7 @@ let lastPacketTokens = 0;
 /** 토큰 예산에 맞춰 단계적으로 주입 내용을 줄인다. 서약과 캐논은 마지막까지 유지. */
 async function buildPacketWithinBudget(query, supervisorPlan) {
     const settings = getSettings();
-    const parts = buildPacketSections(query, supervisorPlan);
+    const parts = await buildPacketSections(query, supervisorPlan);
 
     const empty = !parts.publicRecall.length && !parts.protectedRecall.length && !parts.locks.length
         && !parts.rules.length && !parts.states.length && !parts.characters.length && !parts.scene?.any
@@ -1424,7 +1675,7 @@ async function runSupervisor(query) {
     try {
         const store = getStore();
         const recent = chat.slice(-8).filter(m => !m.is_system).map(m => `${m.is_user ? 'USER' : m.name}: ${cleanStr(m.mes, 400)}`).join('\n');
-        const parts = buildPacketSections(query, null);
+        const parts = await buildPacketSections(query, null);
         const contextBlock = renderPacket(parts, { withExcerpts: false, recallLimit: 6, protectedLimit: 3, summaryLimit: 2 });
         const userPrompt = `Latest player input:\n${query}\n\nRecent messages:\n${recent}\n\nArchive ledger:\n${contextBlock}`;
         const response = await callAuxLLM(settings.prompts.supervisor, userPrompt, { maxTokens: 2000 });
@@ -1562,7 +1813,7 @@ async function askLibrarian(question) {
     if (!q) throw new Error('질문이 비어 있습니다');
     if (!getCurrentChatId()) throw new Error('열린 채팅이 없습니다');
 
-    const parts = buildPacketSections(q, null);
+    const parts = await buildPacketSections(q, null);
     const context = renderPacket(parts, { recallLimit: 14, protectedLimit: 5 });
     const reply = await callAuxLLM(ASK_LIBRARIAN_PROMPT, `Archive records:\n${context}\n\nPlayer's question: ${q}`, { maxTokens: 4000 });
     const answer = String(reply || '').trim();
@@ -2135,6 +2386,13 @@ function renderSettingsPanel() {
     $('#memoria_custom_timeout').val(s.customApi.timeoutSec);
     $('#memoria_st_api_block').toggle(s.apiMode !== 'custom');
     $('#memoria_custom_api_block').toggle(s.apiMode === 'custom');
+
+    $('#memoria_consolidate_every').val(s.consolidateEvery);
+    $('#memoria_embed_enabled').prop('checked', s.embedApi.enabled);
+    $('#memoria_embed_url').val(s.embedApi.url);
+    $('#memoria_embed_key').val(s.embedApi.key);
+    $('#memoria_embed_model').val(s.embedApi.model);
+    $('#memoria_embed_block').toggle(Boolean(s.embedApi.enabled));
 }
 
 function renderPromptsPanel() {
@@ -2245,7 +2503,9 @@ function bindUI() {
         const edited = await ctx.callGenericPopup('기억 내용 수정', ctx.POPUP_TYPE.INPUT, m.summary, { rows: 4 });
         if (!edited || typeof edited !== 'string') return;
         m.summary = cleanStr(edited, 300);
-        m.vec = encodeVec(embedText(`${m.summary} ${(m.entities || []).join(' ')} ${(m.tags || []).join(' ')}`));
+        m.vec = encodeVec(embedText(memoryIndexText(m)));
+        m.avec = null;
+        attachApiEmbeddings([m]);
         persistStore(); renderMemoriesPanel(); updateInjection();
     });
 
@@ -2511,6 +2771,89 @@ function bindUI() {
     numBind('#memoria_max_memories', 'maxMemories', 50, 2000);
     numBind('#memoria_response_tokens', 'responseTokens', 256, 65536);
     numBind('#memoria_preserve_recent', 'preserveRecent', 1, 50);
+    numBind('#memoria_consolidate_every', 'consolidateEvery', 0, 200);
+
+    // ── 임베딩 API
+    $('#memoria_embed_enabled').on('change', function () {
+        getSettings().embedApi.enabled = $(this).prop('checked');
+        $('#memoria_embed_block').toggle($(this).prop('checked'));
+        saveSettingsDebounced();
+    });
+    const embedBind = (sel, key) => {
+        $(sel).on('change', function () {
+            getSettings().embedApi[key] = String($(this).val() || '').trim();
+            queryEmbedCache.clear();
+            saveSettingsDebounced();
+        });
+    };
+    embedBind('#memoria_embed_url', 'url');
+    embedBind('#memoria_embed_key', 'key');
+    embedBind('#memoria_embed_model', 'model');
+    $('#memoria_embed_test').on('click', async function () {
+        const $btn = $(this);
+        $btn.addClass('disabled');
+        try {
+            const vecs = await callEmbedApi(['connection test']);
+            if (vecs?.[0]?.length) toastr.success(`임베딩 연결 성공 (${vecs[0].length}차원)`, 'Memoria');
+            else toastr.error('임베딩 응답이 비어 있습니다. URL/키/모델을 확인하세요.', 'Memoria');
+        } finally {
+            $btn.removeClass('disabled');
+        }
+    });
+    $('#memoria_embed_reindex').on('click', async function () {
+        const s = getSettings();
+        if (!s.embedApi.enabled) { toastr.warning('먼저 임베딩 API를 켜세요.', 'Memoria'); return; }
+        const store = getStore();
+        const targets = store.memories;
+        if (!targets.length) { toastr.info('기억이 없습니다.', 'Memoria'); return; }
+        const $btn = $(this);
+        const $prog = $('#memoria_embed_progress');
+        $btn.addClass('disabled');
+        try {
+            let done = 0, failed = false;
+            for (let i = 0; i < targets.length; i += 48) {
+                const batch = targets.slice(i, i + 48);
+                const vecs = await callEmbedApi(batch.map(memoryIndexText));
+                if (!vecs) { failed = true; break; }
+                batch.forEach((m, j) => { m.avec = encodeVec(vecs[j]); });
+                done += batch.length;
+                $prog.text(`${done}/${targets.length}`);
+            }
+            persistStore();
+            if (failed) toastr.error(`임베딩 재계산 중단 (${done}/${targets.length}). API 설정을 확인하세요.`, 'Memoria');
+            else toastr.success(`기억 ${done}개의 임베딩을 재계산했습니다.`, 'Memoria');
+        } finally {
+            $btn.removeClass('disabled');
+            setTimeout(() => $prog.text(''), 4000);
+        }
+    });
+
+    // ── 서고 정리 (수동)
+    $('#memoria_consolidate_now').on('click', async function () {
+        if (!getCurrentChatId()) { toastr.warning('열린 채팅이 없습니다.', 'Memoria'); return; }
+        const store = getStore();
+        if (consolidationCandidates(store).length < 12) {
+            toastr.info('정리할 만큼 기억이 쌓이지 않았습니다. (최소 12개)', 'Memoria');
+            return;
+        }
+        const $btn = $(this);
+        const $prog = $('#memoria_consolidate_progress');
+        $btn.addClass('disabled');
+        $prog.text('정리 중…');
+        try {
+            const stats = await runConsolidation(store);
+            store.lastConsolidateTurn = store.turnCounter;
+            persistStore(); renderMemoriesPanel(); updateStatusUI(); updateInjection();
+            if (stats) toastr.success(`서고 정리 완료 — 병합 ${stats.merged} · 정리 ${stats.dropped} · 중요도 재조정 ${stats.reweighted}`, 'Memoria');
+            else toastr.error('서고 정리에 실패했습니다. (모델 응답 오류)', 'Memoria');
+        } catch (e) {
+            console.error(`[${MODULE_NAME}] 서고 정리 실패:`, e);
+            toastr.error('서고 정리에 실패했습니다.', 'Memoria');
+        } finally {
+            $btn.removeClass('disabled');
+            $prog.text('');
+        }
+    });
 
     // ── 프롬프트
     const promptBind = (sel, key) => {
@@ -2612,7 +2955,7 @@ function registerCommands() {
             helpString: '기억을 검색해 결과를 반환합니다.',
             unnamedArgumentList: [SlashCommandArgument.fromProps({ description: '검색어', typeList: [ARGUMENT_TYPE.STRING], isRequired: true })],
             callback: async (_, value) => {
-                const { selected, pinned, triggered } = retrieveMemories(String(value || ''), []);
+                const { selected, pinned, triggered } = await retrieveMemories(String(value || ''), []);
                 const all = [...pinned, ...triggered, ...selected].slice(0, 10);
                 if (!all.length) return '관련 기억이 없습니다.';
                 return all.map(m => `(${m.kind}, t${m.turnIndex}) ${m.summary}`).join('\n');
@@ -2708,6 +3051,7 @@ function bindEvents() {
 
     eventSource.on(event_types.CHAT_CHANGED, () => {
         vecCache.clear();
+        queryEmbedCache.clear();
         getStore();
         reconcileWithChat();
         renderAllPanels();
