@@ -1,7 +1,7 @@
 <div id="memoria_settings" class="memoria">
     <div class="inline-drawer">
         <div class="inline-drawer-toggle inline-drawer-header">
-            <b><i class="fa-solid fa-book-bookmark"></i> Memoria — 장기기억 서고 <span class="memoria__version">v1.0.0</span></b>
+            <b><i class="fa-solid fa-book-bookmark"></i> Memoria — 장기기억 서고 <span class="memoria__version">v1.0.1</span></b>
             <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
         </div>
         <div class="inline-drawer-content">
@@ -137,6 +137,12 @@
                             <h4>아이템 도감</h4>
                             <p>스토리에 의미 있는 물건들. 소유자와 상태가 자동으로 갱신됩니다.</p>
                         </div>
+                        <div class="memoria__compact-actions">
+                            <div class="menu_button" id="memoria_item_add">
+                                <i class="fa-solid fa-plus"></i>
+                                <span>아이템 추가</span>
+                            </div>
+                        </div>
                     </div>
                     <div id="memoria_items_list" class="memoria__row-list"></div>
                 </div>
@@ -145,6 +151,12 @@
                         <div>
                             <h4>서약</h4>
                             <p>비밀·미해결 떡밥·건너뛰면 안 되는 전개 등, 이야기가 지켜야 할 약속. 토큰이 부족해도 가장 마지막까지 유지됩니다.</p>
+                        </div>
+                        <div class="memoria__compact-actions">
+                            <div class="menu_button" id="memoria_lock_add">
+                                <i class="fa-solid fa-plus"></i>
+                                <span>서약 추가</span>
+                            </div>
                         </div>
                     </div>
                     <div id="memoria_locks_list" class="memoria__row-list"></div>

@@ -744,6 +744,18 @@
 
 .memoria__ask-row .menu_button { flex-shrink: 0; }
 
+.memoria__lock-add {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    text-align: left;
+}
+
+.memoria__lock-add h3 { margin: 0 0 4px; }
+.memoria__lock-add label { font-size: 0.82em; font-weight: 600; opacity: 0.8; }
+.memoria__lock-add .text_pole { width: 100%; margin: 0; }
+.memoria__lock-add textarea { resize: vertical; }
+
 .memoria__ask-answer {
     margin-top: 8px;
     padding: 10px 12px;

@@ -1112,7 +1112,7 @@ function removeDerivedForTurn(store, turnIndex) {
     store.memories = store.memories.filter(m => m.turnIndex !== turnIndex || m.pinned || m.manual);
     store.worldRules = rollbackOrDrop(store.worldRules, turnIndex);
     store.entityStates = rollbackOrDrop(store.entityStates, turnIndex);
-    store.locks = store.locks.filter(l => l.turnIndex !== turnIndex);
+    store.locks = store.locks.filter(l => l.turnIndex !== turnIndex || l.manual);
     // 이 턴에서 "해소됨" 판정을 받은 서약은 다시 활성으로 (스와이프/삭제 롤백)
     for (const l of store.locks) {
         if (l.status === 'resolved' && l.resolvedTurn === turnIndex) {
@@ -3001,6 +3001,68 @@ function bindUI() {
         store.items = store.items.filter(i => i.id !== id);
         persistStore(); renderItemsPanel(); updateInjection();
     });
+    $('#memoria_item_add').on('click', async function () {
+        const ctx = getContext();
+        const template = '이름: \n의미: \n소유자: \n상태: ';
+        const raw = await ctx.callGenericPopup('아이템 추가 — 이름만 필수, 나머지는 비워도 됩니다.', ctx.POPUP_TYPE.INPUT, template, { rows: 6 });
+        if (!raw || typeof raw !== 'string') return;
+        const pick = (label) => {
+            const m = raw.match(new RegExp(`^${label}\\s*[:：]\\s*(.*)$`, 'm'));
+            return m ? cleanStr(m[1], 160) : '';
+        };
+        const name = pick('이름') || cleanStr(raw.split('\n')[0], 60);
+        if (!name) { toastr.warning('이름이 비어 있습니다.', 'Memoria'); return; }
+        const store = getStore();
+        upsertItem(store, {
+            name: cleanStr(name, 60),
+            meaning: pick('의미') || null,
+            holder: pick('소유자') || null,
+            status: pick('상태') || null,
+        }, store.turnCounter);
+        const created = store.items.find(x => x.name.toLowerCase() === cleanStr(name, 60).toLowerCase());
+        if (created) created.manual = true; // 수기 항목은 스와이프 롤백에서 보호
+        persistStore(); renderItemsPanel(); updateInjection();
+        toastr.success(`아이템 "${cleanStr(name, 40)}"을(를) 추가했습니다.`, 'Memoria');
+    });
+    $('#memoria_lock_add').on('click', async function () {
+        const ctx = getContext();
+        const $dlg = $(`
+            <div class="memoria__lock-add">
+                <h3>서약 추가</h3>
+                <label>종류</label>
+                <select class="text_pole memoria__lock-add-kind">
+                    <option value="loose_end">열린 떡밥 — 언젠가 회수해야 할 실마리</option>
+                    <option value="keep_unresolved">미해결 유지 — 이야기가 성급히 매듭짓지 말 것</option>
+                    <option value="keep_secret">비밀 유지 — 새어 나가면 안 되는 사실</option>
+                    <option value="knowledge_gap">정보 격차 — 특정 인물이 아직 몰라야 하는 것</option>
+                    <option value="consent">동의 경계 — 넘지 말아야 할 선</option>
+                    <option value="world_limit">세계 제약 — 세계관의 불변 규칙</option>
+                </select>
+                <label>내용</label>
+                <textarea class="text_pole memoria__lock-add-summary" rows="3" placeholder="예: 은우는 도윤이 편지를 읽었다는 사실을 아직 모른다"></textarea>
+                <label>우선순위</label>
+                <select class="text_pole memoria__lock-add-priority">
+                    <option value="1">P1 — 절대 어기면 안 됨</option>
+                    <option value="2" selected>P2 — 중요</option>
+                    <option value="3">P3 — 참고</option>
+                </select>
+            </div>`);
+        const ok = await ctx.callGenericPopup($dlg, ctx.POPUP_TYPE.CONFIRM, '', { okButton: '추가', cancelButton: '취소' });
+        if (!ok) return;
+        const summary = cleanStr($dlg.find('.memoria__lock-add-summary').val(), 200);
+        if (!summary) { toastr.warning('내용이 비어 있습니다.', 'Memoria'); return; }
+        const store = getStore();
+        upsertLock(store, {
+            kind: normLockKind(String($dlg.find('.memoria__lock-add-kind').val())),
+            summary,
+            status: 'active',
+            priority: Number($dlg.find('.memoria__lock-add-priority').val()) || 2,
+            owner: null,
+            manual: true, // 수기 서약은 스와이프 롤백에서 보호
+        }, store.turnCounter);
+        persistStore(); renderStatePanel(); updateInjection();
+        toastr.success('서약을 추가했습니다.', 'Memoria');
+    });
     $('#memoria_settings').on('click', '.memoria-milestone-delete', async function () {
         const id = $(this).closest('.memoria__row').data('id');
         if (!await confirmDelete('이 사건')) return;
@@ -3201,11 +3263,12 @@ function bindUI() {
         $btn.addClass('disabled');
         toastr.info('연결을 테스트합니다…', 'Memoria');
         try {
-            const reply = await callAuxLLM('You are a connection test. Reply with exactly: OK', 'ping', { maxTokens: 20 });
+            // 추론(thinking) 모델은 대답 전에 생각 토큰을 쓰므로 예산을 넉넉히 준다
+            const reply = await callAuxLLM('You are a connection test. Reply with exactly: OK', 'ping', { maxTokens: 2048 });
             if (String(reply).trim()) toastr.success(`연결 성공 — 응답: ${cleanStr(reply, 60)}`, 'Memoria');
             else toastr.warning('응답이 비어 있습니다. 모델 설정을 확인하세요.', 'Memoria');
         } catch (e) {
-            toastr.error(`연결 실패: ${e.message}`, 'Memoria');
+            toastr.error(`연결 실패: ${e.cause?.message || e.message}`, 'Memoria');
         } finally {
             $btn.removeClass('disabled');
         }
