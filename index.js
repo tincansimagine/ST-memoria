@@ -20,6 +20,7 @@ import {
     extension_prompt_types,
     generateRaw,
     getCurrentChatId,
+    getRequestHeaders,
     name1,
     name2,
     saveSettingsDebounced,
@@ -180,7 +181,8 @@ const DEFAULT_SETTINGS = Object.freeze({
     summaryContextCount: 3,   // 요약 생성 시 참조할 이전 요약 수 (0 = 안 함, -1 = 전체)
     apiMode: 'st',            // 'st' = 실리태번(현재 API/연결 프로필), 'custom' = 커스텀 OpenAI 호환 API
     customApi: { url: '', key: '', model: '', temperature: 0.7, timeoutSec: 90 },
-    embedApi: { enabled: false, url: '', key: '', model: '' }, // 선택: OpenAI 호환 임베딩 API (의미 검색 정확도 향상)
+    // 의미 검색 소스: 'off' = 내장 해시만, 'local' = 실리태번 내장 임베딩(무료), 'api' = OpenAI 호환 임베딩 API
+    embedApi: { mode: 'off', enabled: false, url: '', key: '', model: '' },
     consolidateEvery: 30,     // N턴마다 서고 정리(중복 병합·중요도 재조정). 0 = 끔
     promptRev: 8,
     settingsRev: 2,
@@ -208,6 +210,8 @@ function getSettings() {
     for (const [k, v] of Object.entries(DEFAULT_SETTINGS.customApi)) {
         if (typeof s.customApi[k] === 'undefined') s.customApi[k] = v;
     }
+    // 구버전(mode 없음) → enabled 플래그를 mode로 승격
+    if (typeof s.embedApi.mode === 'undefined') s.embedApi.mode = s.embedApi.enabled ? 'api' : 'off';
     for (const [k, v] of Object.entries(DEFAULT_SETTINGS.embedApi)) {
         if (typeof s.embedApi[k] === 'undefined') s.embedApi[k] = v;
     }
@@ -360,6 +364,7 @@ function getStore() {
 function persistStore() {
     if (!getCurrentChatId()) return;
     saveMetadataDebounced();
+    scheduleLocalSync();
 }
 
 /* ============================================================
@@ -459,7 +464,8 @@ function normalizeEmbedApiUrl(url) {
     let u = String(url || '').trim().replace(/\/+$/, '');
     if (!u) return '';
     if (!/\/embeddings$/.test(u)) {
-        if (/\/v1$/.test(u)) u += '/embeddings';
+        // .../v1 · .../v1beta/openai (Gemini) · .../openai 처럼 이미 API 루트면 /embeddings만 붙인다
+        if (/\/(v\d+[a-z]*|openai)$/.test(u)) u += '/embeddings';
         else u += '/v1/embeddings';
     }
     return u;
@@ -469,7 +475,7 @@ function normalizeEmbedApiUrl(url) {
 async function callEmbedApi(texts) {
     const cfg = getSettings().embedApi;
     const url = normalizeEmbedApiUrl(cfg.url);
-    if (!cfg.enabled || !url || !texts.length) return null;
+    if (cfg.mode !== 'api' || !url || !texts.length) return null;
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 20000);
     try {
@@ -503,7 +509,7 @@ async function callEmbedApi(texts) {
 
 /** 새로 저장된 기억들에 API 임베딩(avec)을 붙인다. 꺼져 있거나 실패하면 조용히 건너뜀 */
 async function attachApiEmbeddings(memories) {
-    if (!getSettings().embedApi.enabled || !memories.length) return;
+    if (getSettings().embedApi.mode !== 'api' || !memories.length) return;
     const vecs = await callEmbedApi(memories.map(memoryIndexText));
     if (!vecs) return;
     memories.forEach((m, i) => { m.avec = encodeVec(vecs[i]); });
@@ -513,7 +519,7 @@ async function attachApiEmbeddings(memories) {
 const queryEmbedCache = new Map();
 
 async function embedQueriesViaApi(texts) {
-    if (!getSettings().embedApi.enabled) return null;
+    if (getSettings().embedApi.mode !== 'api') return null;
     const misses = texts.filter(t => !queryEmbedCache.has(t));
     if (misses.length) {
         const vecs = await callEmbedApi(misses);
@@ -529,6 +535,113 @@ async function embedQueriesViaApi(texts) {
 /** API 코사인(대개 0.5~1.0에 몰림)을 해시 코사인 스케일로 보정 */
 function calibrateApiCos(c) {
     return Math.max(0, (c - 0.5) * 1.1);
+}
+
+/* ============================================================
+ * 로컬 임베딩 (실리태번 내장 transformers.js — 무료, 서버에서 계산)
+ * ST 벡터 API에 기억을 색인해 두고, 매 턴 질의로 유사한 기억의 순위를 받아온다.
+ * ============================================================ */
+
+/** 기억 하나를 로컬 벡터 색인에서 식별하는 해시 (본문이 바뀌면 해시도 바뀜 → 자동 재색인) */
+function memLocalHash(m) {
+    return getStringHash(memoryIndexText(m));
+}
+
+function localCollectionId() {
+    const chatId = getCurrentChatId();
+    return chatId ? `memoria_${getStringHash(String(chatId))}` : null;
+}
+
+async function vectorApi(path, body) {
+    const res = await fetch(`/api/vector/${path}`, {
+        method: 'POST',
+        headers: getRequestHeaders(),
+        body: JSON.stringify({ source: 'transformers', ...body }),
+    });
+    if (!res.ok) throw new Error(`vector/${path} HTTP ${res.status}`);
+    const text = await res.text();
+    return text ? JSON.parse(text) : null;
+}
+
+let localSyncedChat = null;   // 마지막으로 동기화를 마친 채팅 ID
+let localSyncPromise = null;  // 동시 호출 합치기
+let localSyncTimer = null;
+
+/** 로컬 벡터 색인을 현재 기억 목록과 맞춘다 (없는 것 추가, 사라진 것 삭제) */
+async function syncLocalVectors() {
+    const collectionId = localCollectionId();
+    if (!collectionId) return false;
+    const store = getStore();
+    const wanted = new Map(); // hash → memory
+    for (const m of store.memories) {
+        if (!m.disabled) wanted.set(memLocalHash(m), m);
+    }
+    const existing = new Set((await vectorApi('list', { collectionId }) || []).map(Number));
+    const toInsert = [];
+    for (const [hash, m] of wanted) {
+        if (!existing.has(hash)) toInsert.push({ hash, text: memoryIndexText(m), index: m.turnIndex || 0 });
+    }
+    const toDelete = [...existing].filter(h => !wanted.has(h));
+    if (toDelete.length) await vectorApi('delete', { collectionId, hashes: toDelete });
+    // 첫 색인은 모델 다운로드가 겹칠 수 있어 작은 배치로 나눠 보낸다
+    for (let i = 0; i < toInsert.length; i += 50) {
+        await vectorApi('insert', { collectionId, items: toInsert.slice(i, i + 50) });
+    }
+    localSyncedChat = getCurrentChatId();
+    return true;
+}
+
+/** 채팅당 1회 보장 + 진행 중이면 그 약속을 공유 */
+function ensureLocalSync() {
+    if (getSettings().embedApi.mode !== 'local') return Promise.resolve(false);
+    if (localSyncedChat === getCurrentChatId() && !localSyncTimer) return Promise.resolve(true);
+    if (!localSyncPromise) {
+        if (localSyncTimer) { clearTimeout(localSyncTimer); localSyncTimer = null; }
+        localSyncPromise = syncLocalVectors()
+            .catch(e => { console.warn(`[${MODULE_NAME}] 로컬 임베딩 동기화 실패:`, e); return false; })
+            .finally(() => { localSyncPromise = null; });
+    }
+    return localSyncPromise;
+}
+
+/** 기억이 바뀐 뒤 호출 — 잠시 뒤 백그라운드에서 색인을 맞춘다 */
+function scheduleLocalSync() {
+    if (getSettings().embedApi.mode !== 'local') return;
+    if (localSyncTimer) clearTimeout(localSyncTimer);
+    localSyncTimer = setTimeout(() => {
+        localSyncTimer = null;
+        ensureLocalSync();
+    }, 1500);
+}
+
+/** 질의 텍스트들로 로컬 색인을 검색해 hash → 유사도 점수(해시 코사인 스케일) 맵을 만든다 */
+async function queryLocalRanks(texts, topK = 64) {
+    const collectionId = localCollectionId();
+    if (!collectionId) return null;
+    const synced = await ensureLocalSync();
+    if (!synced) return null;
+    const ranks = new Map();
+    // 순위 기반 점수: 1위 ≈ 0.5에서 완만하게 감쇠 (보조 질의는 0.92배)
+    const scoreAt = (rank, weight) => weight * 0.5 * Math.pow(0.94, rank);
+    await Promise.all(texts.map(async (t, ti) => {
+        if (!t || !String(t).trim()) return;
+        try {
+            const data = await vectorApi('query', {
+                collectionId, searchText: String(t).slice(0, 2000), topK, threshold: 0.2,
+            });
+            const metas = Array.isArray(data?.metadata) ? data.metadata : [];
+            const weight = ti === 0 ? 1 : 0.92;
+            metas.forEach((md, rank) => {
+                const h = Number(md?.hash);
+                if (!Number.isFinite(h)) return;
+                const sc = scoreAt(rank, weight);
+                if (!ranks.has(h) || ranks.get(h) < sc) ranks.set(h, sc);
+            });
+        } catch (e) {
+            console.warn(`[${MODULE_NAME}] 로컬 임베딩 질의 실패 (내장 검색으로 폴백):`, e);
+        }
+    }));
+    return ranks.size ? ranks : null;
 }
 
 function lexicalOverlap(queryTokens, text) {
@@ -1273,7 +1386,7 @@ async function runConsolidation(store) {
     }
 
     if (removeIds.size) store.memories = store.memories.filter(m => !removeIds.has(m.id));
-    if (getSettings().embedApi.enabled) {
+    if (getSettings().embedApi.mode === 'api') {
         await attachApiEmbeddings(store.memories.filter(m => !m.avec));
     }
     return stats;
@@ -1408,6 +1521,11 @@ async function retrieveMemories(queryText, recentUserTexts) {
     const apiQueryVec = apiQueryVecs?.[0] || null;
     const apiAuxVecs = apiQueryVecs?.slice(1) || [];
 
+    // 로컬 임베딩 모드면 실리태번 내장 벡터 색인에서 유사 기억 순위를 받아온다
+    const localRanks = settings.embedApi.mode === 'local'
+        ? await queryLocalRanks([queryText, ...auxTexts.slice(0, 1)])
+        : null;
+
     for (const m of active) {
         const isProtected = m.visibility !== 'public';
         if (isProtected && (!m.owner || !auth.has(m.owner.toLowerCase()))) {
@@ -1430,6 +1548,11 @@ async function retrieveMemories(queryText, recentUserTexts) {
             let apiCos = calibrateApiCos(cosine(apiQueryVec, av));
             for (const aq of apiAuxVecs) { if (aq) apiCos = Math.max(apiCos, calibrateApiCos(cosine(aq, av)) * 0.92); }
             cos = Math.max(cos, apiCos);
+        }
+        // 로컬 임베딩 순위가 있으면 의미 유사도로 반영
+        if (localRanks) {
+            const lr = localRanks.get(memLocalHash(m));
+            if (typeof lr === 'number') cos = Math.max(cos, lr);
         }
         const lex = lexicalOverlap(queryTokens, memoryIndexText(m));
         const entityHit = (m.entities || []).some(e => queryLower.includes(String(e).toLowerCase()));
@@ -2392,11 +2515,12 @@ function renderSettingsPanel() {
     $('#memoria_custom_api_block').toggle(s.apiMode === 'custom');
 
     $('#memoria_consolidate_every').val(s.consolidateEvery);
-    $('#memoria_embed_enabled').prop('checked', s.embedApi.enabled);
+    $('#memoria_embed_mode').val(s.embedApi.mode || 'off');
     $('#memoria_embed_url').val(s.embedApi.url);
     $('#memoria_embed_key').val(s.embedApi.key);
     $('#memoria_embed_model').val(s.embedApi.model);
-    $('#memoria_embed_block').toggle(Boolean(s.embedApi.enabled));
+    $('#memoria_embed_block').toggle(s.embedApi.mode === 'api');
+    $('#memoria_embed_local_block').toggle(s.embedApi.mode === 'local');
 }
 
 function renderPromptsPanel() {
@@ -2777,11 +2901,38 @@ function bindUI() {
     numBind('#memoria_preserve_recent', 'preserveRecent', 1, 50);
     numBind('#memoria_consolidate_every', 'consolidateEvery', 0, 200);
 
-    // ── 임베딩 API
-    $('#memoria_embed_enabled').on('change', function () {
-        getSettings().embedApi.enabled = $(this).prop('checked');
-        $('#memoria_embed_block').toggle($(this).prop('checked'));
+    // ── 의미 검색 임베딩
+    $('#memoria_embed_mode').on('change', function () {
+        const mode = String($(this).val() || 'off');
+        const s = getSettings();
+        s.embedApi.mode = mode;
+        s.embedApi.enabled = mode === 'api'; // 구버전 호환 플래그
+        $('#memoria_embed_block').toggle(mode === 'api');
+        $('#memoria_embed_local_block').toggle(mode === 'local');
+        queryEmbedCache.clear();
+        localSyncedChat = null;
+        if (mode === 'local') scheduleLocalSync();
         saveSettingsDebounced();
+    });
+    $('#memoria_embed_local_test').on('click', async function () {
+        if (!getCurrentChatId()) { toastr.warning('열린 채팅이 없습니다.', 'Memoria'); return; }
+        const $btn = $(this);
+        const $prog = $('#memoria_embed_local_progress');
+        $btn.addClass('disabled');
+        $prog.text('색인 중… (첫 사용 시 모델 다운로드로 오래 걸릴 수 있음)');
+        try {
+            localSyncedChat = null;
+            const ok = await ensureLocalSync();
+            if (ok) {
+                const n = getStore().memories.filter(m => !m.disabled).length;
+                toastr.success(`로컬 임베딩 동작 확인 — 기억 ${n}개 색인 완료`, 'Memoria');
+            } else {
+                toastr.error('로컬 임베딩 색인에 실패했습니다. 실리태번 서버 콘솔을 확인하세요.', 'Memoria');
+            }
+        } finally {
+            $btn.removeClass('disabled');
+            $prog.text('');
+        }
     });
     const embedBind = (sel, key) => {
         $(sel).on('change', function () {
@@ -2806,7 +2957,7 @@ function bindUI() {
     });
     $('#memoria_embed_reindex').on('click', async function () {
         const s = getSettings();
-        if (!s.embedApi.enabled) { toastr.warning('먼저 임베딩 API를 켜세요.', 'Memoria'); return; }
+        if (s.embedApi.mode !== 'api') { toastr.warning('먼저 임베딩 소스를 외부 API로 설정하세요.', 'Memoria'); return; }
         const store = getStore();
         const targets = store.memories;
         if (!targets.length) { toastr.info('기억이 없습니다.', 'Memoria'); return; }
@@ -3056,6 +3207,7 @@ function bindEvents() {
     eventSource.on(event_types.CHAT_CHANGED, () => {
         vecCache.clear();
         queryEmbedCache.clear();
+        localSyncedChat = null;
         getStore();
         reconcileWithChat();
         renderAllPanels();
