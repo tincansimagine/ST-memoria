@@ -182,6 +182,21 @@
     color: var(--mm-muted);
 }
 
+.memoria__icon-btn {
+    cursor: pointer;
+    opacity: 0.55;
+    padding: 4px 6px;
+    border-radius: 4px;
+    flex-shrink: 0;
+    transition: opacity 0.15s, color 0.15s, background 0.15s;
+}
+
+.memoria__icon-btn:hover {
+    opacity: 1;
+    color: var(--mm-accent);
+    background: var(--mm-hover);
+}
+
 .memoria__compact-actions {
     display: flex;
     gap: 6px;

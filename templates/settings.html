@@ -1,7 +1,7 @@
 <div id="memoria_settings" class="memoria">
     <div class="inline-drawer">
         <div class="inline-drawer-toggle inline-drawer-header">
-            <b><i class="fa-solid fa-book-bookmark"></i> Memoria — 장기기억 서고 <span class="memoria__version">v1.1.1</span></b>
+            <b><i class="fa-solid fa-book-bookmark"></i> Memoria — 장기기억 서고 <span class="memoria__version">v1.2.0</span></b>
             <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
         </div>
         <div class="inline-drawer-content">
@@ -53,6 +53,7 @@
                             <p>다음 응답 생성 시 프롬프트에 들어갈 장기기억입니다.</p>
                         </div>
                         <span id="memoria_packet_tokens" class="memoria__token-badge"></span>
+                        <i class="fa-solid fa-copy memoria__icon-btn" id="memoria_packet_copy" title="주입 내용 전체 복사"></i>
                     </div>
                     <textarea id="memoria_packet_preview" class="memoria__preview" rows="12" readonly></textarea>
                 </div>
@@ -416,7 +417,15 @@
                             <input type="number" id="memoria_budget" min="200" max="24000" step="100">
                         </div>
                         <div class="memoria__field">
-                            <label for="memoria_depth" title="채팅 내 주입 깊이 (0 = 가장 마지막)">주입 깊이</label>
+                            <label for="memoria_inject_position" title="장기기억 장부를 프롬프트 어디에 넣을지">주입 위치</label>
+                            <select id="memoria_inject_position">
+                                <option value="chat">채팅 내 (깊이 적용)</option>
+                                <option value="before">메인 프롬프트 앞</option>
+                                <option value="after">메인 프롬프트 뒤</option>
+                            </select>
+                        </div>
+                        <div class="memoria__field">
+                            <label for="memoria_depth" title="채팅 내 주입 깊이 (0 = 가장 마지막) — 주입 위치가 '채팅 내'일 때만 적용">주입 깊이</label>
                             <input type="number" id="memoria_depth" min="0" max="20" step="1">
                         </div>
                         <div class="memoria__field">
@@ -476,6 +485,10 @@
                             <p>아직 기록되지 않은 턴과 기록에 실패한 턴을 순서대로 기록합니다. 범위를 비우면 전체를 색인합니다.</p>
                         </div>
                     </div>
+                    <label class="checkbox_label" title="다른 요약 확장 등이 숨겨 둔(/hide) 메시지도 색인 대상에 포함합니다.">
+                        <input type="checkbox" id="memoria_bulk_hidden">
+                        <span>숨겨진 메시지도 포함</span>
+                    </label>
                     <div class="memoria__button-row">
                         <div class="memoria__range">
                             <input type="number" id="memoria_bulk_from" min="0" step="1" placeholder="시작 #">

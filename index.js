@@ -91,7 +91,7 @@ THE FIVE SHELVES
 2. canon — standing facts of the world or its systems, stored as a snake_case key with a value. Refiling a key replaces its old value. This shelf may also pin what the world explicitly LACKS when the story makes it clear (key "no_magic", value "magic does not exist here") so later scenes stop inventing it.
 3. status — the current value of one slot for one entity (location, outfit, injury, goal, mood_toward_x...). Refiling the same (entity, slot) replaces it. When the scene itself moves or time passes, file entity "scene" with slots "location", "time_of_day", "date" — and "relationship" for the main pair when it clearly shifts. A home or workplace merely mentioned is NOT the scene's location; move "scene" only when the story actually moves there. When a named character exits the scene with a stated destination or errand, file their slot "whereabouts". Skip anything unchanged.
 4. pledges — promises the story must keep: a thread that must stay open (keep_unresolved, loose_end), a secret that must not leak (keep_secret), knowledge a character must not have yet (knowledge_gap), a consent line (consent), or a hard limit of the world (world_limit).
-5. cast — recurring named characters. Open a card only at their first real characterization, or when their role, occupation, or relationships meaningfully change. Throwaway NPCs never get a card. Unknown fields stay null; temporary states (drunk, blushing) are not profile material. "relationships" lists standing ties to other named characters, e.g. [{"target":"Aria","relation":"childhood friend"}]. "voice" captures HOW they speak as a compact pattern — politeness level or typical sentence endings, pet phrases, what they call other people; a pattern only, never sample lines (those belong in quotes). Identity is precise: two people who share a name, title, or trade are still two people — and one person spelled two ways (nickname, romanization, translation) is still one. Reuse the exact name already on file. A pivotal character the story deliberately leaves unnamed may still get a card: use a short stable handle as the name (the SAME words every time, e.g. "the scarred courier") and set "provisional":true. When the story finally names them, file the card under the real name with "aka":["the scarred courier"] so the old records fold in.
+5. cast — the people of this story. The two leads — the player's character and the story's main character — belong here first: the archive starts empty, so nobody is "already known". Open a lead's card at their first clear characterization and keep it current as their role, relationships, or voice evolve. Every other named character gets a card at their first real characterization, or when their role, occupation, or relationships meaningfully change. Only throwaway NPCs never get a card. Unknown fields stay null; temporary states (drunk, blushing) are not profile material. "relationships" lists standing ties to other named characters, e.g. [{"target":"Aria","relation":"childhood friend"}]. "voice" captures HOW they speak as a compact pattern — politeness level or typical sentence endings, pet phrases, what they call other people; a pattern only, never sample lines (those belong in quotes). Identity is precise: two people who share a name, title, or trade are still two people — and one person spelled two ways (nickname, romanization, translation) is still one. Reuse the exact name already on file. A pivotal character the story deliberately leaves unnamed may still get a card: use a short stable handle as the name (the SAME words every time, e.g. "the scarred courier") and set "provisional":true. When the story finally names them, file the card under the real name with "aka":["the scarred courier"] so the old records fold in.
 
 SHELVING RULES
 - Only this exchange goes on the shelves. The reference material below exists so you do not refile old news.
@@ -175,6 +175,7 @@ const DEFAULT_SETTINGS = Object.freeze({
     autoRecord: true,
     profileId: '',            // '' = 현재 연결된 API로 조용히 생성
     injectDepth: 1,
+    injectPosition: 'chat',   // 'chat' = 채팅 내 깊이, 'before' = 메인 프롬프트 앞, 'after' = 메인 프롬프트 뒤
     tokenBudget: 8000,
     topK: 10,
     minScore: 0.12,
@@ -204,7 +205,7 @@ const DEFAULT_SETTINGS = Object.freeze({
     embedApi: { mode: 'off', enabled: false, url: '', key: '', model: '' },
     consolidateEvery: 30,     // N턴마다 서고 정리(중복 병합·중요도 재조정). 0 = 끔
     storyClock: true,         // 서사 시계 — 이야기 속 경과 시간을 추적해 기억 노화에 반영
-    promptRev: 13,
+    promptRev: 14,
     settingsRev: 3,
     fossil: { settling: 12, fossilized: 40, deep: 120 },
     prompts: {
@@ -1288,6 +1289,8 @@ function upsertCharacter(store, c, turnIndex) {
         });
         return;
     }
+    // 비활성(주입 제외) 카드는 기록도 동결 — 사용자가 치운 인물을 사서가 계속 되살리지 못하게
+    if (existing.disabled) return;
     if (c.aka?.length) {
         existing.aliases = [...new Set([...(existing.aliases || []), ...c.aka])]
             .filter(a => norm(a) !== norm(existing.name)).slice(0, 6);
@@ -1306,6 +1309,27 @@ function upsertCharacter(store, c, turnIndex) {
         existing.relationships = list.slice(0, 10);
     }
     existing.updatedTurn = turnIndex;
+}
+
+/** 인물 카드 수동 병합 — absorb 카드를 keep 카드로 접는다 (이름은 별칭으로 보존) */
+function mergeCharacterCards(store, keep, absorb) {
+    const norm = (s) => String(s || '').toLowerCase();
+    keep.aliases = [...new Set([...(keep.aliases || []), absorb.name, ...(absorb.aliases || [])])]
+        .filter(a => a && norm(a) !== norm(keep.name)).slice(0, 8);
+    for (const field of ['role', 'age', 'occupation', 'appearance', 'voice']) {
+        if (!keep[field] && absorb[field]) keep[field] = absorb[field];
+    }
+    keep.traits = [...new Set([...(keep.traits || []), ...(absorb.traits || [])])].slice(0, 10);
+    const rels = keep.relationships || (keep.relationships = []);
+    for (const rel of (absorb.relationships || [])) {
+        if (!rels.some(r => norm(r.target) === norm(rel.target))) rels.push(rel);
+    }
+    keep.relationships = rels.slice(0, 10);
+    keep.firstTurn = Math.min(keep.firstTurn || 0, absorb.firstTurn || 0) || keep.firstTurn;
+    keep.updatedTurn = Math.max(keep.updatedTurn || 0, absorb.updatedTurn || 0);
+    keep.provisional = keep.provisional === true && absorb.provisional === true;
+    if (absorb.manual) keep.manual = true;
+    store.characters = store.characters.filter(x => x.id !== absorb.id);
 }
 
 /** 이벤트 연표: 같은 제목이 이미 있으면 건너뛴다 (중복 방지) */
@@ -1395,10 +1419,22 @@ async function commitTurn(mesId, { silent = true, force = false } = {}) {
         ? '\n\nPLEDGE CHECK: the file below lists open pledges with tags like [p1]. If this exchange clearly settles one ON-SCREEN (the secret is revealed, the promise is kept, the thread is closed), include a top-level array "settled" with those tags, e.g. "settled":["p1"]. Only what actually happened — never predict, never guess.'
         : '';
 
+    // 도감 명단 — 사서가 "누가 아직 카드가 없는지"를 추측하지 않고 알 수 있게 한다.
+    // 명단에 없는 등장인물(주역 포함)은 이번 턴에 바로 카드를 연다.
+    // 비활성 카드도 명단에 올린다 — 사용자가 치운 인물을 사서가 새 카드로 되살리지 못하게.
+    const filedCast = settings.characterTracking
+        ? store.characters.map(c => c.name).slice(0, 40)
+        : null;
+    const castLine = !settings.characterTracking ? ''
+        : filedCast.length
+            ? `Cast already on file: ${filedCast.join(', ')}. Anyone present in this exchange who is NOT on this list — the leads included — gets a card now; for those already listed, file only meaningful changes.\n`
+            : 'The cast shelf is empty — no one has a card yet, not even the leads. Anyone characterized in this exchange gets a card now.\n';
+
     const refBlock = await buildReferenceBlock();
     const userPrompt = [
         refBlock,
         pledgeLines.length ? `Open pledges on file:\n${pledgeLines.join('\n')}\n` : '',
+        castLine,
         recent ? `Already shelved (do not refile) — recent turn digests:\n${recent}\n` : '',
         'The exchange to shelve:',
         `<user name="${userLabel}">\n${userText.slice(0, 4000)}\n</user>`,
@@ -2385,10 +2421,17 @@ async function runSupervisor(query) {
     return null;
 }
 
+function injectionType() {
+    const pos = getSettings().injectPosition;
+    if (pos === 'before') return extension_prompt_types.BEFORE_PROMPT;
+    if (pos === 'after') return extension_prompt_types.IN_PROMPT;
+    return extension_prompt_types.IN_CHAT;
+}
+
 async function updateInjection({ runSupervisorPass = false } = {}) {
     const settings = getSettings();
     if (!settings.enabled || !getCurrentChatId()) {
-        setExtensionPrompt(INJECT_KEY, '', extension_prompt_types.IN_CHAT, settings.injectDepth, false, extension_prompt_roles.SYSTEM);
+        setExtensionPrompt(INJECT_KEY, '', injectionType(), settings.injectDepth, false, extension_prompt_roles.SYSTEM);
         lastPacketText = '';
         return;
     }
@@ -2402,7 +2445,7 @@ async function updateInjection({ runSupervisorPass = false } = {}) {
     const plan = runSupervisorPass ? await runSupervisor(query) : null;
     const packet = await buildPacketWithinBudget(query, plan);
     lastPacketText = packet;
-    setExtensionPrompt(INJECT_KEY, packet, extension_prompt_types.IN_CHAT, settings.injectDepth, false, extension_prompt_roles.SYSTEM);
+    setExtensionPrompt(INJECT_KEY, packet, injectionType(), settings.injectDepth, false, extension_prompt_roles.SYSTEM);
     lastPacketTokens = packet ? await getTokenCountAsync(packet) : 0;
     refreshPacketPreview();
 }
@@ -2536,7 +2579,7 @@ function invalidateTurnByMesId(mesId) {
 
 let bulkIndexAbort = false;
 
-async function bulkIndexChat({ from = 0, to = Infinity } = {}) {
+async function bulkIndexChat({ from = 0, to = Infinity, includeHidden = false } = {}) {
     const settings = getSettings();
     if (!settings.enabled) {
         toastr.warning('Memoria가 꺼져 있습니다.', 'Memoria');
@@ -2549,10 +2592,12 @@ async function bulkIndexChat({ from = 0, to = Infinity } = {}) {
         const m = chat[i];
         if (!m || m.is_user) continue;
         const existing = store.turns.find(t => t.mesId === i);
-        if (m.is_system) {
-            // 숨겨진 메시지: 기록 실패한 기존 턴만 재시도 대상
+        const alreadyDone = existing && existing.mesHash === mesHashOf(m) && !existing.failed;
+        if (m.is_system && !includeHidden) {
+            // 숨겨진 메시지: 기본은 기록 실패한 기존 턴만 재시도.
+            // "숨김 포함"을 켜면 다른 요약 확장이 가려 둔 초반부도 색인할 수 있다.
             if (!existing || !existing.failed) continue;
-        } else if (existing && existing.mesHash === mesHashOf(m) && !existing.failed) {
+        } else if (alreadyDone) {
             continue;
         }
         targets.push(i);
@@ -2987,7 +3032,8 @@ function renderCharactersPanel() {
                     <strong class="memoria__char-name">${escapeHtml(c.name)}</strong>
                     ${c.provisional ? '<span class="memoria__badge memoria__badge--provisional" title="아직 이름이 밝혀지지 않은 인물 — 정체가 드러나면 자동 병합됩니다">미확인</span>' : ''}
                     <span class="memoria__mem-actions">
-                        <i class="fa-solid ${c.disabled ? 'fa-eye-slash' : 'fa-eye'} memoria-char-toggle" title="${c.disabled ? '주입에 포함' : '주입에서 제외'}"></i>
+                        <i class="fa-solid ${c.disabled ? 'fa-eye-slash' : 'fa-eye'} memoria-char-toggle" title="${c.disabled ? '주입에 포함' : '주입·기록에서 제외 (사서가 이 인물을 다시 등록하지 않음)'}"></i>
+                        <i class="fa-solid fa-code-merge memoria-char-merge" title="다른 카드를 이 카드로 병합"></i>
                         <i class="fa-solid fa-pen memoria-char-edit" title="편집"></i>
                         <i class="fa-solid fa-trash memoria-char-delete" title="삭제"></i>
                     </span>
@@ -3173,6 +3219,7 @@ function renderSummariesPanel() {
                     <span class="memoria__badge ${s.carried ? 'memoria__badge--carried' : s.level === 'arc' ? 'memoria__badge--arc' : 'memoria__badge--chunk'}">${s.carried ? '인계' : s.level === 'arc' ? '연대기' : '요약'}</span>
                     <span>${s.carried ? escapeHtml(s.carriedFrom || '이전 채팅') : `t${s.fromTurn}–t${s.toTurn}`}</span>
                     <span class="memoria__mem-actions">
+                        ${!s.carried && s.level === 'chunk' ? '<i class="fa-solid fa-rotate memoria-summary-regen" title="이 구간의 턴 기록으로 요약 다시 생성"></i>' : ''}
                         <i class="fa-solid fa-pen memoria-summary-edit" title="편집"></i>
                         <i class="fa-solid fa-trash memoria-summary-delete" title="삭제"></i>
                     </span>
@@ -3200,6 +3247,7 @@ function renderSettingsPanel() {
     $('#memoria_summary_context').val(s.summaryContextCount);
     $('#memoria_preserve_recent').val(s.preserveRecent);
     $('#memoria_depth').val(s.injectDepth);
+    $('#memoria_inject_position').val(s.injectPosition || 'chat');
     $('#memoria_budget').val(s.tokenBudget);
     $('#memoria_topk').val(s.topK);
     $('#memoria_chunk_turns').val(s.chunkTurns);
@@ -3388,6 +3436,30 @@ function bindUI() {
         c.manual = true; // 사용자가 다듬은 프로필은 롤백에서 보호
         persistStore(); renderCharactersPanel(); updateInjection();
     });
+    $('#memoria_settings').on('click', '.memoria-char-merge', async function () {
+        const store = getStore();
+        const keep = store.characters.find(x => x.id === $(this).closest('.memoria__char-card').data('id'));
+        if (!keep) return;
+        const others = store.characters.filter(x => x.id !== keep.id);
+        if (!others.length) {
+            toastr.info('병합할 다른 인물 카드가 없습니다.', 'Memoria');
+            return;
+        }
+        const ctx = getContext();
+        const name = await ctx.callGenericPopup(
+            `"${keep.name}" 카드로 접을 인물 이름을 입력하세요.\n(같은 인물이 두 카드로 나뉘었을 때 — 접힌 카드의 이름은 별칭으로 남고 기록이 합쳐집니다)\n\n다른 카드: ${others.map(x => x.name).join(', ')}`,
+            ctx.POPUP_TYPE.INPUT, '', { rows: 1 });
+        if (!name || typeof name !== 'string') return;
+        const norm = (s) => String(s || '').toLowerCase().trim();
+        const absorb = others.find(x => norm(x.name) === norm(name) || (x.aliases || []).some(a => norm(a) === norm(name)));
+        if (!absorb) {
+            toastr.warning(`"${cleanStr(name, 60)}" 카드를 찾지 못했습니다.`, 'Memoria');
+            return;
+        }
+        mergeCharacterCards(store, keep, absorb);
+        persistStore(); renderCharactersPanel(); updateInjection();
+        toastr.success(`"${absorb.name}" 카드를 "${keep.name}"(으)로 병합했습니다.`, 'Memoria');
+    });
     $('#memoria_character_add').on('click', async function () {
         const ctx = getContext();
         const name = await ctx.callGenericPopup('추가할 인물 이름', ctx.POPUP_TYPE.INPUT, '', { rows: 1 });
@@ -3575,6 +3647,39 @@ function bindUI() {
         s.avec = null; // 본문이 바뀌었으니 챕터 API 임베딩은 다음 회상 때 재계산
         persistStore(); renderSummariesPanel(); updateInjection();
     });
+    $('#memoria_settings').on('click', '.memoria-summary-regen', async function () {
+        const store = getStore();
+        const id = $(this).closest('.memoria__summary-card').data('id');
+        const s = store.chunkSummaries.find(x => x.id === id);
+        if (!s) return;
+        const parts = store.turns
+            .filter(t => t.turnIndex >= s.fromTurn && t.turnIndex <= s.toTurn && t.summary)
+            .sort((a, b) => a.turnIndex - b.turnIndex)
+            .map(t => `[t${t.turnIndex}] ${t.summary}`);
+        if (!parts.length) {
+            toastr.warning('이 구간의 턴 기록이 남아 있지 않아 다시 생성할 수 없습니다.', 'Memoria');
+            return;
+        }
+        const $icon = $(this);
+        $icon.addClass('fa-spin');
+        try {
+            const settings = getSettings();
+            const refBlock = await buildReferenceBlock();
+            const userPrompt = [refBlock, previousSummariesForContext(store), `Turn digests to weave:\n${parts.join('\n')}`]
+                .filter(Boolean).join('\n');
+            const text = cleanMultiline(await callAuxLLM(`${settings.prompts.chunk}\n\n${languageDirective()}`, userPrompt, { maxTokens: 4000 }), 2000);
+            if (!text) throw new Error('빈 응답');
+            s.text = text;
+            s.avec = null;
+            persistStore(); renderSummariesPanel(); updateInjection();
+            toastr.success('요약을 다시 생성했습니다.', 'Memoria');
+        } catch (e) {
+            console.error(`[${MODULE_NAME}] 요약 재생성 실패:`, e);
+            toastr.error('요약 재생성에 실패했습니다. (모델 응답 오류)', 'Memoria');
+        } finally {
+            $icon.removeClass('fa-spin');
+        }
+    });
     $('#memoria_settings').on('click', '.memoria-digest-edit', async function () {
         const store = getStore();
         const turnIndex = Number($(this).closest('.memoria__row').data('turn'));
@@ -3585,6 +3690,18 @@ function bindUI() {
         if (!edited || typeof edited !== 'string') return;
         t.summary = cleanStr(edited, 300);
         persistStore(); renderSummariesPanel();
+    });
+    $('#memoria_packet_copy').on('click', async function () {
+        if (!lastPacketText) { toastr.info('복사할 주입 내용이 없습니다.', 'Memoria'); return; }
+        try {
+            await navigator.clipboard.writeText(lastPacketText);
+            toastr.success('주입 내용을 복사했습니다.', 'Memoria');
+        } catch {
+            const el = document.getElementById('memoria_packet_preview');
+            el.select();
+            document.execCommand('copy');
+            toastr.success('주입 내용을 복사했습니다.', 'Memoria');
+        }
     });
     $('#memoria_summarize_now').on('click', async function () {
         const store = getStore();
@@ -3704,6 +3821,11 @@ function bindUI() {
         });
     };
     numBind('#memoria_depth', 'injectDepth', 0, 20);
+    $('#memoria_inject_position').on('change', function () {
+        getSettings().injectPosition = String($(this).val());
+        saveSettingsDebounced();
+        updateInjection();
+    });
     numBind('#memoria_budget', 'tokenBudget', 200, 24000);
     numBind('#memoria_topk', 'topK', 1, 30);
     numBind('#memoria_chunk_turns', 'chunkTurns', 3, 40);
@@ -3860,6 +3982,7 @@ function bindUI() {
         bulkIndexChat({
             from: Number.isFinite(from) ? Math.max(0, from) : 0,
             to: Number.isFinite(to) ? Math.max(0, to) : Infinity,
+            includeHidden: $('#memoria_bulk_hidden').prop('checked'),
         });
     });
     $('#memoria_bulk_cancel').on('click', function () { bulkIndexAbort = true; });
