@@ -18,7 +18,7 @@ import {
     event_types,
     extension_prompt_roles,
     extension_prompt_types,
-    generateQuietPrompt,
+    generateRaw,
     getCurrentChatId,
     name1,
     name2,
@@ -98,6 +98,7 @@ SHELVING RULES
 - "quote" is a verbatim contiguous snippet of the user or assistant text in its original language. Copy, never compose. Use null when nothing is worth quoting.
 - visibility marks who may know a memory: "public" (open knowledge), "private" (only the holder — inner thoughts, personal facts), "secret" (deliberately hidden). "owner" names the holder.
 - Small talk shelves nothing; empty arrays are a valid answer. Caps: 8 memories, 4 canon, 6 status, 4 pledges, 3 cast.
+- "digest" and every "summary" are written in YOUR OWN words — condensed, factual, shorter than the source. Never copy sentences or whole passages from the scene into them; verbatim text belongs only in "quote".
 
 Reply with ONE minified JSON object and nothing else (no code fences, no notes):
 {"digest":"1-2 sentence factual summary of this exchange","weight":0.0,"memories":[{"kind":"event|relationship|fact|preference|promise|goal|item|place|secret|impression","summary":"...","quote":"..or null","importance":0.0,"entities":["Name"],"tags":["snake_case"],"visibility":"public|private|secret","owner":"Name or null"}],"canon":[{"scope":"session|world|region|location|faction|system","key":"snake_case_key","value":"..."}],"status":[{"entity":"Name","slot":"snake_case_slot","value":"...","claim":"objective|belief","owner":"Name or null"}],"pledges":[{"kind":"keep_unresolved|keep_secret|knowledge_gap|consent|world_limit|loose_end","summary":"...","status":"active|resolved","priority":2}],"cast":[{"name":"Name","role":"role in story or null","age":"25 or null","occupation":"... or null","appearance":"... or null","traits":["trait"],"relationships":[{"target":"OtherName","relation":"..."}]}]}`;
@@ -170,7 +171,7 @@ const DEFAULT_SETTINGS = Object.freeze({
     summaryContextCount: 3,   // 요약 생성 시 참조할 이전 요약 수 (0 = 안 함, -1 = 전체)
     apiMode: 'st',            // 'st' = 실리태번(현재 API/연결 프로필), 'custom' = 커스텀 OpenAI 호환 API
     customApi: { url: '', key: '', model: '', temperature: 0.7, timeoutSec: 90 },
-    promptRev: 5,
+    promptRev: 6,
     settingsRev: 2,
     fossil: { settling: 12, fossilized: 40, deep: 120 },
     prompts: {
@@ -322,6 +323,18 @@ function getStore() {
         for (const l of s.locks) l.kind = normLockKind(l.kind);
         s.lexiconRev = 1;
     }
+    // 원문이 요약 자리에 통째로 들어간 구버전 사건 기억 정리: 요약은 첫 문장으로, 원문은 인용 칸으로
+    if (s.lexiconRev < 2) {
+        for (const m of s.memories) {
+            if (!(m.tags || []).includes('episode_raw')) continue;
+            const looksRaw = !m.excerpt || m.excerpt === m.summary;
+            if (looksRaw && String(m.summary || '').length > 200) {
+                m.excerpt = m.excerpt || cleanStr(m.summary, 320);
+                m.summary = firstSentence(m.summary);
+            }
+        }
+        s.lexiconRev = 2;
+    }
     return s;
 }
 
@@ -422,7 +435,7 @@ function lexicalOverlap(queryTokens, text) {
 }
 
 /* ============================================================
- * LLM 호출 (연결 프로필 또는 현재 API 조용한 생성)
+ * LLM 호출 (커스텀 API / 연결 프로필 / 현재 API raw 생성 — 모두 채팅 비차단)
  * ============================================================ */
 
 let _connectionManager = null;
@@ -503,10 +516,11 @@ async function callCustomApi(systemPrompt, userPrompt, tokens) {
 }
 
 /**
- * 보조 LLM 호출.
+ * 보조 LLM 호출. 어떤 경로든 ST의 메인 생성 파이프라인을 점유하지 않아
+ * 기록·요약이 도는 중에도 사용자는 계속 채팅할 수 있다.
  * 1) 커스텀 API 모드면 OpenAI 호환 엔드포인트를 직접 호출
  * 2) profileId가 설정돼 있으면 커넥션 매니저 프로필로
- * 3) 아니면 현재 연결된 API로 조용한 생성(generateQuietPrompt)
+ * 3) 아니면 현재 연결된 API로 raw 생성(generateRaw — 채팅 잠금 없음)
  */
 async function callAuxLLM(systemPrompt, userPrompt, { maxTokens } = {}) {
     const settings = getSettings();
@@ -534,10 +548,13 @@ async function callAuxLLM(systemPrompt, userPrompt, { maxTokens } = {}) {
         }
     }
 
-    return await generateQuietPrompt({
-        quietPrompt: `${systemPrompt}\n\n---\n\n${userPrompt}`,
-        skipWIAN: true,
+    // generateQuietPrompt는 Generate('quiet')를 거치며 전송 버튼을 잠가
+    // 기록이 끝날 때까지 다음 채팅을 막는다. generateRaw는 잠금 없이 백그라운드로 돈다.
+    return await generateRaw({
+        prompt: [{ role: 'user', content: userPrompt }],
+        systemPrompt,
         responseLength: tokens,
+        trimNames: false,
     });
 }
 
@@ -590,6 +607,13 @@ function cleanStr(s, max = 400) {
 /** 줄바꿈은 보존하는 정리 (요약 본문용 — 감정/분위기 추적 줄 유지) */
 function cleanMultiline(s, max = 2000) {
     return String(s ?? '').replace(/\r/g, '').replace(/[ \t]+/g, ' ').replace(/\n{3,}/g, '\n\n').trim().slice(0, max);
+}
+
+/** 원문의 첫 문장만 뽑는다 (사서 실패 시 사건 요약 대체용 — 통째 복사 방지) */
+function firstSentence(s, max = 160) {
+    const t = cleanStr(s, 600);
+    const m = t.match(/^.*?[.!?。！？…](?=\s|$)/);
+    return cleanStr(m ? m[0] : t, max);
 }
 
 /** excerpt가 원문의 실제 부분 문자열일 때만 유지 (환각 증거 차단) */
@@ -897,10 +921,17 @@ async function commitTurn(mesId, { silent = true, force = false } = {}) {
     turn.summary = extracted.turnSummary;
     turn.importance = extracted.importance;
 
-    // 원문 증거 기억(항상 저장) — LLM 없이도 회상 가능하게
+    // 원문 증거 기억(항상 저장) — LLM 없이도 회상 가능하게.
+    // 요약 자리에는 다이제스트(없으면 첫 문장)만 넣고, 원문 발췌는 인용 칸에만 둔다.
+    // 사서가 다이제스트에 원문을 그대로 복사해 온 경우(부분 문자열 일치)도 첫 문장으로 대체.
     const rawEpisode = cleanStr(assistantText, 320);
+    const digestIsCopy = extracted.turnSummary
+        && extracted.turnSummary.length > 120
+        && cleanStr(assistantText, 100000).includes(extracted.turnSummary);
+    const episodeSummary = (extracted.turnSummary && !digestIsCopy) ? extracted.turnSummary : firstSentence(assistantText);
+    if (digestIsCopy) turn.summary = episodeSummary;
     const rows = [{
-        kind: 'event', summary: extracted.turnSummary || rawEpisode, excerpt: rawEpisode === (extracted.turnSummary || '') ? null : rawEpisode,
+        kind: 'event', summary: episodeSummary, excerpt: rawEpisode === episodeSummary ? null : rawEpisode,
         importance: Math.max(0.25, extracted.importance - 0.1), entities: [charLabel], tags: ['episode_raw'],
         visibility: 'public', owner: null, _episode: true,
     }, ...extracted.memories];
@@ -1383,13 +1414,8 @@ async function buildPacketWithinBudget(query, supervisorPlan) {
 async function runSupervisor(query) {
     const settings = getSettings();
     if (!settings.supervisorEnabled) return null;
-    // 연출은 생성 시작 시점(GENERATION_STARTED 안)에 실행되므로,
-    // 현재 API로 조용한 생성을 부르면 생성 파이프라인에 재진입하게 된다.
-    // 별도 연결 프로필 또는 커스텀 API가 있을 때만 동작.
-    if (settings.apiMode !== 'custom' && !settings.profileId) {
-        console.debug(`[${MODULE_NAME}] 장면 연출은 별도 연결 프로필 또는 커스텀 API가 필요합니다. 건너뜀.`);
-        return null;
-    }
+    // 생성 파이프라인과 무관한 raw 호출을 쓰므로 어떤 API 모드에서도 안전하게 동작.
+    // (응답 시작이 연출 호출만큼 늦어지는 건 기능 특성상 불가피)
     try {
         const store = getStore();
         const recent = chat.slice(-8).filter(m => !m.is_system).map(m => `${m.is_user ? 'USER' : m.name}: ${cleanStr(m.mes, 400)}`).join('\n');
