@@ -482,6 +482,13 @@ function memoryIndexText(m) {
     return `${m.summary} ${(m.entities || []).join(' ')} ${(m.tags || []).join(' ')} ${(m.hints || []).join(' ')}`;
 }
 
+/** 회상 큐 전용 텍스트 — 원문 인용·회상 단서·개체명만.
+ * 요약은 사서의 문체로 쓰이지만 인용·단서는 장면의 언어 그대로라서,
+ * 유저의 미래 입력과 닿는 결이 다르다. 요약 벡터에 뭉개지 않게 별도 축으로 둔다. */
+function memoryCueText(m) {
+    return `${m.excerpt || ''} ${(m.hints || []).join(' ')} ${(m.entities || []).join(' ')}`.trim();
+}
+
 /* ============================================================
  * 선택적 임베딩 API (OpenAI 호환 /embeddings — 의미 검색 정확도 향상)
  * ============================================================ */
@@ -1448,6 +1455,7 @@ async function commitTurn(mesId, { silent = true, force = false } = {}) {
             manual: false,
             trigger: '',
             vec: encodeVec(embedText(memoryIndexText(m))),
+            cvec: memoryCueText(m).length >= 4 ? encodeVec(embedText(memoryCueText(m))) : '',
         });
     }
     await attachApiEmbeddings(store.memories.slice(-rows.length));
@@ -1780,6 +1788,19 @@ async function retrieveMemories(queryText, recentUserTexts, sceneText = '') {
         ? await queryLocalRanks([queryText, ...auxTexts.slice(0, 1)])
         : null;
 
+    // 장면 개체 사전확률: 지금 장면에 있는 인물(도감 이름·별칭이 최근 본문에 등장)의 목록.
+    // 한국어 롤플레잉은 대명사·호칭 생략이 많아 질의에 이름이 없어도, 장면에 있는 인물과
+    // 얽힌 기억이 지금 관련 있을 사전확률이 높다.
+    const presenceText = `${queryText}\n${(recentUserTexts || []).join('\n')}\n${sceneText}`.toLowerCase();
+    const presentEntities = new Set();
+    for (const c of store.characters || []) {
+        if (c.disabled) continue;
+        const names = [c.name, ...(c.aliases || [])];
+        if (names.some(n => n && String(n).length >= 2 && presenceText.includes(String(n).toLowerCase()))) {
+            presentEntities.add(String(c.name).toLowerCase());
+        }
+    }
+
     for (const m of active) {
         const isProtected = m.visibility !== 'public';
         if (isProtected && (!m.owner || !auth.has(m.owner.toLowerCase()))) {
@@ -1797,6 +1818,17 @@ async function retrieveMemories(queryText, recentUserTexts, sceneText = '') {
         let cos = cosine(queryVec, vec);
         for (const av of auxVecs) cos = Math.max(cos, cosine(av, vec) * 0.92);
         if (sceneVec) cos = Math.max(cos, cosine(sceneVec, vec) * 0.85);
+        // 큐 벡터: 인용·단서는 장면의 언어 그대로라 유저 입력과 결이 맞는다 — 요약 벡터와 별개 축으로 매칭
+        if (m.cvec === undefined || m.cvec === null) {
+            const ct = memoryCueText(m); // 구버전 기억 지연 백필 (다음 저장 때 함께 기록됨)
+            m.cvec = ct.length >= 4 ? encodeVec(embedText(ct)) : '';
+        }
+        if (m.cvec) {
+            const cv = decodeVec(m.cvec);
+            let cueCos = cosine(queryVec, cv);
+            if (sceneVec) cueCos = Math.max(cueCos, cosine(sceneVec, cv) * 0.85);
+            cos = Math.max(cos, cueCos * 0.97);
+        }
         // API 임베딩이 양쪽 다 있으면 의미 유사도를 보정 스케일로 반영
         if (apiQueryVec && m.avec) {
             const av = decodeVec(m.avec);
@@ -1818,7 +1850,12 @@ async function retrieveMemories(queryText, recentUserTexts, sceneText = '') {
             if (hl.length < 2 || !queryLower.includes(hl)) return false;
             return !matchedEntities.some(e => String(e).toLowerCase().includes(hl));
         });
-        if (cos < settings.minCosine && lex < 0.035 && !entityHit && !hintHit) continue;
+        // 장면 개체 사전확률: 질의에 이름은 없지만 지금 장면에 있는 인물과 얽힌 기억
+        const presenceHit = !entityHit && presentEntities.size > 0
+            && (m.entities || []).some(e => presentEntities.has(String(e).toLowerCase()));
+        // 관문: 사전확률만으로는 절반의 의미 유사도라도 있어야 통과 (무관 기억 범람 방지)
+        if (cos < settings.minCosine && lex < 0.035 && !entityHit && !hintHit
+            && !(presenceHit && cos >= settings.minCosine * 0.5)) continue;
 
         const age = Math.max(0, currentTurn - m.turnIndex);
         // 화석화: 턴 나이와 이야기 나이 중 더 오래됐다고 말하는 쪽을 따른다 (10년 스킵이면 직전 턴도 옛일)
@@ -1829,7 +1866,7 @@ async function retrieveMemories(queryText, recentUserTexts, sceneText = '') {
         if (m.importance >= 0.75) fossil = Math.max(fossil, 0.7);
         const recency = pastQuery ? 0.55 : Math.exp(-age / 18) * fossil;
         const score = 0.62 * Math.max(0, cos) + 0.18 * lex + 0.12 * m.importance + 0.08 * recency
-            + (entityHit ? 0.08 : 0) + (hintHit ? 0.07 : 0);
+            + (entityHit ? 0.08 : 0) + (hintHit ? 0.07 : 0) + (presenceHit ? 0.05 : 0);
         if (score < settings.minScore) continue;
         candidates.push({ m, score, vec });
     }
@@ -1862,6 +1899,101 @@ async function retrieveMemories(queryText, recentUserTexts, sceneText = '') {
     }
 
     return { selected: selected.map(s => s.m), hiddenProtected, pinned, triggered };
+}
+
+/* ============================================================
+ * 챕터 회상 — 주입 창에서 밀려난 옛 챕터 요약의 재소환
+ * ============================================================ */
+
+const chapterVecCache = new Map();
+
+function chapterVec(c) {
+    const key = `${c.id}:${(c.text || '').length}`;
+    let v = chapterVecCache.get(key);
+    if (!v) {
+        v = embedText(String(c.text || '').slice(0, 2400));
+        chapterVecCache.set(key, v);
+        if (chapterVecCache.size > 300) chapterVecCache.clear();
+    }
+    return v;
+}
+
+/** 최근 주입 창(마지막 3개) 밖의 청크 요약 중 지금 질의와 가장 맞는 하나 (문턱 미달 시 null) */
+function pickRecalledChapter(store, query, sceneText) {
+    const old = store.chunkSummaries.slice(0, -3);
+    const q = String(query || '').trim();
+    if (!old.length || q.length < 4) return null;
+    const qv = embedText(q);
+    const sv = String(sceneText || '').trim() ? embedText(String(sceneText).slice(0, 2400)) : null;
+    const qTokens = new Set((q.toLowerCase().match(/[\p{L}\p{N}]+/gu) || []));
+    const pastQ = PAST_QUERY_RE.test(q.toLowerCase());
+
+    let best = null;
+    let bestScore = 0;
+    for (const c of old) {
+        const v = chapterVec(c);
+        let cos = cosine(qv, v);
+        if (sv) cos = Math.max(cos, cosine(sv, v) * 0.85);
+        const lex = lexicalOverlap(qTokens, c.text || '');
+        const s = cos + lex * 2;
+        if (s > bestScore) { bestScore = s; best = c; }
+    }
+    // 회상형 질문이면 문턱을 낮춘다 — "그 시절" 얘기를 정면으로 묻고 있으므로
+    return bestScore >= (pastQ ? 0.3 : 0.42) ? best : null;
+}
+
+/* ============================================================
+ * 회상 적중 학습 — 응답을 관련성 라벨로 쓰는 자기교정 루프
+ * ============================================================ */
+
+/** 직전 주입에 실린 회상 기억 목록 (다음 응답에서 반영 여부를 채점) */
+let recallAudit = null; // { ids: string[], at: number }
+
+/**
+ * 주입한 기억이 방금 온 응답에 실제로 반영됐는지 채점한다.
+ * 반영됨 → 중요도 미세 강화 (이 기억은 이 이야기에서 실제로 쓰인다)
+ * 여러 번 실렸는데 계속 무시됨 → 미세 감쇠 (자리만 차지하는 회상)
+ * 변화폭은 아주 작게, 상·하한을 두어 한두 턴의 우연이 서고를 흔들지 못하게 한다.
+ */
+function auditRecallEcho(mes) {
+    const audit = recallAudit;
+    recallAudit = null; // 1회 소모
+    if (!audit || !audit.ids.length) return;
+    if (Date.now() - audit.at > 30 * 60 * 1000) return; // 낡은 감사표는 폐기
+    const replyLower = String(mes?.mes || '').toLowerCase();
+    if (replyLower.length < 40) return; // 너무 짧은 응답은 판단 근거가 못 됨
+
+    const store = getStore();
+    let touched = false;
+    for (const id of audit.ids) {
+        const m = store.memories.find(x => x.id === id);
+        if (!m || m.pinned || m.manual || m.disabled) continue;
+        // 반영 판정: 기억의 고유 토큰(요약·개체)이 응답 본문에 충분히 등장하는가.
+        // 조사·어미가 붙는 한국어 특성상 부분 문자열로 매칭한다.
+        const toks = [...new Set(
+            `${m.summary} ${(m.entities || []).join(' ')}`.toLowerCase().match(/[\p{L}\p{N}]{2,}/gu) || []
+        )];
+        if (toks.length < 3) continue;
+        const hits = toks.filter(t => replyLower.includes(t)).length;
+        const echoed = hits >= 2 && hits / toks.length >= 0.35;
+
+        m.shown = (m.shown || 0) + 1;
+        if (echoed) {
+            m.echoes = (m.echoes || 0) + 1;
+            m.coldRun = 0;
+            m.importance = Math.min(0.95, (m.importance || 0.5) + 0.02);
+            touched = true;
+        } else {
+            m.coldRun = (m.coldRun || 0) + 1;
+            // 4회 연속 무시된 기억만 감쇠 — 정체성급(0.8+) 기억은 감쇠 대상에서 제외
+            if (m.coldRun >= 4 && (m.importance || 0.5) < 0.8) {
+                m.importance = Math.max(0.25, m.importance - 0.02);
+                m.coldRun = 0;
+                touched = true;
+            }
+        }
+    }
+    if (touched) persistStore();
 }
 
 /* ============================================================
@@ -1997,10 +2129,20 @@ async function buildPacketSections(query, supervisorPlan) {
         ...store.arcSummaries.filter(s => !s.carried).map(s => ({ ...s, level: 'arc' })),
         ...store.chunkSummaries.slice(-3).map(s => ({ ...s, level: 'chunk' })),
     ];
+    // 챕터 회상: 주입 창(최근 3개)에서 밀려난 옛 챕터도 지금 질의와 강하게 맞으면 한 자리 소환 —
+    // 기억 조각은 파편이지만 챕터 레코드는 그 시절의 연결된 맥락을 준다
+    const recalledChapter = pickRecalledChapter(store, query, lastAssistantText);
+    if (recalledChapter) summaries.unshift({ ...recalledChapter, level: 'chunk', recalled: true });
 
     // 서사 시계 지도 (기억 줄의 "얼마나 옛일" 표기용)
     const storyAges = settings.storyClock ? buildStoryAgeMap(store) : null;
     const storyTotalDays = storyAges ? store.turns.reduce((a, t) => a + (t.elapsedDays || 0), 0) : 0;
+
+    // 회상 감사표 갱신 — 이번 주입에 실린 기억이 다음 응답에 반영되는지 채점한다
+    recallAudit = {
+        ids: [...publicRecall, ...protectedRecall].map(m => m.id),
+        at: Date.now(),
+    };
 
     return { publicRecall, protectedRecall, hiddenProtected, locks, rules, scene, states, characters, milestones, items, summaries, supervisorPlan, turnNow: store.turnCounter, storyAges, storyTotalDays, sources: await pickDossierExcerpts(query, recentUserTexts.slice(1)) };
 }
@@ -2104,7 +2246,10 @@ function renderPacket(parts, { withExcerpts = true, recallLimit = Infinity, prot
             const body = String(s.text || '').includes('\n')
                 ? `\n  ${String(s.text).replace(/\n/g, '\n  ')}`
                 : ` ${s.text}`;
-            lines.push(`- [${s.carried ? 'earlier chat' : `t${s.fromTurn}–t${s.toTurn}`}]${body}`);
+            const tag = s.carried ? 'earlier chat'
+                : s.recalled ? `recalled chapter · t${s.fromTurn}–t${s.toTurn} — surfaced because it relates to now`
+                : `t${s.fromTurn}–t${s.toTurn}`;
+            lines.push(`- [${tag}]${body}`);
         }
     }
     const sources = (parts.sources || []).slice(0, sourceLimit === Infinity ? (parts.sources || []).length : sourceLimit);
@@ -3710,6 +3855,7 @@ function bindEvents() {
         if (!settings.enabled || !settings.autoRecord) return;
         const mes = chat[mesId];
         if (!mes || mes.is_user || mes.is_system) return;
+        auditRecallEcho(mes); // 직전 주입 기억의 반영 여부 채점 (기록보다 먼저, 원본 감사표 기준)
         queueCommit(mesId).then(() => updateInjection());
     });
 
