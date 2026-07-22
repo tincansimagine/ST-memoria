@@ -95,7 +95,7 @@ SHELVING RULES
 - Only this exchange goes on the shelves. The reference material below exists so you do not refile old news.
 - What a character says or believes is their claim, not established truth. Shelve it as status with "claim":"belief" instead of filing it as fact.
 - The player is off-limits. File what their character did and said inside the fiction — never what the real person feels, wants, or consents to.
-- "quote" is a verbatim contiguous snippet of the user or assistant text in its original language. Copy, never compose. Use null when nothing is worth quoting.
+- "quote" is ONE short verbatim line — a spoken sentence or key phrase (about 15 words max), copied exactly from the user or assistant text in its original language. Never a whole passage or paragraph. Copy, never compose. Use null when nothing is worth quoting — most memories need no quote.
 - visibility marks who may know a memory: "public" (open knowledge), "private" (only the holder — inner thoughts, personal facts), "secret" (deliberately hidden). "owner" names the holder.
 - Small talk shelves nothing; empty arrays are a valid answer. Caps: 8 memories, 4 canon, 6 status, 4 pledges, 3 cast.
 - "digest" and every "summary" are written in YOUR OWN words — condensed, factual, shorter than the source. Never copy sentences or whole passages from the scene into them; verbatim text belongs only in "quote".
@@ -182,7 +182,7 @@ const DEFAULT_SETTINGS = Object.freeze({
     customApi: { url: '', key: '', model: '', temperature: 0.7, timeoutSec: 90 },
     embedApi: { enabled: false, url: '', key: '', model: '' }, // 선택: OpenAI 호환 임베딩 API (의미 검색 정확도 향상)
     consolidateEvery: 30,     // N턴마다 서고 정리(중복 병합·중요도 재조정). 0 = 끔
-    promptRev: 7,
+    promptRev: 8,
     settingsRev: 2,
     fossil: { settling: 12, fossilized: 40, deep: 120 },
     prompts: {
@@ -725,7 +725,7 @@ function firstSentence(s, max = 160) {
 /** excerpt가 원문의 실제 부분 문자열일 때만 유지 (환각 증거 차단) */
 function validExcerpt(excerpt, userText, assistantText) {
     const e = String(excerpt || '').trim();
-    if (!e || e.length < 3 || e.length > 240) return null;
+    if (!e || e.length < 3 || e.length > 160) return null; // 문단 통짜 인용 차단 — 짧은 한 줄만
     if ((userText && userText.includes(e)) || (assistantText && assistantText.includes(e))) return e;
     return null;
 }
@@ -1481,7 +1481,11 @@ async function retrieveMemories(queryText, recentUserTexts) {
 function formatMemoryLine(m, withExcerpt) {
     const visNorm = normVisibility(m.visibility);
     const vis = visNorm === 'public' ? '' : ` [${visNorm}${m.owner ? `:${m.owner}` : ''}]`;
-    const excerpt = withExcerpt && m.excerpt ? ` — "${m.excerpt}"` : '';
+    // 인용은 짧을 때만 주입 — 원문 문단이 통째로 실리는 것 방지.
+    // 에피소드 원문 발췌(episode_raw)는 요약이 이미 내용을 담고 있으므로 주입하지 않는다.
+    const isEpisode = (m.tags || []).includes('episode_raw');
+    const quote = (withExcerpt && !isEpisode && m.excerpt && m.excerpt.length <= 160) ? m.excerpt : null;
+    const excerpt = quote ? ` — "${quote}"` : '';
     return `- (${m.kind}, t${m.turnIndex})${vis} ${m.summary}${excerpt}`;
 }
 
