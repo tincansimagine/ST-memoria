@@ -438,6 +438,23 @@
     color: var(--mm-text);
 }
 
+.memoria__char-voice {
+    color: var(--mm-muted);
+    font-style: italic;
+}
+
+.memoria__char-voice i {
+    font-size: 0.85em;
+    opacity: 0.6;
+    margin-right: 3px;
+}
+
+.memoria__badge--provisional {
+    border-color: color-mix(in srgb, var(--mm-warn, #d0a020) 60%, transparent);
+    border-style: dashed;
+    color: var(--mm-muted);
+}
+
 .memoria__chip--rel {
     border-color: color-mix(in srgb, var(--mm-accent) 55%, transparent);
     color: var(--mm-text);

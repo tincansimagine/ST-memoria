@@ -91,7 +91,7 @@ THE FIVE SHELVES
 2. canon — standing facts of the world or its systems, stored as a snake_case key with a value. Refiling a key replaces its old value. This shelf may also pin what the world explicitly LACKS when the story makes it clear (key "no_magic", value "magic does not exist here") so later scenes stop inventing it.
 3. status — the current value of one slot for one entity (location, outfit, injury, goal, mood_toward_x...). Refiling the same (entity, slot) replaces it. When the scene itself moves or time passes, file entity "scene" with slots "location", "time_of_day", "date" — and "relationship" for the main pair when it clearly shifts. A home or workplace merely mentioned is NOT the scene's location; move "scene" only when the story actually moves there. When a named character exits the scene with a stated destination or errand, file their slot "whereabouts". Skip anything unchanged.
 4. pledges — promises the story must keep: a thread that must stay open (keep_unresolved, loose_end), a secret that must not leak (keep_secret), knowledge a character must not have yet (knowledge_gap), a consent line (consent), or a hard limit of the world (world_limit).
-5. cast — recurring named characters. Open a card only at their first real characterization, or when their role, occupation, or relationships meaningfully change. Throwaway NPCs never get a card. Unknown fields stay null; temporary states (drunk, blushing) are not profile material. "relationships" lists standing ties to other named characters, e.g. [{"target":"Aria","relation":"childhood friend"}]. Identity is precise: two people who share a name, title, or trade are still two people — and one person spelled two ways (nickname, romanization, translation) is still one. Reuse the exact name already on file.
+5. cast — recurring named characters. Open a card only at their first real characterization, or when their role, occupation, or relationships meaningfully change. Throwaway NPCs never get a card. Unknown fields stay null; temporary states (drunk, blushing) are not profile material. "relationships" lists standing ties to other named characters, e.g. [{"target":"Aria","relation":"childhood friend"}]. "voice" captures HOW they speak as a compact pattern — politeness level or typical sentence endings, pet phrases, what they call other people; a pattern only, never sample lines (those belong in quotes). Identity is precise: two people who share a name, title, or trade are still two people — and one person spelled two ways (nickname, romanization, translation) is still one. Reuse the exact name already on file. A pivotal character the story deliberately leaves unnamed may still get a card: use a short stable handle as the name (the SAME words every time, e.g. "the scarred courier") and set "provisional":true. When the story finally names them, file the card under the real name with "aka":["the scarred courier"] so the old records fold in.
 
 SHELVING RULES
 - Only this exchange goes on the shelves. The reference material below exists so you do not refile old news.
@@ -106,9 +106,10 @@ SHELVING RULES
 - "digest" and every "summary" are written in YOUR OWN words — condensed, factual, shorter than the source. Never copy sentences or whole passages from the scene into them; verbatim text belongs only in "quote".
 - "recall" lists 2-4 cue words for finding this memory again later: synonyms, related situations, things someone might say that should surface it. Same language as the chat. Example: a ring gifted at the pier → ["proposal","jewelry","seaside"].
 - "importance" is how much the future story will need this back. 0.8+ — identity-level facts, hard promises, irreversible turns of plot or heart. Around 0.5 — useful context. 0.3 or below — passing color. When torn, rate by what would break the story if forgotten.
+- "time_passed" is how much STORY time this exchange covered, including skips the text implies: a night's sleep, "the following morning", "a week later", an explicit "three years later". One compact duration — 30m, 6h, 2d, 1w, 3mo, 2y — or "0" when the scene flows on unbroken. Infer conservatively from what the text supports; when in doubt, "0".
 
 Reply with ONE minified JSON object and nothing else (no code fences, no notes):
-{"digest":"1-2 sentence factual summary of this exchange","weight":0.0,"memories":[{"kind":"event|relationship|fact|preference|promise|goal|item|place|secret|impression","summary":"...","quote":"..or null","importance":0.0,"entities":["Name"],"tags":["snake_case"],"recall":["cue"],"visibility":"public|private|secret","owner":"Name or null"}],"canon":[{"scope":"session|world|region|location|faction|system","key":"snake_case_key","value":"..."}],"status":[{"entity":"Name","slot":"snake_case_slot","value":"...","claim":"objective|belief","owner":"Name or null"}],"pledges":[{"kind":"keep_unresolved|keep_secret|knowledge_gap|consent|world_limit|loose_end","summary":"...","status":"active|resolved","priority":2}],"cast":[{"name":"Name","role":"role in story or null","age":"25 or null","occupation":"... or null","appearance":"... or null","traits":["trait"],"relationships":[{"target":"OtherName","relation":"..."}]}]}`;
+{"digest":"1-2 sentence factual summary of this exchange","weight":0.0,"time_passed":"0","memories":[{"kind":"event|relationship|fact|preference|promise|goal|item|place|secret|impression","summary":"...","quote":"..or null","importance":0.0,"entities":["Name"],"tags":["snake_case"],"recall":["cue"],"visibility":"public|private|secret","owner":"Name or null"}],"canon":[{"scope":"session|world|region|location|faction|system","key":"snake_case_key","value":"..."}],"status":[{"entity":"Name","slot":"snake_case_slot","value":"...","claim":"objective|belief","owner":"Name or null"}],"pledges":[{"kind":"keep_unresolved|keep_secret|knowledge_gap|consent|world_limit|loose_end","summary":"...","status":"active|resolved","priority":2}],"cast":[{"name":"Name","provisional":false,"aka":[],"role":"role in story or null","age":"25 or null","occupation":"... or null","appearance":"... or null","voice":"speech pattern or null","traits":["trait"],"relationships":[{"target":"OtherName","relation":"..."}]}]}`;
 
 const DEFAULT_SUPERVISOR_PROMPT = `You are Memoria's stage director for a roleplay chat. Given the player's latest input, the recent messages, and the archive ledger, sketch a short plan for the next assistant reply. You never write the reply itself.
 
@@ -201,7 +202,8 @@ const DEFAULT_SETTINGS = Object.freeze({
     // 의미 검색 소스: 'off' = 내장 해시만, 'local' = 실리태번 내장 임베딩(무료), 'api' = OpenAI 호환 임베딩 API
     embedApi: { mode: 'off', enabled: false, url: '', key: '', model: '' },
     consolidateEvery: 30,     // N턴마다 서고 정리(중복 병합·중요도 재조정). 0 = 끔
-    promptRev: 11,
+    storyClock: true,         // 서사 시계 — 이야기 속 경과 시간을 추적해 기억 노화에 반영
+    promptRev: 12,
     settingsRev: 3,
     fossil: { settling: 12, fossilized: 40, deep: 120 },
     prompts: {
@@ -903,6 +905,14 @@ async function callAuxLLM(systemPrompt, userPrompt, { maxTokens } = {}) {
 function parseJsonLoose(text) {
     if (!text) return null;
     let t = String(text).trim();
+    // 추론 모델 방어: 사고 블록을 먼저 걷어낸다 — 블록 안의 예시 JSON을 기록으로 오인하지 않게
+    t = t.replace(/<(think|thinking|thought|reasoning|reflection)>[\s\S]*?<\/\1>/gi, '').trim();
+    // 여는 태그 없이 닫는 태그만 남은 경우(앞부분이 잘린 응답) — 마지막 닫는 태그 뒤만 취한다
+    const strayClose = t.match(/<\/(?:think|thinking|thought|reasoning|reflection)>/gi);
+    if (strayClose) {
+        const lastClose = t.lastIndexOf(strayClose[strayClose.length - 1]);
+        t = t.slice(lastClose + strayClose[strayClose.length - 1].length).trim();
+    }
     t = t.replace(/^```(?:json)?/i, '').replace(/```$/m, '').trim();
     const start = t.indexOf('{');
     if (start < 0) return null;
@@ -954,6 +964,52 @@ function firstSentence(s, max = 160) {
     return cleanStr(m ? m[0] : t, max);
 }
 
+/** "6h", "2d", "3개월" 같은 압축 기간 표기를 일수(float)로. 해석 불가·0이면 0 */
+function parseDurationDays(raw) {
+    const t = String(raw ?? '').trim().toLowerCase();
+    if (!t || t === '0' || t === 'null' || t === 'none') return 0;
+    const m = t.match(/^~?\s*(\d+(?:\.\d+)?)\s*(s|sec|m|min|h|hr|d|w|mo|y|초|분|시간|일|주|개월|달|년|해)\.?s?$/i);
+    if (!m) return 0;
+    const n = parseFloat(m[1]);
+    if (!Number.isFinite(n) || n <= 0) return 0;
+    const PER_DAY = { s: 86400, sec: 86400, 초: 86400, m: 1440, min: 1440, 분: 1440, h: 24, hr: 24, 시간: 24, d: 1, 일: 1, w: 1 / 7, 주: 1 / 7, mo: 1 / 30, 개월: 1 / 30, 달: 1 / 30, y: 1 / 365, 년: 1 / 365, 해: 1 / 365 };
+    const unit = m[2];
+    const days = n / (PER_DAY[unit] ?? 1);
+    return Math.min(days, 36500); // 100년 상한 (이상치 차단)
+}
+
+/** 일수를 짧은 영문 기간 표기로 (장부 주입용) */
+function humanizeStoryDays(days) {
+    if (days < 1) return `${Math.max(1, Math.round(days * 24))}h`;
+    if (days < 14) return `${Math.round(days)}d`;
+    if (days < 60) return `${Math.round(days / 7)}w`;
+    if (days < 365 * 2) return `${Math.round(days / 30)}mo`;
+    return `${Math.round(days / 365)}y`;
+}
+
+/**
+ * 서사 시계: 각 턴 시점에서 지금까지 흐른 이야기 속 시간(일수) 지도.
+ * 턴 T의 나이 = T 이후 턴들의 elapsedDays 합 — 턴 삭제/스와이프 롤백에도 자동으로 맞는다.
+ */
+function buildStoryAgeMap(store) {
+    const turns = [...store.turns].sort((a, b) => b.turnIndex - a.turnIndex); // 최신부터
+    const map = new Map();
+    let acc = 0;
+    for (const t of turns) {
+        map.set(t.turnIndex, acc);       // 이 턴의 사건 이후로 흐른 시간
+        acc += t.elapsedDays || 0;       // 이 턴이 커버한 시간은 더 옛 턴의 나이에 가산
+    }
+    return map;
+}
+
+/** 이야기 속 나이에 따른 화석화 가중치 (턴 기반 가중치와 별개 축) */
+function storyFossilWeight(days) {
+    if (days < 2) return 1.0;
+    if (days < 30) return 0.7;
+    if (days < 365) return 0.35;
+    return 0.12;
+}
+
 /** excerpt가 원문의 실제 부분 문자열일 때만 유지 (환각 증거 차단) — 공백 차이는 허용 */
 function validExcerpt(excerpt, userText, assistantText) {
     const e = String(excerpt || '').trim();
@@ -968,6 +1024,7 @@ function sanitizeExtraction(raw, userText, assistantText) {
     const out = {
         turnSummary: cleanStr(raw?.digest ?? raw?.turn_summary, 300),
         importance: clamp01(raw?.weight ?? raw?.importance, 0.4),
+        elapsedDays: parseDurationDays(raw?.time_passed),
         memories: [], worldRules: [], entityStates: [], locks: [], characters: [], milestones: [], items: [],
     };
 
@@ -1039,10 +1096,13 @@ function sanitizeExtraction(raw, userText, assistantText) {
         if (!name) continue;
         out.characters.push({
             name,
+            provisional: c?.provisional === true,
+            aka: (Array.isArray(c?.aka) ? c.aka : []).map(a => cleanStr(a, 60)).filter(Boolean).slice(0, 4),
             role: naLike(c?.role),
             age: naLike(c?.age),
             occupation: naLike(c?.occupation),
             appearance: naLike(c?.appearance) ? cleanStr(c.appearance, 200) : null,
+            voice: naLike(c?.voice) ? cleanStr(c.voice, 160) : null,
             traits: (Array.isArray(c?.traits) ? c.traits : []).map(t => cleanStr(t, 40)).filter(Boolean).slice(0, 8),
             relationships: (Array.isArray(c?.relationships) ? c.relationships : [])
                 .map(r => ({ target: cleanStr(r?.target, 60), relation: cleanStr(r?.relation, 80) }))
@@ -1171,17 +1231,43 @@ function upsertLock(store, lock, turnIndex) {
     if (idx >= 0) store.locks[idx] = row; else store.locks.push(row);
 }
 
-/** 인물 도감 upsert: 새 정보만 채우고, 관계는 대상별 최신값으로 갱신 */
+/** 인물 도감 upsert: 새 정보만 채우고, 관계는 대상별 최신값으로 갱신.
+ * 이름 또는 별칭이 겹치면 같은 인물 — 이름 없는 인물의 핸들 카드가 본명 카드로 접힌다. */
 function upsertCharacter(store, c, turnIndex) {
-    const existing = store.characters.find(x => x.name.toLowerCase() === c.name.toLowerCase());
+    const norm = (s) => String(s || '').toLowerCase();
+    const findCard = (n) => store.characters.find(x =>
+        norm(x.name) === norm(n) || (x.aliases || []).some(a => norm(a) === norm(n)));
+
+    let existing = findCard(c.name);
+    // 정체 공개: 새 카드가 aka로 기존 카드(옛 핸들)를 가리키면 그 카드를 본명으로 승격
+    if (!existing && c.aka?.length) {
+        for (const handle of c.aka) {
+            const old = findCard(handle);
+            if (!old) continue;
+            existing = old;
+            existing.aliases = [...new Set([...(existing.aliases || []), existing.name, ...c.aka])]
+                .filter(a => norm(a) !== norm(c.name)).slice(0, 6);
+            existing.name = c.name;
+            existing.provisional = false;
+            break;
+        }
+    }
+
     if (!existing) {
+        const { aka, ...card } = c;
         store.characters.push({
-            id: uuidv4(), ...c,
+            id: uuidv4(), ...card,
+            aliases: (aka || []).filter(a => norm(a) !== norm(c.name)).slice(0, 6),
             firstTurn: turnIndex, updatedTurn: turnIndex, disabled: false, manual: false,
         });
         return;
     }
-    for (const field of ['role', 'age', 'occupation', 'appearance']) {
+    if (c.aka?.length) {
+        existing.aliases = [...new Set([...(existing.aliases || []), ...c.aka])]
+            .filter(a => norm(a) !== norm(existing.name)).slice(0, 6);
+    }
+    if (existing.provisional && c.provisional !== true) existing.provisional = false;
+    for (const field of ['role', 'age', 'occupation', 'appearance', 'voice']) {
         if (c[field]) existing[field] = c[field];
     }
     if (c.traits?.length) {
@@ -1326,6 +1412,7 @@ async function commitTurn(mesId, { silent = true, force = false } = {}) {
 
     turn.summary = extracted.turnSummary;
     turn.importance = extracted.importance;
+    turn.elapsedDays = settings.storyClock ? (extracted.elapsedDays || 0) : 0;
 
     // 원문 증거 기억(항상 저장) — LLM 없이도 회상 가능하게.
     // 요약 자리에는 다이제스트(없으면 첫 문장)만 넣고, 원문 발췌는 인용 칸에만 둔다.
@@ -1680,6 +1767,9 @@ async function retrieveMemories(queryText, recentUserTexts, sceneText = '') {
     // 과거 회상형 질의면 최신성 페널티(화석화)를 걸지 않는다 — 오래된 기억도 동등하게 경쟁
     const pastQuery = PAST_QUERY_RE.test(queryLower);
 
+    // 서사 시계: 이야기 속에서 흐른 시간도 노화 축으로 (시간 스킵이 잦은 롤플레잉 대응)
+    const storyAges = settings.storyClock ? buildStoryAgeMap(store) : null;
+
     // 임베딩 API가 켜져 있으면 질의도 API로 임베딩 (실패 시 해시만 사용)
     const apiQueryVecs = await embedQueriesViaApi([queryText, ...auxTexts]);
     const apiQueryVec = apiQueryVecs?.[0] || null;
@@ -1720,12 +1810,24 @@ async function retrieveMemories(queryText, recentUserTexts, sceneText = '') {
             if (typeof lr === 'number') cos = Math.max(cos, lr);
         }
         const lex = lexicalOverlap(queryTokens, memoryIndexText(m));
-        const entityHit = (m.entities || []).some(e => queryLower.includes(String(e).toLowerCase()));
-        const hintHit = (m.hints || []).some(h => h.length >= 2 && queryLower.includes(String(h).toLowerCase()));
+        const matchedEntities = (m.entities || []).filter(e => queryLower.includes(String(e).toLowerCase()));
+        const entityHit = matchedEntities.length > 0;
+        // 단서 가림: 이미 맞은 개체 이름에 통째로 포함되는 단서는 같은 매치의 중복 가산이므로 제외
+        const hintHit = (m.hints || []).some(h => {
+            const hl = String(h).toLowerCase();
+            if (hl.length < 2 || !queryLower.includes(hl)) return false;
+            return !matchedEntities.some(e => String(e).toLowerCase().includes(hl));
+        });
         if (cos < settings.minCosine && lex < 0.035 && !entityHit && !hintHit) continue;
 
         const age = Math.max(0, currentTurn - m.turnIndex);
-        const recency = pastQuery ? 0.55 : Math.exp(-age / 18) * fossilWeight(age, settings);
+        // 화석화: 턴 나이와 이야기 나이 중 더 오래됐다고 말하는 쪽을 따른다 (10년 스킵이면 직전 턴도 옛일)
+        let fossil = fossilWeight(age, settings);
+        if (storyAges) fossil = Math.min(fossil, storyFossilWeight(storyAges.get(m.turnIndex) ?? 0));
+        // 서사적 키 보호: "잊으면 이야기가 깨지는 급"(0.75+) 기억은 깊은 화석화 면제 —
+        // 의도적 시간 스킵 뒤에도 핵심 과거가 회상 경쟁에서 밀리지 않게 바닥을 받친다
+        if (m.importance >= 0.75) fossil = Math.max(fossil, 0.7);
+        const recency = pastQuery ? 0.55 : Math.exp(-age / 18) * fossil;
         const score = 0.62 * Math.max(0, cos) + 0.18 * lex + 0.12 * m.importance + 0.08 * recency
             + (entityHit ? 0.08 : 0) + (hintHit ? 0.07 : 0);
         if (score < settings.minScore) continue;
@@ -1796,7 +1898,7 @@ function markOutdatedRecall(memories, store) {
     }
 }
 
-function formatMemoryLine(m, withExcerpt) {
+function formatMemoryLine(m, withExcerpt, storyAges = null) {
     const visNorm = normVisibility(m.visibility);
     const vis = visNorm === 'public' ? '' : ` [${visNorm}${m.owner ? `:${m.owner}` : ''}]`;
     // 인용은 짧을 때만 주입 — 원문 문단이 통째로 실리는 것 방지.
@@ -1805,7 +1907,10 @@ function formatMemoryLine(m, withExcerpt) {
     const quote = (withExcerpt && !isEpisode && m.excerpt && m.excerpt.length <= 160) ? m.excerpt : null;
     const excerpt = quote ? ` — "${quote}"` : '';
     const dated = outdatedRecallNotes.has(m.id) ? ` [as of then — ${outdatedRecallNotes.get(m.id)}]` : '';
-    return `- (${m.kind}, t${m.turnIndex})${vis} ${m.summary}${excerpt}${dated}`;
+    // 서사 시계: 이야기 속에서 하루 이상 지난 기억은 얼마나 옛일인지 표기
+    const storyDays = storyAges?.get(m.turnIndex) ?? 0;
+    const ago = storyDays >= 1 ? ` · ~${humanizeStoryDays(storyDays)} ago in-story` : '';
+    return `- (${m.kind}, t${m.turnIndex}${ago})${vis} ${m.summary}${excerpt}${dated}`;
 }
 
 const SCENE_LOC_SLOTS = ['location', 'place'];
@@ -1873,10 +1978,17 @@ async function buildPacketSections(query, supervisorPlan) {
     const states = store.entityStates
         .filter(s => !(scene.any && String(s.entity || '').toLowerCase() === 'scene' && sceneSlots.includes(String(s.slot || '').toLowerCase())))
         .slice(-10);
+    // 장면 우선: 최근 메시지에 이름(별칭 포함)이 등장한 인물을 먼저 싣는다 —
+    // 대인원 채팅에서 "지금 장면에 있는" 인물이 상한(10명)에 잘려 나가지 않게
+    const recentSceneText = chat.slice(-4).map(m => String(m?.mes || '')).join('\n').toLowerCase();
+    const inScene = (c) => recentSceneText.includes(String(c.name).toLowerCase())
+        || (c.aliases || []).some(a => a.length >= 2 && recentSceneText.includes(String(a).toLowerCase()));
     const characters = store.characters
         .filter(c => !c.disabled)
-        .sort((a, b) => (b.updatedTurn || 0) - (a.updatedTurn || 0))
-        .slice(0, 10);
+        .map(c => ({ c, scene: inScene(c) ? 1 : 0 }))
+        .sort((a, b) => (b.scene - a.scene) || ((b.c.updatedTurn || 0) - (a.c.updatedTurn || 0)))
+        .slice(0, 10)
+        .map(x => x.c);
     const milestones = [...store.milestones].sort((a, b) => (a.turnIndex || 0) - (b.turnIndex || 0)).slice(-8);
     const items = store.items.filter(i => !i.disabled).slice(-8);
     // 시간순: 인계(이전 채팅) → 이 채팅의 연대기 → 최근 청크 요약
@@ -1886,16 +1998,23 @@ async function buildPacketSections(query, supervisorPlan) {
         ...store.chunkSummaries.slice(-3).map(s => ({ ...s, level: 'chunk' })),
     ];
 
-    return { publicRecall, protectedRecall, hiddenProtected, locks, rules, scene, states, characters, milestones, items, summaries, supervisorPlan, turnNow: store.turnCounter, sources: await pickDossierExcerpts(query, recentUserTexts.slice(1)) };
+    // 서사 시계 지도 (기억 줄의 "얼마나 옛일" 표기용)
+    const storyAges = settings.storyClock ? buildStoryAgeMap(store) : null;
+    const storyTotalDays = storyAges ? store.turns.reduce((a, t) => a + (t.elapsedDays || 0), 0) : 0;
+
+    return { publicRecall, protectedRecall, hiddenProtected, locks, rules, scene, states, characters, milestones, items, summaries, supervisorPlan, turnNow: store.turnCounter, storyAges, storyTotalDays, sources: await pickDossierExcerpts(query, recentUserTexts.slice(1)) };
 }
 
 function formatCharacterLine(c) {
     const head = [c.role, c.age, c.occupation].filter(Boolean).join(', ');
     const bits = [];
     if (c.appearance) bits.push(c.appearance);
+    if (c.voice) bits.push(`voice: ${c.voice}`);
     if (c.traits?.length) bits.push(c.traits.join(', '));
     if (c.relationships?.length) bits.push(c.relationships.map(r => `${r.target}: ${r.relation}`).join('; '));
-    return `- ${c.name}${head ? ` (${head})` : ''}${bits.length ? ` — ${bits.join(' | ')}` : ''}`;
+    const aka = c.aliases?.length ? ` (aka ${c.aliases.join(', ')})` : '';
+    const unnamed = c.provisional ? ' [not yet named in-story — refer to them only by this handle]' : '';
+    return `- ${c.name}${aka}${head ? ` (${head})` : ''}${unnamed}${bits.length ? ` — ${bits.join(' | ')}` : ''}`;
 }
 
 function takeLast(arr, limit) {
@@ -1909,11 +2028,20 @@ function renderPacket(parts, { withExcerpts = true, recallLimit = Infinity, prot
     lines.push(PACKET_HEADER);
     lines.push('This is the story\'s long-term archive, kept by Memoria. When sources disagree, trust in this order: the latest user message first, then the visible chat, then Pledges / Status Board / Canon, then Recalled Moments, then the story digest. Archived material informs the reply — it never dictates it. The user\'s character is theirs alone: never write their actions, feelings, or decisions.');
 
+    // 지식 경계 지시 — 비밀·믿음·지식 격차가 실제로 걸려 있을 때만 한 줄 추가
+    const hasAsymmetry = parts.protectedRecall.length > 0 || parts.hiddenProtected > 0
+        || parts.locks.some(l => ['keep_secret', 'knowledge_gap'].includes(normLockKind(l.kind)))
+        || parts.states.some(s => s.claim === 'belief');
+    if (hasAsymmetry) {
+        lines.push('Knowledge is not shared: each character acts only on what they have personally seen, been told, or could plainly infer. An entry marked as a belief is that holder\'s view alone — others do not share it, and the truth may differ. Let the gap between who-knows-what create tension; never close it with an all-knowing reply.');
+    }
+
     if (parts.scene?.any) {
         const bits = [];
         if (parts.scene.location) bits.push(`place: ${parts.scene.location}`);
         if (parts.scene.date) bits.push(`date: ${parts.scene.date}`);
         if (parts.scene.time) bits.push(`time: ${parts.scene.time}`);
+        if ((parts.storyTotalDays || 0) >= 1) bits.push(`story clock: ~${humanizeStoryDays(parts.storyTotalDays)} since the story began`);
         lines.push(`## Scene Now — ${bits.join(' · ')}`);
     }
     if (parts.locks.length) {
@@ -1952,13 +2080,18 @@ function renderPacket(parts, { withExcerpts = true, recallLimit = Infinity, prot
     }
     const recall = parts.publicRecall.slice(0, recallLimit === Infinity ? parts.publicRecall.length : recallLimit);
     if (recall.length) {
-        lines.push('## Recalled Moments (relevant to now)');
-        for (const m of recall) lines.push(formatMemoryLine(m, withExcerpts));
+        // 먼 과거 회상 프레이밍: 이야기 속에서 오래된 기억이 실릴 때만 다루는 법을 지시
+        const hasDistant = parts.storyAges
+            && recall.some(m => (parts.storyAges.get(m.turnIndex) ?? 0) >= 30);
+        lines.push(hasDistant
+            ? '## Recalled Moments (relevant to now — entries marked "ago in-story" are the distant past: material for memory, comparison, or how things have changed since, never the present scene)'
+            : '## Recalled Moments (relevant to now)');
+        for (const m of recall) lines.push(formatMemoryLine(m, withExcerpts, parts.storyAges));
     }
     const prot = parts.protectedRecall.slice(0, protectedLimit === Infinity ? parts.protectedRecall.length : protectedLimit);
     if (prot.length) {
         lines.push('## Hidden Knowledge (may color subtext only — never say, confirm, or hint at it openly)');
-        for (const m of prot) lines.push(formatMemoryLine(m, withExcerpts));
+        for (const m of prot) lines.push(formatMemoryLine(m, withExcerpts, parts.storyAges));
     }
     if (parts.hiddenProtected > 0) {
         lines.push(`(The archive holds ${parts.hiddenProtected} more entries sealed from this scene. Do not guess what they contain.)`);
@@ -1997,6 +2130,7 @@ function renderPacket(parts, { withExcerpts = true, recallLimit = Infinity, prot
 
 let lastPacketText = '';
 let lastPacketTokens = 0;
+let lastPacketTrim = 0; // 예산 때문에 내려간 축소 사다리 단수 (0 = 전체 수록)
 
 /** 토큰 예산에 맞춰 단계적으로 주입 내용을 줄인다. 서약과 캐논은 마지막까지 유지. */
 async function buildPacketWithinBudget(query, supervisorPlan) {
@@ -2021,11 +2155,12 @@ async function buildPacketWithinBudget(query, supervisorPlan) {
         { withExcerpts: false, recallLimit: 0, protectedLimit: 0, summaryLimit: 0, stateLimit: 0, ruleLimit: 0, charLimit: 0, extraLimit: 0, sourceLimit: 0, includeSupervisorDetail: false },
     ];
 
-    for (const step of ladder) {
-        const text = renderPacket(parts, step);
+    for (let i = 0; i < ladder.length; i++) {
+        const text = renderPacket(parts, ladder[i]);
         const tokens = await getTokenCountAsync(text);
-        if (tokens <= settings.tokenBudget) return text;
+        if (tokens <= settings.tokenBudget) { lastPacketTrim = i; return text; }
     }
+    lastPacketTrim = ladder.length;
     return renderPacket(parts, ladder[ladder.length - 1]);
 }
 
@@ -2224,14 +2359,20 @@ function buildStoryBible() {
     if (scene.any) {
         md.push(`\n**현재 장면** — ${[scene.location, scene.date, scene.time].filter(Boolean).join(' · ')}`);
     }
+    const storyTotal = store.turns.reduce((a, t) => a + (t.elapsedDays || 0), 0);
+    if (storyTotal >= 1) {
+        md.push(`\n**서사 시계** — 이야기 시작 후 약 ${humanizeStoryDays(storyTotal)} 경과`);
+    }
 
     const chars = store.characters.filter(c => !c.disabled);
     if (chars.length) {
         md.push('\n## 등장인물');
         for (const c of chars) {
             const head = [c.role, c.age, c.occupation].filter(Boolean).join(' · ');
-            md.push(`\n### ${c.name}${head ? ` (${head})` : ''}`);
+            md.push(`\n### ${c.name}${c.provisional ? ' (미확인 — 아직 이름이 밝혀지지 않음)' : ''}${head ? ` (${head})` : ''}`);
+            if (c.aliases?.length) md.push(`- 별칭: ${c.aliases.join(', ')}`);
             if (c.appearance) md.push(`- 외모: ${c.appearance}`);
+            if (c.voice) md.push(`- 말투: ${c.voice}`);
             if (c.traits?.length) md.push(`- 특성: ${c.traits.join(', ')}`);
             for (const r of (c.relationships || [])) md.push(`- 관계 → ${r.target}: ${r.relation}`);
         }
@@ -2463,8 +2604,12 @@ function refreshPacketPreview() {
     const el = $('#memoria_packet_preview');
     if (!el.length) return;
     el.val(lastPacketText || '(주입할 내용이 없습니다 — 기억이 쌓이면 자동 생성됩니다)');
+    const trimNote = !lastPacketText ? ''
+        : lastPacketTrim === 0 ? ' · 전체 수록'
+        : lastPacketTrim <= 2 ? ` · 일부 축소 (${lastPacketTrim}단)`
+        : ` · ⚠ 예산 부족으로 크게 축소 (${lastPacketTrim}단) — 예산을 늘리면 회상·요약이 더 실립니다`;
     $('#memoria_packet_tokens').text(lastPacketText
-        ? `≈ ${lastPacketTokens} 토큰 / 예산 ${getSettings().tokenBudget}`
+        ? `≈ ${lastPacketTokens} 토큰 / 예산 ${getSettings().tokenBudget}${trimNote}`
         : '');
 }
 
@@ -2528,6 +2673,8 @@ function characterToEditText(c) {
         `나이: ${c.age || ''}`,
         `직업: ${c.occupation || ''}`,
         `외모: ${c.appearance || ''}`,
+        `말투: ${c.voice || ''}`,
+        `별칭: ${(c.aliases || []).join(', ')}`,
         `특성: ${(c.traits || []).join(', ')}`,
         `관계: ${(c.relationships || []).map(r => `${r.target}=${r.relation}`).join('; ')}`,
     ].join('\n');
@@ -2543,6 +2690,8 @@ function parseCharacterEditText(text) {
         age: get('나이') || null,
         occupation: get('직업') || null,
         appearance: get('외모') || null,
+        voice: get('말투') || null,
+        aliases: get('별칭').split(',').map(a => cleanStr(a, 60)).filter(Boolean).slice(0, 6),
         traits: get('특성').split(',').map(t => cleanStr(t, 40)).filter(Boolean).slice(0, 10),
         relationships: get('관계').split(';')
             .map(pair => {
@@ -2572,14 +2721,17 @@ function renderCharactersPanel() {
             <div class="memoria__char-card${c.disabled ? ' is-disabled' : ''}" data-id="${c.id}">
                 <div class="memoria__char-head">
                     <strong class="memoria__char-name">${escapeHtml(c.name)}</strong>
+                    ${c.provisional ? '<span class="memoria__badge memoria__badge--provisional" title="아직 이름이 밝혀지지 않은 인물 — 정체가 드러나면 자동 병합됩니다">미확인</span>' : ''}
                     <span class="memoria__mem-actions">
                         <i class="fa-solid ${c.disabled ? 'fa-eye-slash' : 'fa-eye'} memoria-char-toggle" title="${c.disabled ? '주입에 포함' : '주입에서 제외'}"></i>
                         <i class="fa-solid fa-pen memoria-char-edit" title="편집"></i>
                         <i class="fa-solid fa-trash memoria-char-delete" title="삭제"></i>
                     </span>
                 </div>
+                ${(c.aliases || []).length ? `<div class="memoria__char-meta">별칭: ${c.aliases.map(escapeHtml).join(', ')}</div>` : ''}
                 ${meta ? `<div class="memoria__char-meta">${meta}</div>` : ''}
                 ${c.appearance ? `<div class="memoria__char-line">${escapeHtml(c.appearance)}</div>` : ''}
+                ${c.voice ? `<div class="memoria__char-line memoria__char-voice"><i class="fa-solid fa-comment-dots"></i> ${escapeHtml(c.voice)}</div>` : ''}
                 ${(c.traits || []).length ? `<div class="memoria__mem-meta">${c.traits.map(t => `<span class="memoria__chip">${escapeHtml(t)}</span>`).join('')}</div>` : ''}
                 ${(c.relationships || []).length ? `<div class="memoria__mem-meta">${c.relationships.map(r => `<span class="memoria__chip memoria__chip--rel"><i class="fa-solid fa-link"></i> ${escapeHtml(r.target)}: ${escapeHtml(r.relation)}</span>`).join('')}</div>` : ''}
             </div>
@@ -2779,6 +2931,7 @@ function renderSettingsPanel() {
     $('#memoria_ref_worldinfo').prop('checked', s.refWorldInfo);
     $('#memoria_event_tracking').prop('checked', s.eventTracking);
     $('#memoria_item_tracking').prop('checked', s.itemTracking);
+    $('#memoria_story_clock').prop('checked', s.storyClock);
     $('#memoria_summary_language').val(s.summaryLanguage || 'auto');
     $('#memoria_summary_context').val(s.summaryContextCount);
     $('#memoria_preserve_recent').val(s.preserveRecent);
@@ -3230,6 +3383,10 @@ function bindUI() {
     $('#memoria_item_tracking').on('change', function () {
         getSettings().itemTracking = $(this).prop('checked');
         saveSettingsDebounced();
+    });
+    $('#memoria_story_clock').on('change', function () {
+        getSettings().storyClock = $(this).prop('checked');
+        saveSettingsDebounced(); updateInjection();
     });
     $('#memoria_summary_context').on('input change', function () {
         const v = Number($(this).val());
