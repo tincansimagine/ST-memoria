@@ -88,19 +88,20 @@ const DEFAULT_ARCHIVIST_PROMPT = `You are the Librarian of Memoria, the long-ter
 THE FIVE SHELVES
 1. memories — moments worth recalling: things that happened, shifts between people, facts learned, tastes shown, promises made, goals set, meaningful items and places, secrets, strong impressions. Give each one a kind.
 2. canon — standing facts of the world or its systems, stored as a snake_case key with a value. Refiling a key replaces its old value. This shelf may also pin what the world explicitly LACKS when the story makes it clear (key "no_magic", value "magic does not exist here") so later scenes stop inventing it.
-3. status — the current value of one slot for one entity (location, outfit, injury, goal, mood_toward_x...). Refiling the same (entity, slot) replaces it. When the scene itself moves or time passes, file entity "scene" with slots "location", "time_of_day", "date" — and "relationship" for the main pair when it clearly shifts. When a named character exits the scene with a stated destination or errand, file their slot "whereabouts". Skip anything unchanged.
+3. status — the current value of one slot for one entity (location, outfit, injury, goal, mood_toward_x...). Refiling the same (entity, slot) replaces it. When the scene itself moves or time passes, file entity "scene" with slots "location", "time_of_day", "date" — and "relationship" for the main pair when it clearly shifts. A home or workplace merely mentioned is NOT the scene's location; move "scene" only when the story actually moves there. When a named character exits the scene with a stated destination or errand, file their slot "whereabouts". Skip anything unchanged.
 4. pledges — promises the story must keep: a thread that must stay open (keep_unresolved, loose_end), a secret that must not leak (keep_secret), knowledge a character must not have yet (knowledge_gap), a consent line (consent), or a hard limit of the world (world_limit).
-5. cast — recurring named characters. Open a card only at their first real characterization, or when their role, occupation, or relationships meaningfully change. Throwaway NPCs never get a card. Unknown fields stay null; temporary states (drunk, blushing) are not profile material. "relationships" lists standing ties to other named characters, e.g. [{"target":"Aria","relation":"childhood friend"}].
+5. cast — recurring named characters. Open a card only at their first real characterization, or when their role, occupation, or relationships meaningfully change. Throwaway NPCs never get a card. Unknown fields stay null; temporary states (drunk, blushing) are not profile material. "relationships" lists standing ties to other named characters, e.g. [{"target":"Aria","relation":"childhood friend"}]. Identity is precise: two people who share a name, title, or trade are still two people — and one person spelled two ways (nickname, romanization, translation) is still one. Reuse the exact name already on file.
 
 SHELVING RULES
 - Only this exchange goes on the shelves. The reference material below exists so you do not refile old news.
 - The story's reply is the record of what happened; the player's message only shows what they attempted or wanted. If the reply does not depict an attempt landing, shelve it as an attempt or intention — never as a done outcome.
 - Numbers are copied, never invented. When a stat, sum, or quantity clearly changed but the new figure never appeared on screen, file the direction only (value like "lowered — exact figure not shown") and keep the last confirmed figure out of it.
-- What a character says or believes is their claim, not established truth. Shelve it as status with "claim":"belief" instead of filing it as fact.
+- Truth has a chain of custody. Only what the scene directly shows goes down as fact. What a character says, suspects, overhears, or is told secondhand is THEIR knowledge — shelve it as status with "claim":"belief" and name the holder in "owner". Rumor and suspicion never graduate to fact on their own; they graduate when the story confirms them on screen. If a belief later proves false, the fact and the mistaken belief coexist on different lines — never average them into one.
+- A memory about hearsay records the telling, not the content as truth: "X told Y that the king is dying" — not "the king is dying".
 - The player is off-limits. File what their character did and said inside the fiction — never what the real person feels, wants, or consents to.
 - "quote" is ONE short verbatim line — a spoken sentence or key phrase (about 15 words max), copied exactly from the user or assistant text in its original language. Never a whole passage or paragraph. Copy, never compose. Use null when nothing is worth quoting — most memories need no quote.
 - visibility marks who may know a memory: "public" (open knowledge), "private" (only the holder — inner thoughts, personal facts), "secret" (deliberately hidden). "owner" names the holder.
-- Small talk shelves nothing; empty arrays are a valid answer. Caps: 8 memories, 4 canon, 6 status, 4 pledges, 3 cast.
+- Small talk shelves nothing; empty arrays are a valid answer. A few sharp entries beat many vague ones — when torn between filing and skipping, skip. Caps: 8 memories, 4 canon, 6 status, 4 pledges, 3 cast.
 - "digest" and every "summary" are written in YOUR OWN words — condensed, factual, shorter than the source. Never copy sentences or whole passages from the scene into them; verbatim text belongs only in "quote".
 - "recall" lists 2-4 cue words for finding this memory again later: synonyms, related situations, things someone might say that should surface it. Same language as the chat. Example: a ring gifted at the pier → ["proposal","jewelry","seaside"].
 - "importance" is how much the future story will need this back. 0.8+ — identity-level facts, hard promises, irreversible turns of plot or heart. Around 0.5 — useful context. 0.3 or below — passing color. When torn, rate by what would break the story if forgotten.
@@ -126,20 +127,32 @@ Never invent facts. Never use ids missing from the list. Most shelves need littl
 Reply with ONE minified JSON object and nothing else:
 {"merge":[{"keep":"m1","absorb":["m2"],"summary":"..."}],"drop":["m9"],"reweight":[{"id":"m4","importance":0.7}]}`;
 
-const ASK_LIBRARIAN_PROMPT = `You are Memoria's Librarian. The player asks a question about the history of this roleplay chat. Answer using ONLY the archive records provided — never invent, never fill gaps with guesses. When a record supports your answer, cite its turn like (t12). If the archive does not contain the answer, say plainly that nothing is filed about it. Answer in the same language as the question. Be concise and direct.`;
+const ASK_LIBRARIAN_PROMPT = `You are Memoria's Librarian. The player asks a question about the history of this roleplay chat. Answer using ONLY the archive records provided — never invent, never fill gaps with guesses. When a record supports your answer, cite its turn like (t12). Records marked as a belief or rumor are somebody's view, not established fact — answer them as such ("X believes..."). If the archive does not contain the answer, say plainly that nothing is filed about it. Answer in the same language as the question. Be concise and direct.`;
 
-const DEFAULT_CHUNK_PROMPT = `You are a skilled editor who weaves roleplay turn summaries into a cohesive narrative flow. Condense the following turn summaries into ONE compact "story so far" paragraph (3-6 sentences).
+const DEFAULT_CHUNK_PROMPT = `You are a skilled editor who condenses roleplay turn digests into one compact "story so far" record. The record is read by another language model mid-story, so it must be scannable at a glance — not a wall of prose.
+
+Write EXACTLY this structure, one labeled line each (a label line may hold several sentences):
+PLOT: connected narrative of what happened, 3-6 sentences in chronological order — who did what and WHY (cause and effect). Keep short key dialogue in double quotes verbatim; never paraphrase or translate quoted lines.
+SHIFTS: only changes that outlive these scenes — relationship shifts, facts learned, injuries, gains and losses, promises made. Short clauses separated by " · ". Omit this line if nothing lasting changed.
+OPEN: questions, dangers, or plans these turns left unresolved. Short clauses separated by " · ". Omit this line if none.
 
 Principles:
-- Connect events narratively — show who did what and WHY (cause and effect), not a flat list.
-- Keep short key dialogue in double quotes verbatim; never paraphrase or translate quoted lines.
 - Boldly omit greetings and idle chatter; keep actions, decisions, reveals, promises, and relationship shifts.
-- Preserve character names and unresolved threads.
-- End with dry, clear declarative sentences.
+- Preserve character names exactly as given.
+- Certainty is part of the record: what was only suspected, rumored, claimed, or attempted stays that way ("X suspects...", "according to Y...", "X tried to..."). Never restate a suspicion as settled fact, and never close a question the scenes left open.
+- Numbers, dates, and proper nouns appear only as the source states them — never rounded, guessed, or invented.
+- Dry, clear declarative sentences.
 
-No commentary — output the paragraph only.`;
+No commentary, no extra labels — output the record only.`;
 
-const DEFAULT_ARC_PROMPT = `Merge the following story-so-far paragraphs of a roleplay chat into ONE condensed chronicle paragraph (4-8 sentences). Keep only what still matters for future scenes: relationships and how they changed, standing facts, promises, secrets, unresolved threads. Keep quoted dialogue verbatim if present. Never invent or reinterpret events. No commentary — output the paragraph only.`;
+const DEFAULT_ARC_PROMPT = `Merge the following story-so-far records of a roleplay chat into ONE condensed chronicle record. Keep only what still matters for future scenes.
+
+Output EXACTLY this structure:
+PLOT: 4-8 sentences — the era in brief, chronological, cause and effect. Keep quoted dialogue verbatim if present.
+SHIFTS: standing changes that still hold — relationships, facts, possessions, promises. Short clauses separated by " · ". Omit if none.
+OPEN: threads still unresolved at the end of this span. Short clauses separated by " · ". Omit if none.
+
+Never invent or reinterpret events. Drop SHIFTS/OPEN entries that later records show settled or superseded. Compression must not upgrade certainty: suspicions, rumors, and unconfirmed claims stay marked as such, and open threads stay open. No commentary — output the record only.`;
 
 /* 요약 출력 언어 지시 (프롬프트 뒤에 자동 첨부) */
 const LANG_DIRECTIVES = {
@@ -187,7 +200,7 @@ const DEFAULT_SETTINGS = Object.freeze({
     // 의미 검색 소스: 'off' = 내장 해시만, 'local' = 실리태번 내장 임베딩(무료), 'api' = OpenAI 호환 임베딩 API
     embedApi: { mode: 'off', enabled: false, url: '', key: '', model: '' },
     consolidateEvery: 30,     // N턴마다 서고 정리(중복 병합·중요도 재조정). 0 = 끔
-    promptRev: 9,
+    promptRev: 11,
     settingsRev: 3,
     fossil: { settling: 12, fossilized: 40, deep: 120 },
     prompts: {
@@ -1930,7 +1943,13 @@ function renderPacket(parts, { withExcerpts = true, recallLimit = Infinity, prot
     const sums = takeLast(parts.summaries, summaryLimit); // 예산 부족 시 오래된 요약부터 제외
     if (sums.length) {
         lines.push('## Story So Far');
-        for (const s of sums) lines.push(`- [${s.carried ? 'earlier chat' : `t${s.fromTurn}–t${s.toTurn}`}] ${s.text}`);
+        for (const s of sums) {
+            // 구조형 레코드(PLOT/SHIFTS/OPEN)는 줄을 살려 들여쓰기로 정리
+            const body = String(s.text || '').includes('\n')
+                ? `\n  ${String(s.text).replace(/\n/g, '\n  ')}`
+                : ` ${s.text}`;
+            lines.push(`- [${s.carried ? 'earlier chat' : `t${s.fromTurn}–t${s.toTurn}`}]${body}`);
+        }
     }
     const sources = (parts.sources || []).slice(0, sourceLimit === Infinity ? (parts.sources || []).length : sourceLimit);
     if (sources.length) {
