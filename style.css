@@ -469,6 +469,11 @@
 }
 
 /* ===== 현재 장면 한 줄 (장소·날짜·시각) ===== */
+.memoria__prev {
+    opacity: 0.55;
+    text-decoration: line-through;
+}
+
 .memoria__scene-line {
     display: flex;
     align-items: center;

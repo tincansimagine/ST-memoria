@@ -87,13 +87,15 @@ const DEFAULT_ARCHIVIST_PROMPT = `You are the Librarian of Memoria, the long-ter
 
 THE FIVE SHELVES
 1. memories — moments worth recalling: things that happened, shifts between people, facts learned, tastes shown, promises made, goals set, meaningful items and places, secrets, strong impressions. Give each one a kind.
-2. canon — standing facts of the world or its systems, stored as a snake_case key with a value. Refiling a key replaces its old value.
-3. status — the current value of one slot for one entity (location, outfit, injury, goal, mood_toward_x...). Refiling the same (entity, slot) replaces it. When the scene itself moves or time passes, file entity "scene" with slots "location", "time_of_day", "date" — and "relationship" for the main pair when it clearly shifts. Skip anything unchanged.
+2. canon — standing facts of the world or its systems, stored as a snake_case key with a value. Refiling a key replaces its old value. This shelf may also pin what the world explicitly LACKS when the story makes it clear (key "no_magic", value "magic does not exist here") so later scenes stop inventing it.
+3. status — the current value of one slot for one entity (location, outfit, injury, goal, mood_toward_x...). Refiling the same (entity, slot) replaces it. When the scene itself moves or time passes, file entity "scene" with slots "location", "time_of_day", "date" — and "relationship" for the main pair when it clearly shifts. When a named character exits the scene with a stated destination or errand, file their slot "whereabouts". Skip anything unchanged.
 4. pledges — promises the story must keep: a thread that must stay open (keep_unresolved, loose_end), a secret that must not leak (keep_secret), knowledge a character must not have yet (knowledge_gap), a consent line (consent), or a hard limit of the world (world_limit).
 5. cast — recurring named characters. Open a card only at their first real characterization, or when their role, occupation, or relationships meaningfully change. Throwaway NPCs never get a card. Unknown fields stay null; temporary states (drunk, blushing) are not profile material. "relationships" lists standing ties to other named characters, e.g. [{"target":"Aria","relation":"childhood friend"}].
 
 SHELVING RULES
 - Only this exchange goes on the shelves. The reference material below exists so you do not refile old news.
+- The story's reply is the record of what happened; the player's message only shows what they attempted or wanted. If the reply does not depict an attempt landing, shelve it as an attempt or intention — never as a done outcome.
+- Numbers are copied, never invented. When a stat, sum, or quantity clearly changed but the new figure never appeared on screen, file the direction only (value like "lowered — exact figure not shown") and keep the last confirmed figure out of it.
 - What a character says or believes is their claim, not established truth. Shelve it as status with "claim":"belief" instead of filing it as fact.
 - The player is off-limits. File what their character did and said inside the fiction — never what the real person feels, wants, or consents to.
 - "quote" is ONE short verbatim line — a spoken sentence or key phrase (about 15 words max), copied exactly from the user or assistant text in its original language. Never a whole passage or paragraph. Copy, never compose. Use null when nothing is worth quoting — most memories need no quote.
@@ -101,6 +103,7 @@ SHELVING RULES
 - Small talk shelves nothing; empty arrays are a valid answer. Caps: 8 memories, 4 canon, 6 status, 4 pledges, 3 cast.
 - "digest" and every "summary" are written in YOUR OWN words — condensed, factual, shorter than the source. Never copy sentences or whole passages from the scene into them; verbatim text belongs only in "quote".
 - "recall" lists 2-4 cue words for finding this memory again later: synonyms, related situations, things someone might say that should surface it. Same language as the chat. Example: a ring gifted at the pier → ["proposal","jewelry","seaside"].
+- "importance" is how much the future story will need this back. 0.8+ — identity-level facts, hard promises, irreversible turns of plot or heart. Around 0.5 — useful context. 0.3 or below — passing color. When torn, rate by what would break the story if forgotten.
 
 Reply with ONE minified JSON object and nothing else (no code fences, no notes):
 {"digest":"1-2 sentence factual summary of this exchange","weight":0.0,"memories":[{"kind":"event|relationship|fact|preference|promise|goal|item|place|secret|impression","summary":"...","quote":"..or null","importance":0.0,"entities":["Name"],"tags":["snake_case"],"recall":["cue"],"visibility":"public|private|secret","owner":"Name or null"}],"canon":[{"scope":"session|world|region|location|faction|system","key":"snake_case_key","value":"..."}],"status":[{"entity":"Name","slot":"snake_case_slot","value":"...","claim":"objective|belief","owner":"Name or null"}],"pledges":[{"kind":"keep_unresolved|keep_secret|knowledge_gap|consent|world_limit|loose_end","summary":"...","status":"active|resolved","priority":2}],"cast":[{"name":"Name","role":"role in story or null","age":"25 or null","occupation":"... or null","appearance":"... or null","traits":["trait"],"relationships":[{"target":"OtherName","relation":"..."}]}]}`;
@@ -156,7 +159,7 @@ const DEFAULT_SETTINGS = Object.freeze({
     autoRecord: true,
     profileId: '',            // '' = 현재 연결된 API로 조용히 생성
     injectDepth: 1,
-    tokenBudget: 4000,
+    tokenBudget: 8000,
     topK: 10,
     minScore: 0.12,
     minCosine: 0.08,
@@ -184,8 +187,8 @@ const DEFAULT_SETTINGS = Object.freeze({
     // 의미 검색 소스: 'off' = 내장 해시만, 'local' = 실리태번 내장 임베딩(무료), 'api' = OpenAI 호환 임베딩 API
     embedApi: { mode: 'off', enabled: false, url: '', key: '', model: '' },
     consolidateEvery: 30,     // N턴마다 서고 정리(중복 병합·중요도 재조정). 0 = 끔
-    promptRev: 8,
-    settingsRev: 2,
+    promptRev: 9,
+    settingsRev: 3,
     fossil: { settling: 12, fossilized: 40, deep: 120 },
     prompts: {
         archivist: DEFAULT_ARCHIVIST_PROMPT,
@@ -225,6 +228,11 @@ function getSettings() {
         if (s.responseTokens <= 2048) s.responseTokens = DEFAULT_SETTINGS.responseTokens;
         if (s.tokenBudget === 1600) s.tokenBudget = DEFAULT_SETTINGS.tokenBudget;
         s.settingsRev = 2;
+    }
+    // rev 3: 주입 예산 기본값 4000 → 8000 (직접 바꾼 값은 유지)
+    if (s.settingsRev < 3) {
+        if (s.tokenBudget === 4000) s.tokenBudget = 8000;
+        s.settingsRev = 3;
     }
     return s;
 }
@@ -329,12 +337,14 @@ function getStore() {
             characters: [],     // { id, name, role, age, occupation, appearance, traits, relationships, firstTurn, updatedTurn, disabled }
             milestones: [],     // { id, title, summary, participants, grade, turnIndex }
             items: [],          // { id, name, meaning, holder, status, firstTurn, updatedTurn, disabled }
+            dossier: [],        // { id, title, chunks: [string], addedAt } — 설정 자료실 (배경 참고 문서)
         };
     }
     const s = chat_metadata[MODULE_NAME];
     if (!Array.isArray(s.characters)) s.characters = []; // 구버전 저장소 보충
     if (!Array.isArray(s.milestones)) s.milestones = [];
     if (!Array.isArray(s.items)) s.items = [];
+    if (!Array.isArray(s.dossier)) s.dossier = [];
     // 구버전(v0.3 이전) 명칭을 새 명칭으로 정규화
     if (!s.lexiconRev) {
         for (const m of s.memories) { m.kind = normKind(m.kind); m.visibility = normVisibility(m.visibility); }
@@ -654,6 +664,79 @@ function lexicalOverlap(queryTokens, text) {
 }
 
 /* ============================================================
+ * 설정 자료실 (배경 참고 문서 — 채팅 기억과 분리된 별도 서가)
+ * 원작 소설·설정 문서를 붙여넣어 두면, 매 턴 지금 장면과 관련된
+ * 대목만 골라 별도 구역으로 주입한다. 채팅에서 확정된 사실이 항상 우선.
+ * ============================================================ */
+
+const DOSSIER_CHUNK_CHARS = 700;    // 대목 하나의 목표 길이
+const DOSSIER_MAX_TOTAL = 400000;   // 자료실 전체 글자 상한 (chat_metadata 비대화 방지)
+
+/** 문서를 문단 경계 기준 ~700자 대목으로 나눈다 */
+function chunkDossierText(text) {
+    const paras = String(text || '').split(/\n\s*\n/).map(p => p.trim()).filter(Boolean);
+    const chunks = [];
+    let buf = '';
+    for (const p of paras) {
+        if (buf && (buf.length + p.length) > DOSSIER_CHUNK_CHARS) {
+            chunks.push(buf);
+            buf = p;
+        } else {
+            buf = buf ? `${buf}\n${p}` : p;
+        }
+        // 문단 하나가 지나치게 길면 강제 분할
+        while (buf.length > DOSSIER_CHUNK_CHARS * 2) {
+            chunks.push(buf.slice(0, DOSSIER_CHUNK_CHARS * 2));
+            buf = buf.slice(DOSSIER_CHUNK_CHARS * 2);
+        }
+    }
+    if (buf) chunks.push(buf);
+    return chunks.slice(0, 600);
+}
+
+function dossierTotalChars(store) {
+    return (store.dossier || []).reduce((n, d) => n + d.chunks.reduce((m, c) => m + c.length, 0), 0);
+}
+
+/** 대목 임베딩 캐시 (채팅 전환 시 비움) */
+const dossierVecCache = new Map();
+
+function dossierChunkVec(docId, i, text) {
+    const key = `${docId}:${i}`;
+    let v = dossierVecCache.get(key);
+    if (!v) {
+        v = embedText(text);
+        dossierVecCache.set(key, v);
+    }
+    return v;
+}
+
+/** 지금 장면과 관련된 자료실 대목을 고른다 → [{title, text}] */
+async function pickDossierExcerpts(query, auxTexts, { max = 3 } = {}) {
+    const store = getStore();
+    const docs = (store.dossier || []).filter(d => !d.disabled && d.chunks?.length);
+    if (!docs.length || !String(query || '').trim()) return [];
+    const queryVec = embedText(query);
+    const auxVecs = (auxTexts || []).slice(0, 2).map(embedText);
+    const queryTokens = new Set((String(query).toLowerCase().match(/[\p{L}\p{N}]+/gu) || []));
+    const scored = [];
+    for (const d of docs) {
+        for (let i = 0; i < d.chunks.length; i++) {
+            const text = d.chunks[i];
+            const vec = dossierChunkVec(d.id, i, text);
+            let cos = cosine(queryVec, vec);
+            for (const av of auxVecs) cos = Math.max(cos, cosine(av, vec) * 0.9);
+            const lex = lexicalOverlap(queryTokens, text);
+            const score = 0.7 * Math.max(0, cos) + 0.3 * lex;
+            if (score < 0.09) continue; // 관련 없는 대목은 아예 주입하지 않는다
+            scored.push({ title: d.title, text, score });
+        }
+    }
+    scored.sort((a, b) => b.score - a.score);
+    return scored.slice(0, max);
+}
+
+/* ============================================================
  * LLM 호출 (커스텀 API / 연결 프로필 / 현재 API raw 생성 — 모두 채팅 비차단)
  * ============================================================ */
 
@@ -835,11 +918,13 @@ function firstSentence(s, max = 160) {
     return cleanStr(m ? m[0] : t, max);
 }
 
-/** excerpt가 원문의 실제 부분 문자열일 때만 유지 (환각 증거 차단) */
+/** excerpt가 원문의 실제 부분 문자열일 때만 유지 (환각 증거 차단) — 공백 차이는 허용 */
 function validExcerpt(excerpt, userText, assistantText) {
     const e = String(excerpt || '').trim();
     if (!e || e.length < 3 || e.length > 160) return null; // 문단 통짜 인용 차단 — 짧은 한 줄만
-    if ((userText && userText.includes(e)) || (assistantText && assistantText.includes(e))) return e;
+    const squash = (s) => String(s || '').replace(/\s+/g, ' ');
+    const en = squash(e);
+    if (squash(userText).includes(en) || squash(assistantText).includes(en)) return e;
     return null;
 }
 
@@ -976,10 +1061,21 @@ function findPrecedingUserMessage(mesId) {
     return null;
 }
 
+/** 이 턴에서 갱신된 항목을 지우되, 이전값 이력이 있으면 그 값으로 되돌린다 (스와이프가 슬롯 자체를 날리지 않게) */
+function rollbackOrDrop(list, turnIndex) {
+    return list.flatMap(row => {
+        if (row.turnIndex !== turnIndex) return [row];
+        if (row.prev != null) {
+            return [{ ...row, value: row.prev, turnIndex: row.prevTurn ?? 0, prev: null, prevTurn: null }];
+        }
+        return [];
+    });
+}
+
 function removeDerivedForTurn(store, turnIndex) {
     store.memories = store.memories.filter(m => m.turnIndex !== turnIndex || m.pinned || m.manual);
-    store.worldRules = store.worldRules.filter(r => r.turnIndex !== turnIndex);
-    store.entityStates = store.entityStates.filter(s => s.turnIndex !== turnIndex);
+    store.worldRules = rollbackOrDrop(store.worldRules, turnIndex);
+    store.entityStates = rollbackOrDrop(store.entityStates, turnIndex);
     store.locks = store.locks.filter(l => l.turnIndex !== turnIndex);
     // 이 턴에서 "해소됨" 판정을 받은 서약은 다시 활성으로 (스와이프/삭제 롤백)
     for (const l of store.locks) {
@@ -1002,14 +1098,35 @@ function removeDerivedForTurn(store, turnIndex) {
 
 function upsertWorldRule(store, rule, turnIndex) {
     const idx = store.worldRules.findIndex(r => r.scope === rule.scope && (r.scopeName || '') === (rule.scopeName || '') && r.key === rule.key);
-    const row = { id: idx >= 0 ? store.worldRules[idx].id : uuidv4(), ...rule, turnIndex };
-    if (idx >= 0) store.worldRules[idx] = row; else store.worldRules.push(row);
+    if (idx < 0) {
+        store.worldRules.push({ id: uuidv4(), ...rule, turnIndex, prev: null, prevTurn: null });
+        return;
+    }
+    const cur = store.worldRules[idx];
+    if ((cur.turnIndex || 0) > turnIndex) return; // 최신성 보호: 옛 턴 재기록이 새 사실을 덮지 못함
+    if (cur.value === rule.value) { cur.turnIndex = turnIndex; return; } // 재확인 — 이전값 이력 유지
+    if ((cur.turnIndex || 0) === turnIndex) {
+        store.worldRules[idx] = { id: cur.id, ...rule, turnIndex, prev: cur.prev ?? null, prevTurn: cur.prevTurn ?? null };
+        return;
+    }
+    store.worldRules[idx] = { id: cur.id, ...rule, turnIndex, prev: cur.value, prevTurn: cur.turnIndex };
 }
 
 function upsertEntityState(store, state, turnIndex) {
     const idx = store.entityStates.findIndex(s => s.entity.toLowerCase() === state.entity.toLowerCase() && s.slot === state.slot && s.claim === state.claim && (s.owner || '') === (state.owner || ''));
-    const row = { id: idx >= 0 ? store.entityStates[idx].id : uuidv4(), ...state, turnIndex };
-    if (idx >= 0) store.entityStates[idx] = row; else store.entityStates.push(row);
+    if (idx < 0) {
+        store.entityStates.push({ id: uuidv4(), ...state, turnIndex, prev: null, prevTurn: null });
+        return;
+    }
+    const cur = store.entityStates[idx];
+    if ((cur.turnIndex || 0) > turnIndex) return; // 최신성 보호
+    if (cur.value === state.value) { cur.turnIndex = turnIndex; return; }
+    if ((cur.turnIndex || 0) === turnIndex) {
+        // 같은 턴 안의 중복 항목 — 값만 갱신하고 이전값 이력은 유지
+        store.entityStates[idx] = { id: cur.id, ...state, turnIndex, prev: cur.prev ?? null, prevTurn: cur.prevTurn ?? null };
+        return;
+    }
+    store.entityStates[idx] = { id: cur.id, ...state, turnIndex, prev: cur.value, prevTurn: cur.turnIndex };
 }
 
 function upsertLock(store, lock, turnIndex) {
@@ -1143,11 +1260,20 @@ async function commitTurn(mesId, { silent = true, force = false } = {}) {
     try {
         llmBusy = true;
         updateStatusUI('기록 중…');
-        const response = await callAuxLLM(`${settings.prompts.archivist}${archivistTrackingDirective()}${pledgeDirective}\n\n${languageDirective()}`, userPrompt);
-        extracted = sanitizeExtraction(parseJsonLoose(response), userText, assistantText);
-    } catch (e) {
-        console.error(`[${MODULE_NAME}] 사서 호출 실패:`, e);
-        if (!silent) toastr.error('기억 기록에 실패했습니다. (모델 응답 오류)', 'Memoria');
+        const sysPrompt = `${settings.prompts.archivist}${archivistTrackingDirective()}${pledgeDirective}\n\n${languageDirective()}`;
+        // JSON을 못 지키는 모델 대비: 파싱 실패 시 형식 경고를 덧붙여 1회 재시도
+        for (let attempt = 0; attempt < 2 && !extracted; attempt++) {
+            const nudge = attempt === 0 ? '' : '\n\nFORMAT WARNING: the previous reply could not be parsed. Respond with EXACTLY ONE minified JSON object — no code fences, no commentary, nothing before "{" or after "}".';
+            try {
+                const response = await callAuxLLM(sysPrompt + nudge, userPrompt);
+                const parsed = parseJsonLoose(response);
+                if (parsed) extracted = sanitizeExtraction(parsed, userText, assistantText);
+                else console.warn(`[${MODULE_NAME}] 사서 응답 파싱 실패 (시도 ${attempt + 1}/2)`);
+            } catch (e) {
+                console.error(`[${MODULE_NAME}] 사서 호출 실패 (시도 ${attempt + 1}/2):`, e);
+            }
+        }
+        if (!extracted && !silent) toastr.error('기억 기록에 실패했습니다. (모델 응답 오류)', 'Memoria');
     } finally {
         llmBusy = false;
     }
@@ -1492,7 +1618,7 @@ function authorizedEntities() {
 /** "우리 처음 만났을 때", "remember when" 같은 과거 회상형 질의 감지 */
 const PAST_QUERY_RE = /(처음|예전|옛날|그때|그 때|지난번|언제였|언제 였|기억나|기억 나|기억해|기억하|첫날|첫 만남|만났을 때|했었|였었|하던 때|remember when|back then|first met|first time|used to|at first|way back|昔|最初|あの時|あのとき|覚えて)/i;
 
-async function retrieveMemories(queryText, recentUserTexts) {
+async function retrieveMemories(queryText, recentUserTexts, sceneText = '') {
     const settings = getSettings();
     const store = getStore();
     const currentTurn = store.turnCounter;
@@ -1510,6 +1636,8 @@ async function retrieveMemories(queryText, recentUserTexts) {
     const queryVec = embedText(queryText);
     const auxTexts = (recentUserTexts || []).slice(0, settings.multiQueryRecent);
     const auxVecs = auxTexts.map(embedText);
+    // 장면 연속 보정: 유저 입력이 짧아도 직전 본문이 담고 있는 장면으로 회상을 이어간다
+    const sceneVec = String(sceneText || '').trim() ? embedText(String(sceneText).slice(0, 2400)) : null;
     const queryTokens = new Set((String(queryText).toLowerCase().match(/[\p{L}\p{N}]+/gu) || []));
     const queryLower = String(queryText).toLowerCase();
 
@@ -1542,6 +1670,7 @@ async function retrieveMemories(queryText, recentUserTexts) {
         const vec = decodeVec(m.vec);
         let cos = cosine(queryVec, vec);
         for (const av of auxVecs) cos = Math.max(cos, cosine(av, vec) * 0.92);
+        if (sceneVec) cos = Math.max(cos, cosine(sceneVec, vec) * 0.85);
         // API 임베딩이 양쪽 다 있으면 의미 유사도를 보정 스케일로 반영
         if (apiQueryVec && m.avec) {
             const av = decodeVec(m.avec);
@@ -1601,6 +1730,36 @@ async function retrieveMemories(queryText, recentUserTexts) {
  * 주입 내용(장부) 구성 + 주입
  * ============================================================ */
 
+/** 회상 시점 이후 값이 바뀐 상태를 언급하는 기억에 "당시 기준" 꼬리표 (id → 안내문). 주입 때마다 재계산 */
+const outdatedRecallNotes = new Map();
+
+function markOutdatedRecall(memories, store) {
+    outdatedRecallNotes.clear();
+    if (!memories.length) return;
+    // 이전값 이력이 있는 최근 변경만 검사 (비용 통제)
+    const changes = store.entityStates
+        .filter(s => s.prev != null && String(s.prev).length >= 2 && s.claim !== 'belief')
+        .slice(-24);
+    if (!changes.length) return;
+    for (const m of memories) {
+        const text = `${m.summary || ''} ${m.excerpt || ''}`.toLowerCase();
+        for (const s of changes) {
+            if ((m.turnIndex || 0) >= (s.turnIndex || 0)) continue;      // 변경 이후의 기억은 무관
+            const prev = String(s.prev).toLowerCase();
+            const now = String(s.value).toLowerCase();
+            if (!text.includes(prev) || text.includes(now)) continue;    // 옛 값을 말하고 새 값은 모르는 기억만
+            // 오검출 방지: scene 외에는 그 기억이 해당 개체를 실제로 다루는지 확인
+            const entLower = String(s.entity || '').toLowerCase();
+            const aboutEntity = entLower === 'scene'
+                || (m.entities || []).some(e => String(e).toLowerCase() === entLower)
+                || text.includes(entLower);
+            if (!aboutEntity) continue;
+            outdatedRecallNotes.set(m.id, `${s.entity}.${s.slot} is now: ${s.value}`);
+            break;
+        }
+    }
+}
+
 function formatMemoryLine(m, withExcerpt) {
     const visNorm = normVisibility(m.visibility);
     const vis = visNorm === 'public' ? '' : ` [${visNorm}${m.owner ? `:${m.owner}` : ''}]`;
@@ -1609,7 +1768,8 @@ function formatMemoryLine(m, withExcerpt) {
     const isEpisode = (m.tags || []).includes('episode_raw');
     const quote = (withExcerpt && !isEpisode && m.excerpt && m.excerpt.length <= 160) ? m.excerpt : null;
     const excerpt = quote ? ` — "${quote}"` : '';
-    return `- (${m.kind}, t${m.turnIndex})${vis} ${m.summary}${excerpt}`;
+    const dated = outdatedRecallNotes.has(m.id) ? ` [as of then — ${outdatedRecallNotes.get(m.id)}]` : '';
+    return `- (${m.kind}, t${m.turnIndex})${vis} ${m.summary}${excerpt}${dated}`;
 }
 
 const SCENE_LOC_SLOTS = ['location', 'place'];
@@ -1639,16 +1799,37 @@ async function buildPacketSections(query, supervisorPlan) {
     for (let i = chat.length - 1; i >= 0 && recentUserTexts.length < settings.multiQueryRecent + 1; i--) {
         if (chat[i]?.is_user && chat[i].mes) recentUserTexts.push(chat[i].mes);
     }
+    // 직전 본문(어시스턴트) — "응", "계속해줘" 같은 짧은 입력에도 장면이 이어지게 회상 보조 질의로 쓴다
+    let lastAssistantText = '';
+    for (let i = chat.length - 1; i >= 0; i--) {
+        if (chat[i] && !chat[i].is_user && !chat[i].is_system && chat[i].mes) { lastAssistantText = chat[i].mes; break; }
+    }
 
-    const { selected, hiddenProtected, pinned, triggered } = await retrieveMemories(query, recentUserTexts.slice(1));
+    const { selected, hiddenProtected, pinned, triggered } = await retrieveMemories(query, recentUserTexts.slice(1), lastAssistantText);
 
     const publicRecall = [];
     const protectedRecall = [];
     for (const m of [...pinned, ...triggered, ...selected]) {
         (m.visibility === 'public' ? publicRecall : protectedRecall).push(m);
     }
+    // 낡은 회상 표시: 회상된 기억이 그 후 바뀐 상태의 옛 값을 담고 있으면 주입 시 "당시 기준" 꼬리표를 붙인다
+    markOutdatedRecall([...publicRecall, ...protectedRecall], store);
 
-    const locks = store.locks.filter(l => l.status === 'active').sort((a, b) => a.priority - b.priority).slice(0, 8);
+    // 서약 절제: 비밀·설정 한계류는 전부 유지하되, 아주 오래 진전 없는 떡밥(미해결 스레드)은
+    // 한 번에 2개까지만 주입 — 죽은 떡밥이 매 턴 자리를 차지하는 것을 막는다 (서고에는 그대로 남음)
+    const activeLocks = store.locks.filter(l => l.status === 'active').sort((a, b) => a.priority - b.priority);
+    const THREAD_KINDS = ['keep_unresolved', 'loose_end'];
+    const isStaleThread = (l) => THREAD_KINDS.includes(normLockKind(l.kind)) && (store.turnCounter - (l.turnIndex || 0)) > 80;
+    const locks = [];
+    let staleUsed = 0;
+    for (const l of activeLocks) {
+        if (locks.length >= 8) break;
+        if (isStaleThread(l)) {
+            if (staleUsed >= 2) continue;
+            staleUsed++;
+        }
+        locks.push(l);
+    }
     const rules = store.worldRules.slice(-8);
     const scene = getSceneSnapshot(store);
     // 장면 한 줄에 이미 담긴 scene 슬롯은 상태 보드 목록에서 제외 (중복 방지)
@@ -1669,7 +1850,7 @@ async function buildPacketSections(query, supervisorPlan) {
         ...store.chunkSummaries.slice(-3).map(s => ({ ...s, level: 'chunk' })),
     ];
 
-    return { publicRecall, protectedRecall, hiddenProtected, locks, rules, scene, states, characters, milestones, items, summaries, supervisorPlan };
+    return { publicRecall, protectedRecall, hiddenProtected, locks, rules, scene, states, characters, milestones, items, summaries, supervisorPlan, turnNow: store.turnCounter, sources: await pickDossierExcerpts(query, recentUserTexts.slice(1)) };
 }
 
 function formatCharacterLine(c) {
@@ -1687,7 +1868,7 @@ function takeLast(arr, limit) {
     return arr.slice(-limit);
 }
 
-function renderPacket(parts, { withExcerpts = true, recallLimit = Infinity, protectedLimit = Infinity, summaryLimit = Infinity, stateLimit = Infinity, ruleLimit = Infinity, charLimit = Infinity, extraLimit = Infinity, includeSupervisorDetail = true } = {}) {
+function renderPacket(parts, { withExcerpts = true, recallLimit = Infinity, protectedLimit = Infinity, summaryLimit = Infinity, stateLimit = Infinity, ruleLimit = Infinity, charLimit = Infinity, extraLimit = Infinity, sourceLimit = Infinity, includeSupervisorDetail = true } = {}) {
     const lines = [];
     lines.push(PACKET_HEADER);
     lines.push('This is the story\'s long-term archive, kept by Memoria. When sources disagree, trust in this order: the latest user message first, then the visible chat, then Pledges / Status Board / Canon, then Recalled Moments, then the story digest. Archived material informs the reply — it never dictates it. The user\'s character is theirs alone: never write their actions, feelings, or decisions.');
@@ -1726,7 +1907,12 @@ function renderPacket(parts, { withExcerpts = true, recallLimit = Infinity, prot
     const states = takeLast(parts.states, stateLimit);
     if (states.length) {
         lines.push('## Status Board (current values)');
-        for (const s of states) lines.push(`- ${s.entity}.${s.slot} = ${s.value}${s.claim === 'belief' ? ` (belief${s.owner ? ` of ${s.owner}` : ''})` : ''}`);
+        for (const s of states) {
+            // 최근에 바뀐 값은 이전값을 함께 보여줘 낡은 기억과의 혼동을 막는다
+            const freshChange = s.prev != null && (parts.turnNow || 0) - (s.turnIndex || 0) <= 6;
+            const was = freshChange ? ` (was: ${s.prev})` : '';
+            lines.push(`- ${s.entity}.${s.slot} = ${s.value}${was}${s.claim === 'belief' ? ` (belief${s.owner ? ` of ${s.owner}` : ''})` : ''}`);
+        }
     }
     const recall = parts.publicRecall.slice(0, recallLimit === Infinity ? parts.publicRecall.length : recallLimit);
     if (recall.length) {
@@ -1745,6 +1931,11 @@ function renderPacket(parts, { withExcerpts = true, recallLimit = Infinity, prot
     if (sums.length) {
         lines.push('## Story So Far');
         for (const s of sums) lines.push(`- [${s.carried ? 'earlier chat' : `t${s.fromTurn}–t${s.toTurn}`}] ${s.text}`);
+    }
+    const sources = (parts.sources || []).slice(0, sourceLimit === Infinity ? (parts.sources || []).length : sourceLimit);
+    if (sources.length) {
+        lines.push('## Source Excerpts (background reference from imported documents — everything above outranks these; never force them into the scene)');
+        for (const s of sources) lines.push(`- [${s.title}] ${cleanMultiline(s.text, 900)}`);
     }
     if (parts.supervisorPlan) {
         const p = parts.supervisorPlan;
@@ -1772,18 +1963,20 @@ async function buildPacketWithinBudget(query, supervisorPlan) {
 
     const empty = !parts.publicRecall.length && !parts.protectedRecall.length && !parts.locks.length
         && !parts.rules.length && !parts.states.length && !parts.characters.length && !parts.scene?.any
-        && !parts.milestones.length && !parts.items.length && !parts.summaries.length && !parts.supervisorPlan;
+        && !parts.milestones.length && !parts.items.length && !parts.summaries.length
+        && !(parts.sources || []).length && !parts.supervisorPlan;
     if (empty) return '';
 
+    // 예산 부족 시 자료실 대목부터 줄인다 (배경 참고는 우선순위 최하)
     const ladder = [
         {},
         { withExcerpts: false },
-        { withExcerpts: false, recallLimit: 6 },
-        { withExcerpts: false, recallLimit: 4, protectedLimit: 3, charLimit: 8, extraLimit: 6 },
-        { withExcerpts: false, recallLimit: 3, protectedLimit: 2, summaryLimit: 2, charLimit: 6, extraLimit: 4 },
-        { withExcerpts: false, recallLimit: 2, protectedLimit: 1, summaryLimit: 1, stateLimit: 6, charLimit: 4, extraLimit: 3, includeSupervisorDetail: false },
-        { withExcerpts: false, recallLimit: 0, protectedLimit: 0, summaryLimit: 1, stateLimit: 4, ruleLimit: 4, charLimit: 2, extraLimit: 2, includeSupervisorDetail: false },
-        { withExcerpts: false, recallLimit: 0, protectedLimit: 0, summaryLimit: 0, stateLimit: 0, ruleLimit: 0, charLimit: 0, extraLimit: 0, includeSupervisorDetail: false },
+        { withExcerpts: false, recallLimit: 6, sourceLimit: 2 },
+        { withExcerpts: false, recallLimit: 4, protectedLimit: 3, charLimit: 8, extraLimit: 6, sourceLimit: 1 },
+        { withExcerpts: false, recallLimit: 3, protectedLimit: 2, summaryLimit: 2, charLimit: 6, extraLimit: 4, sourceLimit: 0 },
+        { withExcerpts: false, recallLimit: 2, protectedLimit: 1, summaryLimit: 1, stateLimit: 6, charLimit: 4, extraLimit: 3, sourceLimit: 0, includeSupervisorDetail: false },
+        { withExcerpts: false, recallLimit: 0, protectedLimit: 0, summaryLimit: 1, stateLimit: 4, ruleLimit: 4, charLimit: 2, extraLimit: 2, sourceLimit: 0, includeSupervisorDetail: false },
+        { withExcerpts: false, recallLimit: 0, protectedLimit: 0, summaryLimit: 0, stateLimit: 0, ruleLimit: 0, charLimit: 0, extraLimit: 0, sourceLimit: 0, includeSupervisorDetail: false },
     ];
 
     for (const step of ladder) {
@@ -1844,10 +2037,35 @@ function reconcileWithChat() {
     const store = getStore();
     let changed = false;
     const validTurns = [];
+    const usedMesIds = new Set();
+
+    // 채팅 전체의 (내용 해시 → 메시지 번호들) 지도 — 앞쪽 삭제로 번호가 밀려도 내용으로 턴을 다시 찾는다
+    const hashIndex = new Map();
+    for (let i = 0; i < chat.length; i++) {
+        const c = chat[i];
+        if (!c || c.is_user) continue;
+        const h = mesHashOf(c);
+        if (!hashIndex.has(h)) hashIndex.set(h, []);
+        hashIndex.get(h).push(i);
+    }
+
     for (const t of store.turns) {
         const mes = chat[t.mesId];
-        if (mes && !mes.is_user && mesHashOf(mes) === t.mesHash) {
+        if (mes && !mes.is_user && mesHashOf(mes) === t.mesHash && !usedMesIds.has(t.mesId)) {
             validTurns.push(t);
+            usedMesIds.add(t.mesId);
+            continue;
+        }
+        // 번호가 밀렸다면 같은 내용의 메시지에 재연결 (기존 번호에서 가장 가까운 후보 우선).
+        // 진짜 사라진 턴만 정리한다 — 화면 길이 변화만으로 기억을 지우지 않는다.
+        const candidates = (hashIndex.get(t.mesHash) || []).filter(i => !usedMesIds.has(i));
+        if (candidates.length) {
+            const relocated = candidates.reduce((best, i) => Math.abs(i - t.mesId) < Math.abs(best - t.mesId) ? i : best);
+            t.mesId = relocated;
+            usedMesIds.add(relocated);
+            for (const m of store.memories) if (m.turnIndex === t.turnIndex) m.mesId = relocated;
+            validTurns.push(t);
+            changed = true;
         } else {
             removeDerivedForTurn(store, t.turnIndex);
             changed = true;
@@ -2139,6 +2357,13 @@ async function importCarryOver(file) {
             if (!it?.name) continue;
             upsertItem(store, { name: it.name, meaning: it.meaning || '', holder: it.holder || null, status: it.status || null }, 0);
         }
+        // 자료실 문서 인계 (같은 제목은 건너뜀)
+        for (const d of (src.dossier || [])) {
+            if (!d?.title || !Array.isArray(d.chunks) || !d.chunks.length) continue;
+            if (store.dossier.some(x => x.title === d.title)) continue;
+            if (dossierTotalChars(store) + d.chunks.reduce((n, c) => n + c.length, 0) > DOSSIER_MAX_TOTAL) break;
+            store.dossier.push({ id: uuidv4(), title: d.title, chunks: d.chunks, addedAt: Date.now(), disabled: Boolean(d.disabled) });
+        }
 
         persistStore();
         renderAllPanels();
@@ -2343,6 +2568,28 @@ function renderItemsPanel() {
     }
 }
 
+function renderDossierPanel() {
+    const store = getStore();
+    const list = $('#memoria_dossier_list');
+    if (!list.length) return;
+    list.empty();
+
+    if (!store.dossier.length) {
+        list.append('<div class="memoria__empty">등록된 문서가 없습니다. "문서 추가"로 원작·설정 자료를 붙여넣으면 관련 대목만 골라 배경 참고로 주입됩니다.</div>');
+        return;
+    }
+    for (const d of store.dossier) {
+        const chars = d.chunks.reduce((n, c) => n + c.length, 0);
+        list.append($(`
+            <div class="memoria__row${d.disabled ? ' is-resolved' : ''}" data-id="${d.id}">
+                <span class="memoria__row-text"><b>${escapeHtml(d.title)}</b> <small>(${d.chunks.length}개 대목 · ${chars.toLocaleString()}자)</small></span>
+                <i class="fa-solid ${d.disabled ? 'fa-eye-slash' : 'fa-eye'} memoria-dossier-toggle" title="${d.disabled ? '주입에 포함' : '주입에서 제외'}"></i>
+                <i class="fa-solid fa-trash memoria-dossier-delete" title="삭제"></i>
+            </div>
+        `));
+    }
+}
+
 function renderStatePanel() {
     const store = getStore();
     const $rules = $('#memoria_rules_list');
@@ -2351,6 +2598,7 @@ function renderStatePanel() {
     if (!$rules.length) return;
     renderCharactersPanel();
     renderItemsPanel();
+    renderDossierPanel();
 
     $rules.empty();
     if (!store.worldRules.length) $rules.append('<div class="memoria__empty">기록된 캐논이 없습니다.</div>');
@@ -2378,9 +2626,10 @@ function renderStatePanel() {
     $states.empty();
     if (!store.entityStates.length) $states.append('<div class="memoria__empty">기록된 개체 상태가 없습니다.</div>');
     for (const s of store.entityStates) {
+        const prevBit = s.prev != null ? ` <small class="memoria__prev">(이전: ${escapeHtml(String(s.prev))})</small>` : '';
         $states.append($(`
             <div class="memoria__row" data-id="${s.id}">
-                <span class="memoria__row-text"><b>${escapeHtml(s.entity)}.${escapeHtml(s.slot)}</b> = ${escapeHtml(s.value)} <small>(${s.claim === 'belief' ? `믿음${s.owner ? `:${escapeHtml(s.owner)}` : ''}` : '객관'} · t${s.turnIndex})</small></span>
+                <span class="memoria__row-text"><b>${escapeHtml(s.entity)}.${escapeHtml(s.slot)}</b> = ${escapeHtml(s.value)}${prevBit} <small>(${s.claim === 'belief' ? `믿음${s.owner ? `:${escapeHtml(s.owner)}` : ''}` : '객관'} · t${s.turnIndex})</small></span>
                 <i class="fa-solid fa-trash memoria-state-delete" title="삭제"></i>
             </div>
         `));
@@ -2716,6 +2965,41 @@ function bindUI() {
         const store = getStore();
         store.milestones = store.milestones.filter(e => e.id !== id);
         persistStore(); renderMilestonesPanel(); updateInjection();
+    });
+
+    // ── 자료실 (배경 참고 문서)
+    $('#memoria_dossier_add').on('click', async function () {
+        if (!getCurrentChatId()) { toastr.warning('열린 채팅이 없습니다.', 'Memoria'); return; }
+        const ctx = getContext();
+        const title = await ctx.callGenericPopup('문서 이름 (예: 원작 1권 요약, 세계관 설정집)', ctx.POPUP_TYPE.INPUT, '', { rows: 1 });
+        if (!title || !String(title).trim()) return;
+        const text = await ctx.callGenericPopup('문서 내용을 붙여넣으세요. 문단 단위로 나뉘어 저장되고, 매 턴 관련 대목만 주입됩니다.', ctx.POPUP_TYPE.INPUT, '', { rows: 14 });
+        if (!text || !String(text).trim()) return;
+        const store = getStore();
+        if (dossierTotalChars(store) + String(text).length > DOSSIER_MAX_TOTAL) {
+            toastr.error(`자료실 용량 초과 — 전체 ${DOSSIER_MAX_TOTAL.toLocaleString()}자까지 담을 수 있습니다.`, 'Memoria');
+            return;
+        }
+        const chunks = chunkDossierText(text);
+        if (!chunks.length) { toastr.warning('내용이 비어 있습니다.', 'Memoria'); return; }
+        store.dossier.push({ id: uuidv4(), title: cleanStr(title, 80), chunks, addedAt: Date.now(), disabled: false });
+        persistStore(); renderDossierPanel(); updateInjection();
+        toastr.success(`"${cleanStr(title, 40)}" — ${chunks.length}개 대목으로 등록했습니다.`, 'Memoria');
+    });
+    $('#memoria_settings').on('click', '.memoria-dossier-toggle', function () {
+        const id = $(this).closest('.memoria__row').data('id');
+        const d = getStore().dossier.find(x => x.id === id);
+        if (!d) return;
+        d.disabled = !d.disabled;
+        persistStore(); renderDossierPanel(); updateInjection();
+    });
+    $('#memoria_settings').on('click', '.memoria-dossier-delete', async function () {
+        const id = $(this).closest('.memoria__row').data('id');
+        if (!await confirmDelete('이 문서')) return;
+        const store = getStore();
+        store.dossier = store.dossier.filter(d => d.id !== id);
+        for (const k of [...dossierVecCache.keys()]) if (k.startsWith(`${id}:`)) dossierVecCache.delete(k);
+        persistStore(); renderDossierPanel(); updateInjection();
     });
 
     // ── 캐논/상태/서약
@@ -3207,6 +3491,7 @@ function bindEvents() {
     eventSource.on(event_types.CHAT_CHANGED, () => {
         vecCache.clear();
         queryEmbedCache.clear();
+        dossierVecCache.clear();
         localSyncedChat = null;
         getStore();
         reconcileWithChat();
