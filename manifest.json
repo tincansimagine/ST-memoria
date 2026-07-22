@@ -6,7 +6,7 @@
     "js": "index.js",
     "css": "style.css",
     "author": "tincansimagine",
-    "version": "1.1.0",
+    "version": "1.1.1",
     "homePage": "",
     "description": "대화를 자동으로 요약·기억하고, 매 턴 맥락에 맞는 장기기억을 골라 프롬프트에 주입합니다."
 }

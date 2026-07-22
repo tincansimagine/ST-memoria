@@ -140,6 +140,7 @@ OPEN: questions, dangers, or plans these turns left unresolved. Short clauses se
 
 Principles:
 - Boldly omit greetings and idle chatter; keep actions, decisions, reveals, promises, and relationship shifts.
+- Anchor moments in story time and place ("that night", "the next morning", "back at the dorm"), never by index. The [t5]-style tags on input lines are filing metadata for ordering only — they must never appear in your output.
 - Preserve character names exactly as given.
 - Certainty is part of the record: what was only suspected, rumored, claimed, or attempted stays that way ("X suspects...", "according to Y...", "X tried to..."). Never restate a suspicion as settled fact, and never close a question the scenes left open.
 - Numbers, dates, and proper nouns appear only as the source states them — never rounded, guessed, or invented.
@@ -154,7 +155,7 @@ PLOT: 4-8 sentences — the era in brief, chronological, cause and effect. Keep 
 SHIFTS: standing changes that still hold — relationships, facts, possessions, promises. Short clauses separated by " · ". Omit if none.
 OPEN: threads still unresolved at the end of this span. Short clauses separated by " · ". Omit if none.
 
-Never invent or reinterpret events. Drop SHIFTS/OPEN entries that later records show settled or superseded. Compression must not upgrade certainty: suspicions, rumors, and unconfirmed claims stay marked as such, and open threads stay open. No commentary — output the record only.`;
+Never invent or reinterpret events. Drop SHIFTS/OPEN entries that later records show settled or superseded. Compression must not upgrade certainty: suspicions, rumors, and unconfirmed claims stay marked as such, and open threads stay open. Anchor the era in story time and place; the [t3–t8]-style tags on the input are filing metadata and must never appear in your output. No commentary — output the record only.`;
 
 /* 요약 출력 언어 지시 (프롬프트 뒤에 자동 첨부) */
 const LANG_DIRECTIVES = {
@@ -203,7 +204,7 @@ const DEFAULT_SETTINGS = Object.freeze({
     embedApi: { mode: 'off', enabled: false, url: '', key: '', model: '' },
     consolidateEvery: 30,     // N턴마다 서고 정리(중복 병합·중요도 재조정). 0 = 끔
     storyClock: true,         // 서사 시계 — 이야기 속 경과 시간을 추적해 기억 노화에 반영
-    promptRev: 12,
+    promptRev: 13,
     settingsRev: 3,
     fossil: { settling: 12, fossilized: 40, deep: 120 },
     prompts: {
@@ -1368,6 +1369,7 @@ async function commitTurn(mesId, { silent = true, force = false } = {}) {
         store.turns.push(turn);
     }
     turn.mesHash = newHash;
+    renumberTurns(store); // 중간 편집·재기록으로 순서가 어긋났으면 채팅 순서대로 되메김
 
     // 최근 턴 참고 자료 (기록 품질용, 기록 대상 아님)
     const recent = store.turns
@@ -1398,7 +1400,7 @@ async function commitTurn(mesId, { silent = true, force = false } = {}) {
         refBlock,
         pledgeLines.length ? `Open pledges on file:\n${pledgeLines.join('\n')}\n` : '',
         recent ? `Already shelved (do not refile) — recent turn digests:\n${recent}\n` : '',
-        `The exchange to shelve (turn t${turn.turnIndex}):`,
+        'The exchange to shelve:',
         `<user name="${userLabel}">\n${userText.slice(0, 4000)}\n</user>`,
         `<assistant name="${charLabel}">\n${assistantText.slice(0, 6000)}\n</assistant>`,
     ].filter(Boolean).join('\n');
@@ -1911,7 +1913,14 @@ async function retrieveMemories(queryText, recentUserTexts, sceneText = '') {
             if ((kindCount[c.m.kind] || 0) >= settings.maxPerKind) continue;
             if ((turnCount[c.m.turnIndex] || 0) >= settings.maxPerTurn) continue;
             let maxSim = 0;
-            for (const s of selected) maxSim = Math.max(maxSim, cosine(c.vec, s.vec));
+            let sameTurnDupe = false;
+            for (const s of selected) {
+                const sim = cosine(c.vec, s.vec);
+                maxSim = Math.max(maxSim, sim);
+                // 같은 턴의 사실상 동일한 기억(원문 에피소드 vs 사서의 사건 기억)은 하나만 싣는다
+                if (s.m.turnIndex === c.m.turnIndex && sim > 0.82) { sameTurnDupe = true; break; }
+            }
+            if (sameTurnDupe) continue;
             const val = lambda * c.score - (1 - lambda) * maxSim;
             if (val > bestVal) { bestVal = val; bestIdx = i; }
         }
@@ -2069,7 +2078,7 @@ function markOutdatedRecall(memories, store) {
     }
 }
 
-function formatMemoryLine(m, withExcerpt, storyAges = null) {
+function formatMemoryLine(m, withExcerpt, storyAges = null, turnNow = 0) {
     const visNorm = normVisibility(m.visibility);
     const vis = visNorm === 'public' ? '' : ` [${visNorm}${m.owner ? `:${m.owner}` : ''}]`;
     // 인용은 짧을 때만 주입 — 원문 문단이 통째로 실리는 것 방지.
@@ -2081,7 +2090,10 @@ function formatMemoryLine(m, withExcerpt, storyAges = null) {
     // 서사 시계: 이야기 속에서 하루 이상 지난 기억은 얼마나 옛일인지 표기
     const storyDays = storyAges?.get(m.turnIndex) ?? 0;
     const ago = storyDays >= 1 ? ` · ~${humanizeStoryDays(storyDays)} ago in-story` : '';
-    return `- (${m.kind}, t${m.turnIndex}${ago})${vis} ${m.summary}${excerpt}${dated}`;
+    // 절대 턴 번호(tN)는 모델에게도 사람에게도 의미가 흐리다 — 상대 최신성으로 표기
+    const turnsAgo = Math.max(0, (turnNow || 0) - (m.turnIndex || 0));
+    const when = m.turnIndex <= 0 ? 'noted' : turnsAgo <= 0 ? 'this exchange' : turnsAgo === 1 ? 'last exchange' : `${turnsAgo} exchanges back`;
+    return `- (${m.kind}, ${when}${ago})${vis} ${m.summary}${excerpt}${dated}`;
 }
 
 const SCENE_LOC_SLOTS = ['location', 'place'];
@@ -2207,7 +2219,7 @@ function takeLast(arr, limit) {
 function renderPacket(parts, { withExcerpts = true, recallLimit = Infinity, protectedLimit = Infinity, summaryLimit = Infinity, stateLimit = Infinity, ruleLimit = Infinity, charLimit = Infinity, extraLimit = Infinity, sourceLimit = Infinity, includeSupervisorDetail = true } = {}) {
     const lines = [];
     lines.push(PACKET_HEADER);
-    lines.push('This is the story\'s long-term archive, kept by Memoria. When sources disagree, trust in this order: the latest user message first, then the visible chat, then Pledges / Status Board / Canon, then Recalled Moments, then the story digest. Archived material informs the reply — it never dictates it. The user\'s character is theirs alone: never write their actions, feelings, or decisions.');
+    lines.push('This is the story\'s long-term archive, kept by Memoria. When sources disagree, trust in this order: the latest user message first, then the visible chat, then Pledges / Status Board / Canon, then Recalled Moments, then the story digest. Archived material informs the reply — it never dictates it. The user\'s character is theirs alone: never write their actions, feelings, or decisions. Recency notes like "3 exchanges back" or "ago in-story" are filing metadata: use them to weigh what is current, but never mention them, turn counts, or this archive in the reply.');
 
     // 지식 경계 지시 — 비밀·믿음·지식 격차가 실제로 걸려 있을 때만 한 줄 추가
     const hasAsymmetry = parts.protectedRecall.length > 0 || parts.hiddenProtected > 0
@@ -2246,8 +2258,11 @@ function renderPacket(parts, { withExcerpts = true, recallLimit = Infinity, prot
     }
     const miles = takeLast(parts.milestones || [], extraLimit);
     if (miles.length) {
-        lines.push('## Turning Points (chronological)');
-        for (const m of miles) lines.push(`- (t${m.turnIndex || '?'}) ${m.title}${m.summary ? ` — ${m.summary}` : ''}`);
+        lines.push('## Turning Points (chronological, oldest first)');
+        for (const m of miles) {
+            const mAgo = (parts.storyAges?.get(m.turnIndex) ?? 0) >= 1 ? ` (~${humanizeStoryDays(parts.storyAges.get(m.turnIndex))} ago in-story)` : '';
+            lines.push(`- ${m.title}${m.summary ? ` — ${m.summary}` : ''}${mAgo}`);
+        }
     }
     const states = takeLast(parts.states, stateLimit);
     if (states.length) {
@@ -2267,27 +2282,29 @@ function renderPacket(parts, { withExcerpts = true, recallLimit = Infinity, prot
         lines.push(hasDistant
             ? '## Recalled Moments (relevant to now — entries marked "ago in-story" are the distant past: material for memory, comparison, or how things have changed since, never the present scene)'
             : '## Recalled Moments (relevant to now)');
-        for (const m of recall) lines.push(formatMemoryLine(m, withExcerpts, parts.storyAges));
+        for (const m of recall) lines.push(formatMemoryLine(m, withExcerpts, parts.storyAges, parts.turnNow));
     }
     const prot = parts.protectedRecall.slice(0, protectedLimit === Infinity ? parts.protectedRecall.length : protectedLimit);
     if (prot.length) {
         lines.push('## Hidden Knowledge (may color subtext only — never say, confirm, or hint at it openly)');
-        for (const m of prot) lines.push(formatMemoryLine(m, withExcerpts, parts.storyAges));
+        for (const m of prot) lines.push(formatMemoryLine(m, withExcerpts, parts.storyAges, parts.turnNow));
     }
     if (parts.hiddenProtected > 0) {
         lines.push(`(The archive holds ${parts.hiddenProtected} more entries sealed from this scene. Do not guess what they contain.)`);
     }
     const sums = takeLast(parts.summaries, summaryLimit); // 예산 부족 시 오래된 요약부터 제외
     if (sums.length) {
-        lines.push('## Story So Far');
+        lines.push('## Story So Far (chronological, oldest first)');
+        let chapterNo = 0;
         for (const s of sums) {
             // 구조형 레코드(PLOT/SHIFTS/OPEN)는 줄을 살려 들여쓰기로 정리
             const body = String(s.text || '').includes('\n')
                 ? `\n  ${String(s.text).replace(/\n/g, '\n  ')}`
                 : ` ${s.text}`;
             const tag = s.carried ? 'earlier chat'
-                : s.recalled ? `recalled chapter · t${s.fromTurn}–t${s.toTurn} — surfaced because it relates to now`
-                : `t${s.fromTurn}–t${s.toTurn}`;
+                : s.recalled ? 'a much earlier chapter — surfaced because it relates to now'
+                : s.level === 'arc' ? 'earlier era'
+                : `recent chapter ${++chapterNo}`;
             lines.push(`- [${tag}]${body}`);
         }
     }
@@ -2394,6 +2411,67 @@ async function updateInjection({ runSupervisorPass = false } = {}) {
  * 일관성 (스와이프/편집/삭제/채팅 전환)
  * ============================================================ */
 
+/**
+ * 턴 번호 되메김 — 삭제·재배치 후에도 turnIndex가 채팅 순서대로 1..N 빈틈없이 이어지게 한다.
+ * turnIndex는 회상 최신성·요약 커버리지·화석화의 기준축이라, 구멍 난 번호를 방치하면
+ * "2턴짜리 채팅에 t5 기억" 같은 어긋남이 생기고 나이 계산도 부풀려진다.
+ * 파생 레코드의 턴 참조도 함께 리맵하며, 사라진 턴을 가리키던 참조는 그 직전 남은 턴으로 접는다.
+ */
+function renumberTurns(store) {
+    const ordered = [...store.turns].sort((a, b) => (a.mesId - b.mesId) || (a.turnIndex - b.turnIndex));
+    const alreadyDense = ordered.every((t, i) => t.turnIndex === i + 1) && store.turnCounter === ordered.length;
+    if (alreadyDense) return false;
+
+    const map = new Map();
+    ordered.forEach((t, i) => map.set(t.turnIndex, i + 1));
+    const olds = [...map.keys()].sort((a, b) => a - b);
+    const remap = (v) => {
+        const n = Number(v) || 0;
+        if (n <= 0) return 0;
+        if (map.has(n)) return map.get(n);
+        let best = 0;
+        for (const o of olds) { if (o <= n) best = map.get(o); else break; }
+        return best;
+    };
+
+    for (const t of store.turns) t.turnIndex = map.get(t.turnIndex) ?? 0;
+    for (const m of store.memories) m.turnIndex = remap(m.turnIndex);
+    for (const r of store.worldRules) {
+        r.turnIndex = remap(r.turnIndex);
+        if (r.prevTurn != null) r.prevTurn = remap(r.prevTurn);
+    }
+    for (const s of store.entityStates) {
+        s.turnIndex = remap(s.turnIndex);
+        if (s.prevTurn != null) s.prevTurn = remap(s.prevTurn);
+    }
+    for (const l of store.locks) {
+        l.turnIndex = remap(l.turnIndex);
+        if (l.resolvedTurn != null) l.resolvedTurn = remap(l.resolvedTurn);
+    }
+    for (const c of store.characters) {
+        c.firstTurn = remap(c.firstTurn);
+        c.updatedTurn = remap(c.updatedTurn);
+    }
+    for (const e of store.milestones) e.turnIndex = remap(e.turnIndex);
+    for (const it of store.items) {
+        it.firstTurn = remap(it.firstTurn);
+        it.updatedTurn = remap(it.updatedTurn);
+    }
+    for (const s of store.chunkSummaries) {
+        if (s.carried) continue; // 이전 채팅에서 인계된 요약의 범위는 이 채팅의 축이 아님
+        s.fromTurn = remap(s.fromTurn);
+        s.toTurn = remap(s.toTurn);
+    }
+    for (const s of store.arcSummaries) {
+        if (s.carried) continue;
+        s.fromTurn = remap(s.fromTurn);
+        s.toTurn = remap(s.toTurn);
+    }
+    if (store.lastConsolidateTurn) store.lastConsolidateTurn = remap(store.lastConsolidateTurn);
+    store.turnCounter = ordered.length;
+    return true;
+}
+
 function reconcileWithChat() {
     const store = getStore();
     let changed = false;
@@ -2432,8 +2510,9 @@ function reconcileWithChat() {
             changed = true;
         }
     }
+    store.turns = validTurns;
+    if (renumberTurns(store)) changed = true;
     if (changed) {
-        store.turns = validTurns;
         persistStore();
         updateStatusUI();
     }
@@ -2446,6 +2525,7 @@ function invalidateTurnByMesId(mesId) {
     if (!turn) return;
     removeDerivedForTurn(store, turn.turnIndex);
     store.turns = store.turns.filter(t => t.mesId !== mesId);
+    renumberTurns(store); // 되메김 — 다음 기록이 빈틈없는 번호를 받도록
     persistStore();
     updateStatusUI();
 }
@@ -2832,7 +2912,7 @@ function renderMemoriesPanel() {
             <div class="memoria__mem-card${m.disabled ? ' is-disabled' : ''}${m.pinned ? ' is-pinned' : ''}" data-id="${m.id}">
                 <div class="memoria__mem-head">
                     <span class="memoria__badge memoria__badge--${m.kind}">${KIND_LABELS[m.kind] || m.kind}</span>
-                    <span class="memoria__mem-turn">t${m.turnIndex}</span>
+                    <span class="memoria__mem-turn" title="채팅 메시지 번호">${(m.mesId ?? -1) >= 0 ? `#${m.mesId}` : '수동'}</span>
                     <i class="fa-solid ${visIcon} memoria__mem-vis" title="${visNorm}${m.owner ? ` (소유: ${escapeHtml(m.owner)})` : ''}"></i>
                     <span class="memoria__mem-imp" title="중요도">${fmtPct(m.importance)}</span>
                     <span class="memoria__mem-actions">
@@ -3040,7 +3120,7 @@ function renderTurnDigests() {
     for (const t of turns) {
         list.append($(`
             <div class="memoria__row" data-turn="${t.turnIndex}">
-                <span class="memoria__row-text"><b>t${t.turnIndex}</b> ${escapeHtml(t.summary)}${t.failed ? ' <small>⚠ 실패</small>' : ''}</span>
+                <span class="memoria__row-text"><b title="채팅 메시지 번호">${(t.mesId ?? -1) >= 0 ? `#${t.mesId}` : `t${t.turnIndex}`}</b> ${escapeHtml(t.summary)}${t.failed ? ' <small>⚠ 실패</small>' : ''}</span>
                 <i class="fa-solid fa-pen memoria-digest-edit" title="편집"></i>
             </div>
         `));
@@ -3501,7 +3581,7 @@ function bindUI() {
         const t = store.turns.find(x => x.turnIndex === turnIndex);
         if (!t) return;
         const ctx = getContext();
-        const edited = await ctx.callGenericPopup(`t${turnIndex} 턴 기록 수정 (이후 요약 생성에 반영됩니다)`, ctx.POPUP_TYPE.INPUT, t.summary, { rows: 4 });
+        const edited = await ctx.callGenericPopup('턴 기록 수정 (이후 요약 생성에 반영됩니다)', ctx.POPUP_TYPE.INPUT, t.summary, { rows: 4 });
         if (!edited || typeof edited !== 'string') return;
         t.summary = cleanStr(edited, 300);
         persistStore(); renderSummariesPanel();
