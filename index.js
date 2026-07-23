@@ -89,7 +89,7 @@ const DEFAULT_ARCHIVIST_PROMPT = `You are the Librarian of Memoria, the long-ter
 THE FIVE SHELVES
 1. memories — moments worth recalling: things that happened, shifts between people, facts learned, tastes shown, promises made, goals set, meaningful items and places, secrets, strong impressions. Give each one a kind.
 2. canon — standing facts of the world or its systems, stored as a snake_case key with a value. Refiling a key replaces its old value. This shelf may also pin what the world explicitly LACKS when the story makes it clear (key "no_magic", value "magic does not exist here") so later scenes stop inventing it. Canon is for facts expected to hold for the rest of the story; anything that could plausibly change in play (a passcode, an address, who holds an item) belongs in status instead.
-3. status — the current value of one slot for one entity. Use these slots whenever they fit, always the same name: location, whereabouts, posture, outfit, condition, injury, mood, holding, activity, goal — invent a new slot only when none of them fits, then reuse that exact name every time after. One fact lives in ONE slot: an injury goes under "injury" alone, never echoed into "condition" or "appearance" too. Refiling the same (entity, slot) replaces it. When a state ENDS, refile the slot with its new reality ("uninjured", "hands free", "calm") — a stale value left standing is worse than no entry. When the scene itself moves or time passes, file entity "scene" with slots "location", "time_of_day", "date" — and "relationship" for the main pair when it clearly shifts. A home or workplace merely mentioned is NOT the scene's location; move "scene" only when the story actually moves there. When a named character exits the scene with a stated destination or errand, file their slot "whereabouts". Skip anything unchanged. Status holds the current value only — how it came to be belongs in memories, not in the value.
+3. status — the current value of one slot for one entity. Use these slots whenever they fit, always the same name: location, whereabouts, outfit, condition, injury, mood, holding, activity, goal — invent a new slot only when none of them fits, then reuse that exact name every time after. "activity" is what they are doing right now, stance included, as ONE line ("lying on the window seat", "sitting in a chair, unpacking") — never split posture into its own slot, so a stale pose can't contradict a fresh action. One fact lives in ONE slot: an injury goes under "injury" alone, never echoed into "condition" or "appearance" too. Refiling the same (entity, slot) replaces it. When a state ENDS, refile the slot with its new reality ("uninjured", "hands free", "calm") — a stale value left standing is worse than no entry. When the scene itself moves or time passes, file entity "scene" with slots "location", "time_of_day", "date" — and "relationship" for the main pair when it clearly shifts. A home or workplace merely mentioned is NOT the scene's location; move "scene" only when the story actually moves there. When a named character exits the scene with a stated destination or errand, file their slot "whereabouts". Skip anything unchanged. Status holds the current value only — how it came to be belongs in memories, not in the value.
 4. pledges — promises the story must keep: a thread that must stay open (keep_unresolved, loose_end), a secret that must not leak (keep_secret), knowledge a character must not have yet (knowledge_gap), a consent line (consent), or a hard limit of the world (world_limit).
 5. cast — the people of this story. The two leads — the player's character and the story's main character — belong here first: the archive starts empty, so nobody is "already known". Open a lead's card at their first clear characterization and keep it current as their role, relationships, or voice evolve. Every other named character gets a card at their first real characterization, or when their role, occupation, or relationships meaningfully change. Only throwaway NPCs never get a card. Unknown fields stay null; temporary states (drunk, blushing) are not profile material. "relationships" lists standing ties to other named characters, e.g. [{"target":"Aria","relation":"childhood friend"}]. "voice" captures HOW they speak as a compact pattern — politeness level or typical sentence endings, pet phrases, what they call other people; a pattern only, never sample lines (those belong in quotes). Identity is precise: two people who share a name, title, or trade are still two people — and one person spelled two ways (nickname, romanization, translation) is still one. Reuse the exact name already on file. A pivotal character the story deliberately leaves unnamed may still get a card: use a short stable handle as the name (the SAME words every time, e.g. "the scarred courier") and set "provisional":true. When the story finally names them, file the card under the real name with "aka":["the scarred courier"] so the old records fold in.
 
@@ -103,7 +103,7 @@ SHELVING RULES
 - Truth has a chain of custody. Only what the scene directly shows goes down as fact. What a character says, suspects, overhears, or is told secondhand is THEIR knowledge — shelve it as status with "claim":"belief" and name the holder in "owner". Rumor and suspicion never graduate to fact on their own; they graduate when the story confirms them on screen. If a belief later proves false, the fact and the mistaken belief coexist on different lines — never average them into one.
 - A memory about hearsay records the telling, not the content as truth: "X told Y that the king is dying" — not "the king is dying".
 - The player is off-limits. File what their character did and said inside the fiction — never what the real person feels, wants, or consents to.
-- "quote" is ONE short verbatim line — a spoken sentence or key phrase (about 15 words max), copied exactly from the user or assistant text in its original language. Never a whole passage or paragraph. Copy, never compose. Use null when nothing is worth quoting — most memories need no quote.
+- "quote" is ONE short verbatim line of SPOKEN dialogue (about 15 words max), copied exactly from the user or assistant text in its original language. Never narration or description — prose that merely restates the summary is dead weight; the shelf wants the words a voice actually said. Never a whole passage. Copy, never compose. Use null when nothing was worth hearing twice — most memories need no quote.
 - visibility marks who may know a memory: "public" (open knowledge), "private" (only the holder — inner thoughts, personal facts), "secret" (deliberately hidden). "owner" names the holder.
 - Small talk shelves nothing; empty arrays are a valid answer. A few sharp entries beat many vague ones — when torn between filing and skipping, skip. Caps: 8 memories, 4 canon, 6 status, 4 pledges, 3 cast.
 - "digest" and every "summary" are written in YOUR OWN words — condensed, factual, shorter than the source. Never copy sentences or whole passages from the scene into them; verbatim text belongs only in "quote".
@@ -218,7 +218,7 @@ const DEFAULT_SETTINGS = Object.freeze({
     embedApi: { mode: 'off', enabled: false, url: '', key: '', model: '' },
     consolidateEvery: 30,     // N턴마다 서고 정리(중복 병합·중요도 재조정). 0 = 끔
     storyClock: true,         // 서사 시계 — 이야기 속 경과 시간을 추적해 기억 노화에 반영
-    promptRev: 17,
+    promptRev: 19,
     settingsRev: 3,
     fossil: { settling: 12, fossilized: 40, deep: 120 },
     prompts: {
@@ -399,9 +399,10 @@ function getStore() {
         }
         s.lexiconRev = 3;
     }
-    // rev 4: 유의어 슬롯 병합 — physical_state/physical_condition 등으로 갈라진 상태 줄을
+    // rev 4~5: 유의어 슬롯 병합 — physical_state/physical_condition 등으로 갈라진 상태 줄을
     // 표준 슬롯으로 정규화하고, 같은 (entity, slot, claim, owner)는 최신 것만 남긴다
-    if (s.lexiconRev < 4) {
+    // (rev 5: posture→activity 통합이 추가되어 같은 멱등 패스를 한 번 더 돌린다)
+    if (s.lexiconRev < 5) {
         const seen = new Map(); // key → index (최신 turnIndex 보유)
         const keep = [];
         const sorted = [...s.entityStates].sort((a, b) => (a.turnIndex || 0) - (b.turnIndex || 0));
@@ -420,7 +421,7 @@ function getStore() {
             }
         }
         s.entityStates = keep;
-        s.lexiconRev = 4;
+        s.lexiconRev = 5;
     }
     return s;
 }
@@ -2213,8 +2214,9 @@ const SLOT_ALIASES = {
     // mood 계열
     emotion: 'mood', emotions: 'mood', feeling: 'mood', feelings: 'mood',
     emotional_state: 'mood', mood_state: 'mood', mental_state: 'mood',
-    // posture 계열
-    position: 'posture', pose: 'posture', stance: 'posture', body_position: 'posture',
+    // posture/activity 통합 — 자세는 활동의 일부라 따로 두면 "서 있음"과 "누워 있음"이
+    // 다른 슬롯에 공존하는 모순이 생긴다. 전부 activity 한 줄로 병합.
+    posture: 'activity', position: 'activity', pose: 'activity', stance: 'activity', body_position: 'activity',
     // holding 계열
     held_items: 'holding', held_item: 'holding', carrying: 'holding', in_hand: 'holding',
     // location 계열
@@ -2228,7 +2230,7 @@ function canonSlot(slot) {
 }
 
 /* 장면이 바뀌면 무효가 되는 휘발성 슬롯 — 주입 시 낡은 값은 걸러낸다 */
-const VOLATILE_SLOTS = new Set(['posture', 'mood', 'outfit', 'holding', 'activity', 'expression', 'condition']);
+const VOLATILE_SLOTS = new Set(['mood', 'outfit', 'holding', 'activity', 'expression', 'condition']);
 function isVolatileSlot(slot) { return VOLATILE_SLOTS.has(canonSlot(slot)); }
 
 /** 상태 보드의 scene 항목에서 현재 장면(장소·날짜·시각)을 골라낸다 */
@@ -2265,6 +2267,8 @@ async function buildPacketSections(query, supervisorPlan) {
     const publicRecall = [];
     const protectedRecall = [];
     for (const m of [...pinned, ...triggered, ...selected]) {
+        // 직전 1교환 이내의 기억은 눈에 보이는 채팅 원문과 겹친다 — 요약본을 또 실을 이유가 없다
+        if (!m.pinned && (store.turnCounter - (m.turnIndex || 0)) <= 1) continue;
         (m.visibility === 'public' ? publicRecall : protectedRecall).push(m);
     }
     // 낡은 회상 표시: 회상된 기억이 그 후 바뀐 상태의 옛 값을 담고 있으면 주입 시 "당시 기준" 꼬리표를 붙인다
@@ -2297,12 +2301,24 @@ async function buildPacketSections(query, supervisorPlan) {
         const slot = canonSlot(s.slot);
         if (slot === 'location' || slot === 'date') sceneAnchorTurn = Math.max(sceneAnchorTurn, s.turnIndex || 0);
     }
+    // 인물 이동 앵커: 각 인물의 위치(location/whereabouts)가 마지막으로 바뀐 턴 —
+    // 그보다 먼저 기록된 활동·기분 등은 이전 자리의 것이므로 무효
+    // ("기숙사를 나갔다"가 기록됐는데 "방에서 짐 푸는 중"이 계속 서 있는 사고 방지)
+    const moveAnchor = new Map();
+    for (const s of store.entityStates) {
+        const slot = canonSlot(s.slot);
+        if ((slot !== 'location' && slot !== 'whereabouts') || s.claim === 'belief') continue;
+        const k = String(s.entity || '').toLowerCase();
+        moveAnchor.set(k, Math.max(moveAnchor.get(k) || 0, s.turnIndex || 0));
+    }
     const states = store.entityStates
         .filter(s => !(scene.any && String(s.entity || '').toLowerCase() === 'scene' && sceneSlots.includes(String(s.slot || '').toLowerCase())))
-        // 휘발성 슬롯(자세·복장·기분 등)은 장면이 지나면 무효 — 이전 장면 것과 오래된 것은 주입 제외 (저장소에는 남음)
+        // 휘발성 슬롯(활동·복장·기분 등)은 장면이 지나거나 당사자가 이동하면 무효 —
+        // 이전 장면·이전 자리 것과 오래된 것은 주입 제외 (저장소에는 남음)
         .filter(s => {
             if (!isVolatileSlot(s.slot) || s.claim === 'belief') return true;
-            if ((s.turnIndex || 0) < sceneAnchorTurn) return false;
+            const anchor = Math.max(sceneAnchorTurn, moveAnchor.get(String(s.entity || '').toLowerCase()) || 0);
+            if ((s.turnIndex || 0) < anchor) return false;
             return (store.turnCounter - (s.turnIndex || 0)) <= 16;
         })
         .slice(-10);
@@ -2448,8 +2464,10 @@ function renderPacket(parts, { withExcerpts = true, recallLimit = Infinity, prot
         lines.push('## Status Board (current values)');
         // 지속 상태(부상·위치·목표 등)를 먼저, 장면 휘발성 상태(자세·복장·기분)를 뒤에 —
         // 모델이 "오래 유지할 값"과 "이번 장면에서 재확인할 값"을 구분해 읽도록
-        const persistent = states.filter(s => !isVolatileSlot(s.slot));
-        const volatile = states.filter(s => isVolatileSlot(s.slot));
+        // 인물별로 묶어 정렬 — 같은 인물의 상태가 흩어져 실리면 모순을 알아채기 어렵다
+        const byEntity = (a, b) => String(a.entity).localeCompare(String(b.entity)) || String(a.slot).localeCompare(String(b.slot));
+        const persistent = states.filter(s => !isVolatileSlot(s.slot)).sort(byEntity);
+        const volatile = states.filter(s => isVolatileSlot(s.slot)).sort(byEntity);
         const fmtState = (s) => {
             const freshChange = s.prev != null && (parts.turnNow || 0) - (s.turnIndex || 0) <= 6;
             const was = freshChange ? ` (was: ${s.prev})` : '';
