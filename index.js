@@ -507,39 +507,54 @@ function normalizeEmbedApiUrl(url) {
 }
 
 /** 텍스트 배열 → 정규화된 Float32Array 배열. 실패 시 null (해시 임베딩으로 폴백) */
-async function callEmbedApi(texts) {
+async function callEmbedApi(texts, { retries = 3, timeoutMs = 30000 } = {}) {
     const cfg = getSettings().embedApi;
     const url = normalizeEmbedApiUrl(cfg.url);
     if (cfg.mode !== 'api' || !url || !texts.length) return null;
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 20000);
-    try {
-        const headers = { 'Content-Type': 'application/json' };
-        if (cfg.key) headers['Authorization'] = `Bearer ${cfg.key}`;
-        const res = await fetch(url, {
-            method: 'POST', headers, signal: controller.signal,
-            body: JSON.stringify({ model: cfg.model || 'text-embedding-3-small', input: texts }),
-        });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const data = await res.json();
-        const rows = Array.isArray(data?.data) ? data.data : [];
-        if (rows.length !== texts.length) throw new Error('임베딩 응답 개수 불일치');
-        return rows
-            .sort((a, b) => (a.index ?? 0) - (b.index ?? 0))
-            .map(r => {
-                const arr = Float32Array.from(r.embedding || []);
-                let norm = 0;
-                for (let i = 0; i < arr.length; i++) norm += arr[i] * arr[i];
-                norm = Math.sqrt(norm) || 1;
-                for (let i = 0; i < arr.length; i++) arr[i] /= norm;
-                return arr;
+    for (let attempt = 0; attempt < retries; attempt++) {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+        try {
+            const headers = { 'Content-Type': 'application/json' };
+            if (cfg.key) headers['Authorization'] = `Bearer ${cfg.key}`;
+            const res = await fetch(url, {
+                method: 'POST', headers, signal: controller.signal,
+                body: JSON.stringify({ model: cfg.model || 'text-embedding-3-small', input: texts }),
             });
-    } catch (e) {
-        console.warn(`[${MODULE_NAME}] 임베딩 API 실패 (해시 임베딩으로 폴백):`, e);
-        return null;
-    } finally {
-        clearTimeout(timeoutId);
+            if (res.status === 429 || res.status >= 500) {
+                const wait = Math.min(2000 * (attempt + 1), 8000);
+                console.warn(`[${MODULE_NAME}] 임베딩 API HTTP ${res.status}, ${wait}ms 후 재시도 (${attempt + 1}/${retries})`);
+                await new Promise(r => setTimeout(r, wait));
+                continue;
+            }
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            const data = await res.json();
+            const rows = Array.isArray(data?.data) ? data.data : [];
+            if (rows.length !== texts.length) throw new Error('임베딩 응답 개수 불일치');
+            return rows
+                .sort((a, b) => (a.index ?? 0) - (b.index ?? 0))
+                .map(r => {
+                    const arr = Float32Array.from(r.embedding || []);
+                    let norm = 0;
+                    for (let i = 0; i < arr.length; i++) norm += arr[i] * arr[i];
+                    norm = Math.sqrt(norm) || 1;
+                    for (let i = 0; i < arr.length; i++) arr[i] /= norm;
+                    return arr;
+                });
+        } catch (e) {
+            if (e.name === 'AbortError' && attempt < retries - 1) {
+                const wait = Math.min(3000 * (attempt + 1), 10000);
+                console.warn(`[${MODULE_NAME}] 임베딩 API 타임아웃, ${wait}ms 후 재시도 (${attempt + 1}/${retries})`);
+                await new Promise(r => setTimeout(r, wait));
+                continue;
+            }
+            console.warn(`[${MODULE_NAME}] 임베딩 API 실패 (해시 임베딩으로 폴백):`, e);
+            return null;
+        } finally {
+            clearTimeout(timeoutId);
+        }
     }
+    return null;
 }
 
 /** 새로 저장된 기억들에 API 임베딩을 붙인다 — 요약 축(avec)과 큐 축(acvec) 모두.
@@ -3898,10 +3913,9 @@ function bindUI() {
         const $prog = $('#memoria_embed_progress');
         $btn.addClass('disabled');
         try {
-            let done = 0, failed = false;
+            let done = 0, skipped = 0;
             for (let i = 0; i < targets.length; i += 48) {
                 const batch = targets.slice(i, i + 48);
-                // 요약 축(avec)과 큐 축(acvec)을 함께 재계산
                 const texts = [];
                 const slots = [];
                 for (const m of batch) {
@@ -3913,14 +3927,19 @@ function bindUI() {
                         slots.push({ m, field: 'acvec' });
                     }
                 }
-                const vecs = await callEmbedApi(texts);
-                if (!vecs) { failed = true; break; }
+                const vecs = await callEmbedApi(texts, { retries: 3, timeoutMs: 30000 });
+                if (!vecs) {
+                    skipped += batch.length;
+                    $prog.text(`${done}/${targets.length} (${skipped} 건너뜀)`);
+                    continue;
+                }
                 slots.forEach((s, j) => { s.m[s.field] = encodeVec(vecs[j]); });
                 done += batch.length;
                 $prog.text(`${done}/${targets.length}`);
+                if (done % 192 === 0) persistStore();
             }
             persistStore();
-            if (failed) toastr.error(`임베딩 재계산 중단 (${done}/${targets.length}). API 설정을 확인하세요.`, 'Memoria');
+            if (skipped > 0) toastr.warning(`임베딩 재계산 완료: ${done}개 성공, ${skipped}개 실패 (건너뜀). 실패분은 다시 시도해 주세요.`, 'Memoria');
             else toastr.success(`기억 ${done}개의 임베딩을 재계산했습니다.`, 'Memoria');
         } finally {
             $btn.removeClass('disabled');
