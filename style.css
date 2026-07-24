@@ -560,6 +560,17 @@
 .memoria__row.is-resolved { opacity: 0.5; }
 .memoria__row.is-resolved .memoria__row-text { text-decoration: line-through; }
 
+/* 수기 서약에 대한 사서의 "해소된 듯" 의견 배지 */
+.memoria__suggest {
+    margin-left: 6px;
+    padding: 1px 7px;
+    border-radius: 8px;
+    background: color-mix(in srgb, var(--mm-accent, #b08968) 18%, transparent);
+    color: var(--mm-accent, #b08968);
+    font-size: 0.82em;
+    white-space: nowrap;
+}
+
 .memoria__row-text {
     flex: 1;
     min-width: 0;

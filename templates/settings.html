@@ -1,7 +1,7 @@
 <div id="memoria_settings" class="memoria">
     <div class="inline-drawer">
         <div class="inline-drawer-toggle inline-drawer-header">
-            <b><i class="fa-solid fa-book-bookmark"></i> Memoria — 장기기억 서고 <span class="memoria__version">v1.3.0</span></b>
+            <b><i class="fa-solid fa-book-bookmark"></i> Memoria — 장기기억 서고 <span class="memoria__version">v1.3.1</span></b>
             <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
         </div>
         <div class="inline-drawer-content">
@@ -50,12 +50,13 @@
                     <div class="memoria__section-head">
                         <div>
                             <h4>주입 미리보기</h4>
-                            <p>다음 응답 생성 시 프롬프트에 들어갈 장기기억입니다.</p>
+                            <p>다음 응답 생성 시 프롬프트에 들어갈 장기기억입니다. 직접 수정한 뒤 ✏ 버튼을 누르면 <b>다음 응답 1회</b>에 한해 수정본이 주입됩니다.</p>
                         </div>
                         <span id="memoria_packet_tokens" class="memoria__token-badge"></span>
+                        <i class="fa-solid fa-pen-to-square memoria__icon-btn" id="memoria_packet_apply" title="수정한 내용을 다음 응답 1회에 주입 (장부는 매 턴 재생성되므로 영구 수정은 기억·상태·서약 탭에서)"></i>
                         <i class="fa-solid fa-copy memoria__icon-btn" id="memoria_packet_copy" title="주입 내용 전체 복사"></i>
                     </div>
-                    <textarea id="memoria_packet_preview" class="memoria__preview" rows="12" readonly></textarea>
+                    <textarea id="memoria_packet_preview" class="memoria__preview" rows="12"></textarea>
                 </div>
                 <div class="memoria__section">
                     <div class="memoria__section-head">

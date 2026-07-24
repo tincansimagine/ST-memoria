@@ -1243,6 +1243,10 @@ function rollbackOrDrop(list, turnIndex) {
         if (row.prev != null) {
             return [{ ...row, value: row.prev, turnIndex: row.prevTurn ?? 0, prev: null, prevTurn: null }];
         }
+        // 이 턴에 "재확인"만 된 옛 기록(값은 그대로, turnIndex만 이동) — 지우면 오래 지켜온
+        // 캐논·상태가 스와이프 한 번에 증발한다. 재확인 이전 시점으로만 되돌린다.
+        const created = row.createdTurn ?? row.turnIndex;
+        if (created !== turnIndex) return [{ ...row, turnIndex: created }];
         return [];
     });
 }
@@ -1251,12 +1255,18 @@ function removeDerivedForTurn(store, turnIndex) {
     store.memories = store.memories.filter(m => m.turnIndex !== turnIndex || m.pinned || m.manual);
     store.worldRules = rollbackOrDrop(store.worldRules, turnIndex);
     store.entityStates = rollbackOrDrop(store.entityStates, turnIndex);
-    store.locks = store.locks.filter(l => l.turnIndex !== turnIndex || l.manual);
+    // 스와이프 롤백은 "그 턴에 처음 생긴" 서약만 지운다 — 옛 서약이 이 턴에 재발행돼
+    // turnIndex만 갱신된 경우까지 지우면 오래 지켜온 서약이 통째로 증발한다
+    store.locks = store.locks.filter(l => (l.createdTurn ?? l.turnIndex) !== turnIndex || l.manual);
     // 이 턴에서 "해소됨" 판정을 받은 서약은 다시 활성으로 (스와이프/삭제 롤백)
     for (const l of store.locks) {
         if (l.status === 'resolved' && l.resolvedTurn === turnIndex) {
             l.status = 'active';
             l.resolvedTurn = null;
+        }
+        if (l.suggestResolved && l.suggestTurn === turnIndex) {
+            l.suggestResolved = false;
+            l.suggestTurn = null;
         }
     }
     // 인물 도감: 이 턴에서 처음 만들어졌고 이후 갱신이 없는 인물만 제거 (병합된 프로필은 유지)
@@ -1274,43 +1284,56 @@ function removeDerivedForTurn(store, turnIndex) {
 function upsertWorldRule(store, rule, turnIndex) {
     const idx = store.worldRules.findIndex(r => r.scope === rule.scope && (r.scopeName || '') === (rule.scopeName || '') && r.key === rule.key);
     if (idx < 0) {
-        store.worldRules.push({ id: uuidv4(), ...rule, turnIndex, prev: null, prevTurn: null });
+        store.worldRules.push({ id: uuidv4(), ...rule, turnIndex, createdTurn: turnIndex, prev: null, prevTurn: null });
         return;
     }
     const cur = store.worldRules[idx];
+    const createdTurn = cur.createdTurn ?? cur.turnIndex; // 처음 생긴 턴 보존 — 스와이프 롤백 증발 방지
     if ((cur.turnIndex || 0) > turnIndex) return; // 최신성 보호: 옛 턴 재기록이 새 사실을 덮지 못함
-    if (cur.value === rule.value) { cur.turnIndex = turnIndex; return; } // 재확인 — 이전값 이력 유지
+    if (cur.value === rule.value) { cur.turnIndex = turnIndex; cur.createdTurn = createdTurn; return; } // 재확인 — 이전값 이력 유지
     if ((cur.turnIndex || 0) === turnIndex) {
-        store.worldRules[idx] = { id: cur.id, ...rule, turnIndex, prev: cur.prev ?? null, prevTurn: cur.prevTurn ?? null };
+        store.worldRules[idx] = { id: cur.id, ...rule, turnIndex, createdTurn, prev: cur.prev ?? null, prevTurn: cur.prevTurn ?? null };
         return;
     }
-    store.worldRules[idx] = { id: cur.id, ...rule, turnIndex, prev: cur.value, prevTurn: cur.turnIndex };
+    store.worldRules[idx] = { id: cur.id, ...rule, turnIndex, createdTurn, prev: cur.value, prevTurn: cur.turnIndex };
 }
 
 function upsertEntityState(store, state, turnIndex) {
     // 슬롯 별칭 병합: 기존 항목이 구식 슬롯명(physical_state 등)으로 저장돼 있어도 같은 줄로 합쳐진다
     const idx = store.entityStates.findIndex(s => s.entity.toLowerCase() === state.entity.toLowerCase() && canonSlot(s.slot) === canonSlot(state.slot) && s.claim === state.claim && (s.owner || '') === (state.owner || ''));
     if (idx < 0) {
-        store.entityStates.push({ id: uuidv4(), ...state, turnIndex, prev: null, prevTurn: null });
+        store.entityStates.push({ id: uuidv4(), ...state, turnIndex, createdTurn: turnIndex, prev: null, prevTurn: null });
         return;
     }
     const cur = store.entityStates[idx];
+    const createdTurn = cur.createdTurn ?? cur.turnIndex; // 처음 생긴 턴 보존 — 스와이프 롤백 증발 방지
     if ((cur.turnIndex || 0) > turnIndex) return; // 최신성 보호
-    if (cur.value === state.value) { cur.turnIndex = turnIndex; return; }
+    if (cur.value === state.value) { cur.turnIndex = turnIndex; cur.createdTurn = createdTurn; return; }
     if ((cur.turnIndex || 0) === turnIndex) {
         // 같은 턴 안의 중복 항목 — 값만 갱신하고 이전값 이력은 유지
-        store.entityStates[idx] = { id: cur.id, ...state, turnIndex, prev: cur.prev ?? null, prevTurn: cur.prevTurn ?? null };
+        store.entityStates[idx] = { id: cur.id, ...state, turnIndex, createdTurn, prev: cur.prev ?? null, prevTurn: cur.prevTurn ?? null };
         return;
     }
-    store.entityStates[idx] = { id: cur.id, ...state, turnIndex, prev: cur.value, prevTurn: cur.turnIndex };
+    store.entityStates[idx] = { id: cur.id, ...state, turnIndex, createdTurn, prev: cur.value, prevTurn: cur.turnIndex };
 }
 
 function upsertLock(store, lock, turnIndex) {
     let idx = store.locks.findIndex(l => l.kind === lock.kind && l.summary === lock.summary);
     // 같은 종류의 사실상 같은 서약(문구만 다른 재발행)은 새 문구로 갱신 — 서약 목록 증식 방지
     if (idx < 0) idx = store.locks.findIndex(l => l.kind === lock.kind && textOverlap(l.summary, lock.summary) >= 0.55);
-    const row = { id: idx >= 0 ? store.locks[idx].id : uuidv4(), ...lock, turnIndex };
-    if (idx >= 0) store.locks[idx] = row; else store.locks.push(row);
+    if (idx < 0) {
+        store.locks.push({ id: uuidv4(), ...lock, turnIndex, createdTurn: turnIndex });
+        return;
+    }
+    const cur = store.locks[idx];
+    // 수기 서약은 사서의 재발행이 건드리지 못한다 — 덮어쓰기로 manual 플래그가 지워지면
+    // 스와이프 롤백 보호가 풀려 서약이 통째로 사라지는 사고가 났었다
+    if (cur.manual && !lock.manual) return;
+    store.locks[idx] = {
+        id: cur.id, ...lock, turnIndex,
+        manual: cur.manual || lock.manual || false,
+        createdTurn: cur.createdTurn ?? cur.turnIndex, // 재발행돼도 "처음 생긴 턴"은 보존
+    };
 }
 
 /** 인물 도감 upsert: 새 정보만 채우고, 관계는 대상별 최신값으로 갱신.
@@ -1578,9 +1601,14 @@ async function commitTurn(mesId, { silent = true, force = false } = {}) {
     for (const l of extracted.locks) upsertLock(store, l, turn.turnIndex);
 
     // 사서가 해소됐다고 판정한 서약 처리 (스와이프 시 되돌릴 수 있게 턴 기록)
+    // 수기 서약은 사서가 직접 닫지 못한다 — 대신 "해소된 듯" 의견만 붙여 사용자가 ✔로 확정
     for (const tag of (extracted.settledPledges || [])) {
         const lock = pledgeTagMap.get(tag);
-        if (lock && lock.status === 'active') {
+        if (!lock || lock.status !== 'active') continue;
+        if (lock.manual) {
+            lock.suggestResolved = true;
+            lock.suggestTurn = turn.turnIndex;
+        } else {
             lock.status = 'resolved';
             lock.resolvedTurn = turn.turnIndex;
         }
@@ -2541,6 +2569,9 @@ function renderPacket(parts, { withExcerpts = true, recallLimit = Infinity, prot
 }
 
 let lastPacketText = '';
+// 주입 미리보기에서 사용자가 수정한 1회용 장부 — 다음 응답 생성에 그대로 주입 후 폐기.
+// 장부는 매 턴 서고에서 재생성되므로 영구 수정은 기억·상태·서약 편집으로만 가능하다.
+let packetOverrideOnce = null;
 let lastPacketTokens = 0;
 let lastPacketTrim = 0; // 예산 때문에 내려간 축소 사다리 단수 (0 = 전체 수록)
 
@@ -2611,6 +2642,15 @@ async function updateInjection({ runSupervisorPass = false } = {}) {
         return;
     }
 
+    // 1회용 수정본이 대기 중이면 재생성 없이 그대로 주입 (다음 응답이 도착하면 폐기)
+    if (packetOverrideOnce != null) {
+        lastPacketText = packetOverrideOnce;
+        setExtensionPrompt(INJECT_KEY, packetOverrideOnce, injectionType(), settings.injectDepth, false, extension_prompt_roles.SYSTEM);
+        lastPacketTokens = packetOverrideOnce ? await getTokenCountAsync(packetOverrideOnce) : 0;
+        refreshPacketPreview();
+        return;
+    }
+
     let query = '';
     for (let i = chat.length - 1; i >= 0; i--) {
         if (chat[i]?.is_user && chat[i].mes) { query = chat[i].mes; break; }
@@ -2657,14 +2697,17 @@ function renumberTurns(store) {
     for (const r of store.worldRules) {
         r.turnIndex = remap(r.turnIndex);
         if (r.prevTurn != null) r.prevTurn = remap(r.prevTurn);
+        if (r.createdTurn != null) r.createdTurn = remap(r.createdTurn);
     }
     for (const s of store.entityStates) {
         s.turnIndex = remap(s.turnIndex);
         if (s.prevTurn != null) s.prevTurn = remap(s.prevTurn);
+        if (s.createdTurn != null) s.createdTurn = remap(s.createdTurn);
     }
     for (const l of store.locks) {
         l.turnIndex = remap(l.turnIndex);
         if (l.resolvedTurn != null) l.resolvedTurn = remap(l.resolvedTurn);
+        if (l.createdTurn != null) l.createdTurn = remap(l.createdTurn);
     }
     for (const c of store.characters) {
         c.firstTurn = remap(c.firstTurn);
@@ -3087,7 +3130,12 @@ function updateStatusUI(activity) {
 function refreshPacketPreview() {
     const el = $('#memoria_packet_preview');
     if (!el.length) return;
+    if (el.is(':focus')) return; // 사용자가 수정 중인 내용을 자동 갱신이 덮어쓰지 않게
     el.val(lastPacketText || '(주입할 내용이 없습니다 — 기억이 쌓이면 자동 생성됩니다)');
+    if (packetOverrideOnce != null) {
+        $('#memoria_packet_tokens').text(`✏ 수정본 대기 중 — 다음 응답 1회에 주입됩니다 (≈ ${lastPacketTokens} 토큰)`);
+        return;
+    }
     const trimNote = !lastPacketText ? ''
         : lastPacketTrim === 0 ? ' · 전체 수록'
         : lastPacketTrim <= 2 ? ` · 일부 축소 (${lastPacketTrim}단)`
@@ -3317,9 +3365,12 @@ function renderStatePanel() {
     $locks.empty();
     if (!store.locks.length) $locks.append('<div class="memoria__empty">기록된 서약이 없습니다.</div>');
     for (const l of store.locks) {
+        const suggest = (l.suggestResolved && l.status === 'active')
+            ? ' <small class="memoria__suggest" title="사서가 이야기 속에서 해소됐다고 판단한 수기 서약입니다. 동의하면 ✔로 확정하세요.">🔔 해소된 듯 — ✔로 확정</small>'
+            : '';
         $locks.append($(`
             <div class="memoria__row${l.status === 'resolved' ? ' is-resolved' : ''}" data-id="${l.id}">
-                <span class="memoria__row-text"><span class="memoria__badge memoria__badge--lock">${LOCK_LABELS[l.kind] || l.kind}</span> ${escapeHtml(l.summary)} <small>(P${l.priority} · t${l.turnIndex})</small></span>
+                <span class="memoria__row-text"><span class="memoria__badge memoria__badge--lock">${LOCK_LABELS[l.kind] || l.kind}</span> ${escapeHtml(l.summary)} <small>(P${l.priority} · t${l.turnIndex})</small>${suggest}</span>
                 <i class="fa-solid ${l.status === 'resolved' ? 'fa-rotate-left' : 'fa-check'} memoria-lock-toggle" title="${l.status === 'resolved' ? '다시 활성화' : '해결됨으로 표시'}"></i>
                 <i class="fa-solid fa-trash memoria-lock-delete" title="삭제"></i>
             </div>
@@ -3505,8 +3556,22 @@ function bindUI() {
     });
 
     $('#memoria_refresh_packet').on('click', async function () {
+        packetOverrideOnce = null; // 갱신은 수정본 폐기를 겸한다
         await updateInjection();
         toastr.success('주입 내용을 다시 생성했습니다.', 'Memoria');
+    });
+
+    $('#memoria_packet_apply').on('click', async function () {
+        if (!getCurrentChatId()) { toastr.warning('열린 채팅이 없습니다.', 'Memoria'); return; }
+        const edited = String($('#memoria_packet_preview').val() || '').trim();
+        if (!edited || edited.startsWith('(주입할 내용이 없습니다')) {
+            toastr.warning('주입할 내용이 비어 있습니다.', 'Memoria');
+            return;
+        }
+        packetOverrideOnce = edited;
+        $('#memoria_packet_preview').blur();
+        await updateInjection();
+        toastr.success('수정본이 다음 응답 1회에 주입됩니다. (영구 수정은 기억·상태·서약 탭에서)', 'Memoria');
     });
 
     // ── 서고에 질문
@@ -3562,6 +3627,7 @@ function bindUI() {
         const edited = await ctx.callGenericPopup('기억 내용 수정', ctx.POPUP_TYPE.INPUT, m.summary, { rows: 4 });
         if (!edited || typeof edited !== 'string') return;
         m.summary = cleanStr(edited, 300);
+        m.manual = true; // 사용자가 다듬은 기억은 스와이프 롤백·상한 정리·서고 정리에서 보호 (인물 편집과 동일)
         m.vec = encodeVec(embedText(memoryIndexText(m)));
         m.avec = null;
         attachApiEmbeddings([m]);
@@ -3798,6 +3864,8 @@ function bindUI() {
         const lock = store.locks.find(l => l.id === id);
         if (!lock) return;
         lock.status = lock.status === 'resolved' ? 'active' : 'resolved';
+        lock.suggestResolved = false; // 사용자가 직접 결정했으니 사서 의견은 정리
+        lock.suggestTurn = null;
         persistStore(); renderStatePanel(); updateInjection();
     });
 
@@ -4285,6 +4353,7 @@ function registerCommands() {
 
 function bindEvents() {
     eventSource.on(event_types.MESSAGE_RECEIVED, async (mesId) => {
+        packetOverrideOnce = null; // 1회용 수정본은 응답이 도착하면 폐기
         const settings = getSettings();
         if (!settings.enabled || !settings.autoRecord) return;
         const mes = chat[mesId];
@@ -4331,6 +4400,7 @@ function bindEvents() {
     });
 
     eventSource.on(event_types.CHAT_CHANGED, () => {
+        packetOverrideOnce = null; // 수정본은 그 채팅의 그 순간에만 유효
         vecCache.clear();
         queryEmbedCache.clear();
         dossierVecCache.clear();
