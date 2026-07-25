@@ -213,7 +213,9 @@ const DEFAULT_SETTINGS = Object.freeze({
     refWorldInfo: false,      // 사서·요약 호출 시 활성 월드인포(로어북)를 참고 자료로 제공
     summaryContextCount: 3,   // 요약 생성 시 참조할 이전 요약 수 (0 = 안 함, -1 = 전체)
     apiMode: 'st',            // 'st' = 실리태번(현재 API/연결 프로필), 'custom' = 커스텀 OpenAI 호환 API
-    customApi: { url: '', key: '', model: '', temperature: 0.7, timeoutSec: 90 },
+    // flexTier: 절감 티어(반값·지연 감수) — 'off' | 'openai'(본문 service_tier) | 'gemini'(헤더)
+    // extraHeaders/extraBody: JSON 문자열 — 요청에 얹을 추가 헤더·본문 필드 (프록시 라우팅 등 고급용)
+    customApi: { url: '', key: '', model: '', temperature: 0.7, timeoutSec: 90, flexTier: 'off', extraHeaders: '', extraBody: '' },
     // 의미 검색 소스: 'off' = 내장 해시만, 'local' = 실리태번 내장 임베딩(무료), 'api' = OpenAI 호환 임베딩 API
     embedApi: { mode: 'off', enabled: false, url: '', key: '', model: '' },
     consolidateEvery: 30,     // N턴마다 서고 정리(중복 병합·중요도 재조정). 0 = 끔
@@ -912,6 +914,18 @@ function normalizeCustomApiUrl(url) {
     return u;
 }
 
+/** 설정에 적힌 JSON 오브젝트 문자열을 파싱 (비었거나 오브젝트가 아니면 null) */
+function parseJsonObjectSetting(raw) {
+    const t = String(raw || '').trim();
+    if (!t) return null;
+    try {
+        const o = JSON.parse(t);
+        return (o && typeof o === 'object' && !Array.isArray(o)) ? o : null;
+    } catch {
+        return null;
+    }
+}
+
 /** 커스텀 OpenAI 호환 API 직접 호출 */
 async function callCustomApi(systemPrompt, userPrompt, tokens) {
     const cfg = getSettings().customApi;
@@ -921,6 +935,27 @@ async function callCustomApi(systemPrompt, userPrompt, tokens) {
     const headers = { 'Content-Type': 'application/json' };
     if (cfg.key) headers['Authorization'] = `Bearer ${cfg.key}`;
 
+    const body = {
+        model: cfg.model,
+        messages: [
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: userPrompt },
+        ],
+        temperature: Number.isFinite(Number(cfg.temperature)) ? Number(cfg.temperature) : 0.7,
+        max_tokens: tokens,
+        stream: false,
+    };
+
+    // 절감 티어: 배경 작업이라 지연을 감수하고 반값으로 — 제공사마다 거는 위치가 다르다
+    if (cfg.flexTier === 'openai') body.service_tier = 'flex';
+    else if (cfg.flexTier === 'gemini') headers['X-Goog-Api-Service-Tier'] = 'flex';
+
+    // 고급: 사용자가 직접 얹는 헤더·본문 필드는 마지막에 적용해 위 기본값까지 덮어쓸 수 있게 한다
+    const extraHeaders = parseJsonObjectSetting(cfg.extraHeaders);
+    if (extraHeaders) for (const [k, v] of Object.entries(extraHeaders)) headers[k] = String(v);
+    const extraBody = parseJsonObjectSetting(cfg.extraBody);
+    if (extraBody) Object.assign(body, extraBody);
+
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), Math.max(10, cfg.timeoutSec || 90) * 1000);
     try {
@@ -928,16 +963,7 @@ async function callCustomApi(systemPrompt, userPrompt, tokens) {
             method: 'POST',
             headers,
             signal: controller.signal,
-            body: JSON.stringify({
-                model: cfg.model,
-                messages: [
-                    { role: 'system', content: systemPrompt },
-                    { role: 'user', content: userPrompt },
-                ],
-                temperature: Number.isFinite(Number(cfg.temperature)) ? Number(cfg.temperature) : 0.7,
-                max_tokens: tokens,
-                stream: false,
-            }),
+            body: JSON.stringify(body),
         });
         if (!response.ok) {
             let detail = response.statusText;
@@ -3557,6 +3583,9 @@ function renderSettingsPanel() {
     $('#memoria_custom_model').val(s.customApi.model);
     $('#memoria_custom_temp').val(s.customApi.temperature);
     $('#memoria_custom_timeout').val(s.customApi.timeoutSec);
+    $('#memoria_custom_flex').val(s.customApi.flexTier || 'off');
+    $('#memoria_custom_headers').val(s.customApi.extraHeaders || '');
+    $('#memoria_custom_body').val(s.customApi.extraBody || '');
     $('#memoria_st_api_block').toggle(s.apiMode !== 'custom');
     $('#memoria_custom_api_block').toggle(s.apiMode === 'custom');
 
@@ -4104,6 +4133,25 @@ function bindUI() {
     customBind('#memoria_custom_model', 'model');
     customBind('#memoria_custom_temp', 'temperature', true);
     customBind('#memoria_custom_timeout', 'timeoutSec', true);
+    $('#memoria_custom_flex').on('change', function () {
+        const v = String($(this).val() || 'off');
+        getSettings().customApi.flexTier = ['openai', 'gemini'].includes(v) ? v : 'off';
+        saveSettingsDebounced();
+        if (v !== 'off') toastr.info('절감 티어는 응답이 수 분까지 늦어질 수 있습니다 — 타임아웃을 넉넉히 잡고, Flex 사용 시 장면 연출은 끄는 것을 권합니다.', 'Memoria');
+    });
+    // 추가 헤더/본문 필드 — 저장 전에 JSON 형식을 검사해 조용한 무시 사고를 막는다
+    const customJsonBind = (sel, key) => {
+        $(sel).on('change', function () {
+            const raw = String($(this).val() || '').trim();
+            if (raw && !parseJsonObjectSetting(raw)) {
+                toastr.warning('JSON 오브젝트 형식이 아닙니다 — 예: {"service_tier":"flex"}. 이 값은 무시됩니다.', 'Memoria');
+            }
+            getSettings().customApi[key] = raw;
+            saveSettingsDebounced();
+        });
+    };
+    customJsonBind('#memoria_custom_headers', 'extraHeaders');
+    customJsonBind('#memoria_custom_body', 'extraBody');
     $('#memoria_api_test').on('click', async function () {
         const $btn = $(this);
         $btn.addClass('disabled');

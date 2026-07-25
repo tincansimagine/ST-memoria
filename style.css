@@ -702,6 +702,17 @@
     font-weight: 600;
 }
 
+.memoria__advanced {
+    margin-top: 8px;
+}
+
+.memoria__advanced summary {
+    cursor: pointer;
+    font-size: 0.85em;
+    opacity: 0.75;
+    padding: 2px 0;
+}
+
 .memoria__details textarea {
     width: 100%;
     box-sizing: border-box;

@@ -354,10 +354,29 @@
                                 <input type="number" id="memoria_custom_temp" min="0" max="2" step="0.1">
                             </div>
                             <div class="memoria__field">
-                                <label for="memoria_custom_timeout">타임아웃(초)</label>
-                                <input type="number" id="memoria_custom_timeout" min="10" max="600" step="10">
+                                <label for="memoria_custom_timeout" title="응답을 기다리는 최대 시간. Flex 같은 절감 티어는 수 분씩 걸릴 수 있으니 크게 잡으세요">타임아웃(초)</label>
+                                <input type="number" id="memoria_custom_timeout" min="10" max="1800" step="10">
                             </div>
                         </div>
+                        <div class="memoria__field">
+                            <label for="memoria_custom_flex" title="배경 작업(사서·요약·색인)을 반값 절감 티어로 처리. 응답이 수 분까지 늦어질 수 있으니 타임아웃을 넉넉히 잡고, 사용 시 장면 연출은 끄는 것을 권장">절감 티어 (Flex)</label>
+                            <select id="memoria_custom_flex">
+                                <option value="off">사용 안 함 (표준)</option>
+                                <option value="openai">OpenAI Flex (service_tier)</option>
+                                <option value="gemini">Gemini Flex (헤더 방식)</option>
+                            </select>
+                        </div>
+                        <details class="memoria__advanced">
+                            <summary>고급 — 커스텀 헤더/본문</summary>
+                            <div class="memoria__field">
+                                <label for="memoria_custom_headers" title="요청에 얹을 추가 HTTP 헤더 (JSON). 프록시 라우팅 지시 등 고급 용도">추가 헤더 (JSON, 선택)</label>
+                                <input type="text" id="memoria_custom_headers" placeholder='{"X-Header":"value"}' autocomplete="off">
+                            </div>
+                            <div class="memoria__field">
+                                <label for="memoria_custom_body" title="요청 본문에 얹을 추가 필드 (JSON). 표준 필드도 덮어쓸 수 있음">추가 본문 필드 (JSON, 선택)</label>
+                                <input type="text" id="memoria_custom_body" placeholder='{"provider":{"sort":"throughput"}}' autocomplete="off">
+                            </div>
+                        </details>
                     </div>
                     <div class="memoria__field-grid">
                         <div class="memoria__field">
