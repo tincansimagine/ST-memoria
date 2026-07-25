@@ -1738,31 +1738,45 @@ function previousSummariesForContext(store) {
 async function maybeSummarizeChunk(store) {
     const settings = getSettings();
     const n = Math.max(3, settings.chunkTurns);
-    const lastCovered = store.chunkSummaries.reduce((acc, c) => Math.max(acc, c.toTurn), 0);
-    if (store.turnCounter - lastCovered < n) return;
+    // 미요약 범위가 크게 밀렸어도(일괄 색인·기록 실패 구간) 한 덩이(t1–tNNN)로
+    // 삼키지 않고 n턴 창 단위로 나눠 요약한다. summaryCursor는 다이제스트가 없어
+    // 요약을 건너뛴 창도 "지나갔다"고 기억해 통짜 재시도를 막는다.
+    let lastCovered = Math.max(
+        store.summaryCursor || 0,
+        store.chunkSummaries.reduce((acc, c) => Math.max(acc, c.toTurn), 0),
+        store.arcSummaries.filter(a => !a.carried).reduce((acc, a) => Math.max(acc, a.toTurn), 0),
+    );
+    let pushed = false;
 
-    const fromTurn = lastCovered + 1;
-    const toTurn = store.turnCounter;
-    const parts = store.turns
-        .filter(t => t.turnIndex >= fromTurn && t.turnIndex <= toTurn && t.summary)
-        .sort((a, b) => a.turnIndex - b.turnIndex)
-        .map(t => `[t${t.turnIndex}] ${t.summary}`);
-    if (!parts.length) return;
+    while (store.turnCounter - lastCovered >= n) {
+        const fromTurn = lastCovered + 1;
+        const toTurn = Math.min(lastCovered + n, store.turnCounter);
+        lastCovered = toTurn;
+        store.summaryCursor = toTurn;
 
-    let text = '';
-    try {
-        const refBlock = await buildReferenceBlock();
-        const userPrompt = [refBlock, previousSummariesForContext(store), `Turn digests to weave:\n${parts.join('\n')}`]
-            .filter(Boolean).join('\n');
-        text = cleanMultiline(await callAuxLLM(`${settings.prompts.chunk}\n\n${languageDirective()}`, userPrompt, { maxTokens: 4000 }), 2000);
-    } catch (e) {
-        console.debug(`[${MODULE_NAME}] 청크 요약 LLM 실패, 연결 요약 사용`, e);
+        const parts = store.turns
+            .filter(t => t.turnIndex >= fromTurn && t.turnIndex <= toTurn && t.summary)
+            .sort((a, b) => a.turnIndex - b.turnIndex)
+            .map(t => `[t${t.turnIndex}] ${t.summary}`);
+        if (!parts.length) continue;
+
+        let text = '';
+        try {
+            const refBlock = await buildReferenceBlock();
+            const userPrompt = [refBlock, previousSummariesForContext(store), `Turn digests to weave:\n${parts.join('\n')}`]
+                .filter(Boolean).join('\n');
+            text = cleanMultiline(await callAuxLLM(`${settings.prompts.chunk}\n\n${languageDirective()}`, userPrompt, { maxTokens: 4000 }), 2000);
+        } catch (e) {
+            console.debug(`[${MODULE_NAME}] 청크 요약 LLM 실패, 연결 요약 사용`, e);
+        }
+        if (!text) text = cleanStr(parts.join(' / '), 2000);
+
+        store.chunkSummaries.push({ id: uuidv4(), fromTurn, toTurn, text });
+        pushed = true;
+        await maybeMergeArc(store);
     }
-    if (!text) text = cleanStr(parts.join(' / '), 2000);
 
-    store.chunkSummaries.push({ id: uuidv4(), fromTurn, toTurn, text });
-    await maybeMergeArc(store);
-    await applyAutoHide();
+    if (pushed) await applyAutoHide();
 }
 
 async function maybeMergeArc(store) {
@@ -2819,6 +2833,7 @@ function renumberTurns(store) {
         s.toTurn = remap(s.toTurn);
     }
     if (store.lastConsolidateTurn) store.lastConsolidateTurn = remap(store.lastConsolidateTurn);
+    if (store.summaryCursor) store.summaryCursor = remap(store.summaryCursor);
     store.turnCounter = ordered.length;
     return true;
 }
@@ -2936,7 +2951,90 @@ async function bulkIndexChat({ from = 0, to = Infinity, includeHidden = false } 
     $('#memoria_bulk_cancel').hide();
     $('#memoria_bulk_progress').text(bulkIndexAbort ? `중단됨 (${done}/${total})` : `완료 (${done}/${total})`);
     toastr.success(`${done}개 턴 색인 ${bulkIndexAbort ? '중단' : '완료'}`, 'Memoria');
+
+    // 일괄 색인은 턴을 하나씩 떼어 보므로 경과 시간 추정 오차가 수백 턴 누적될 수 있다.
+    // 색인이 어느 정도 쌓였으면 전체 다이제스트를 이어 읽는 재계산으로 시계를 바로잡는다.
+    if (!bulkIndexAbort && getSettings().storyClock && done >= 10) {
+        toastr.info('색인이 끝나 서사 시계를 재계산합니다…', 'Memoria');
+        await recalibrateStoryClock({ silent: true });
+    }
     await updateInjection();
+}
+
+/* ============================================================
+ * 서사 시계 재계산 — 재색인 없이 이야기 속 날짜를 바로잡는다
+ * ============================================================ */
+
+const CLOCK_RECAL_PROMPT = `You are rebuilding the in-story timeline of a roleplay archive. Below are consecutive turn digests, oldest first, each tagged like [t12]. Lines marked (context) are for continuity only — do not include them in your answer.
+
+For EVERY non-context digest, estimate how much STORY time passed since the digest right before it — including skips implied at its start: a night's sleep, "the next morning", "a week later", an explicit "three years later". Flashbacks, memories, or stories recounted inside a scene do NOT move the clock. Use one compact duration per turn: "0", "30m", "6h", "1d", "2d", "1w", "3mo", "2y". Be conservative — when the scene flows on unbroken or you are unsure, use "0".
+
+Reply with ONE minified JSON object mapping every non-context tag to its duration, e.g. {"t12":"0","t13":"6h","t14":"1d"} — nothing else.`;
+
+let clockRecalBusy = false;
+
+async function recalibrateStoryClock({ silent = false } = {}) {
+    if (clockRecalBusy) return;
+    const store = getStore();
+    const turns = store.turns.filter(t => t.summary).sort((a, b) => a.turnIndex - b.turnIndex);
+    if (turns.length < 2) {
+        if (!silent) toastr.info('재계산할 턴 기록이 없습니다.', 'Memoria');
+        return;
+    }
+
+    clockRecalBusy = true;
+    $('#memoria_clock_recalc').prop('disabled', true);
+    const $prog = $('#memoria_clock_progress');
+    const before = store.turns.reduce((a, t) => a + (t.elapsedDays || 0), 0);
+    const updates = new Map();
+    const BATCH = 80;
+    let failedBatches = 0;
+
+    try {
+        for (let i = 0; i < turns.length; i += BATCH) {
+            $prog.text(`재계산 중… ${Math.min(i + BATCH, turns.length)}/${turns.length}턴`);
+            const batch = turns.slice(i, i + BATCH);
+            // 배치 경계에서 시간이 끊기지 않게 직전 다이제스트 몇 개를 문맥으로 첨부
+            const ctx = turns.slice(Math.max(0, i - 3), i);
+            const lines = [
+                ...ctx.map(t => `(context) [t${t.turnIndex}] ${t.summary}`),
+                ...batch.map(t => `[t${t.turnIndex}] ${t.summary}`),
+            ].join('\n');
+            try {
+                const raw = await callAuxLLM(CLOCK_RECAL_PROMPT, lines, { maxTokens: 4000 });
+                const parsed = parseJsonLoose(raw);
+                if (!parsed) { failedBatches++; continue; }
+                for (const [k, v] of Object.entries(parsed)) {
+                    const m = /^t(\d+)$/.exec(String(k).trim());
+                    if (m) updates.set(Number(m[1]), parseDurationDays(v));
+                }
+            } catch (e) {
+                failedBatches++;
+                console.error(`[${MODULE_NAME}] 서사 시계 재계산 배치 실패:`, e);
+            }
+        }
+
+        if (!updates.size) {
+            $prog.text('실패');
+            toastr.error('서사 시계 재계산에 실패했습니다. (모델 응답 오류)', 'Memoria');
+            return;
+        }
+
+        // 응답에 없는 턴은 기존 값을 유지한다 (0으로 밀어버리지 않음)
+        for (const t of store.turns) {
+            if (updates.has(t.turnIndex)) t.elapsedDays = updates.get(t.turnIndex);
+        }
+        persistStore();
+        updateStatusUI();
+        const after = store.turns.reduce((a, t) => a + (t.elapsedDays || 0), 0);
+        const fmt = (d) => d >= 1 ? humanizeStoryDays(d) : '1일 미만';
+        $prog.text(`완료 — 총 경과 ${fmt(before)} → ${fmt(after)}${failedBatches ? ` (배치 ${failedBatches}개 실패)` : ''}`);
+        toastr.success(`서사 시계 재계산 완료 — 이야기 총 경과 ${fmt(after)}`, 'Memoria');
+        if (!silent) await updateInjection();
+    } finally {
+        clockRecalBusy = false;
+        $('#memoria_clock_recalc').prop('disabled', false);
+    }
 }
 
 /* ============================================================
@@ -4345,6 +4443,7 @@ function bindUI() {
         });
     });
     $('#memoria_bulk_cancel').on('click', function () { bulkIndexAbort = true; });
+    $('#memoria_clock_recalc').on('click', () => recalibrateStoryClock());
     $('#memoria_unhide_all').on('click', unhideAllMessages);
     $('#memoria_bible').on('click', exportStoryBible);
     $('#memoria_export').on('click', exportMemory);
@@ -4426,6 +4525,12 @@ function registerCommands() {
             name: 'memoria-index',
             helpString: '현재 채팅의 아직 기록되지 않은 턴을 전부 색인합니다.',
             callback: async () => { bulkIndexChat(); return '일괄 색인을 시작했습니다.'; },
+        }));
+
+        SlashCommandParser.addCommandObject(SlashCommand.fromProps({
+            name: 'memoria-clock',
+            helpString: '기록된 다이제스트를 처음부터 다시 읽어 서사 시계(이야기 속 날짜)를 재계산합니다.',
+            callback: async () => { recalibrateStoryClock(); return '서사 시계 재계산을 시작했습니다.'; },
         }));
 
         SlashCommandParser.addCommandObject(SlashCommand.fromProps({
