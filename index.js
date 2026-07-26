@@ -1292,7 +1292,13 @@ function sanitizeExtraction(raw, userText, assistantText) {
 let commitQueue = Promise.resolve();
 let pendingCommits = 0;
 
+/** 턴 동일성 판별 — 사서가 보는 본문(visibleProse) 기준이어야 편집·숨은 태그와 reconcile이 어긋나지 않는다 */
 function mesHashOf(mes) {
+    return getStringHash(visibleProse(mes?.mes || '')) >>> 0;
+}
+
+/** 구버전(v1.4.0 이하) raw mes 해시 — reconcile에서 한 번만 새 해시로 옮긴다 */
+function mesHashLegacyRaw(mes) {
     return getStringHash(String(mes?.mes || '')) >>> 0;
 }
 
@@ -1622,6 +1628,16 @@ async function commitTurn(mesId, { silent = true, force = false } = {}) {
             turnSummary: '', importance: 0.3,
             memories: [], worldRules: [], entityStates: [], locks: [],
         };
+    }
+
+    // LLM 호출 중 재생성·삭제·편집으로 메시지가 바뀌었으면 결과를 버린다
+    const currentMes = chat[mesId];
+    if (!currentMes || currentMes.is_user || mesHashOf(currentMes) !== newHash) {
+        console.debug(`[${MODULE_NAME}] commit 폐기 (mes ${mesId} 내용 변경됨)`);
+        turn.failed = true;
+        persistStore();
+        updateStatusUI();
+        return false;
     }
 
     turn.summary = extracted.turnSummary;
@@ -2854,18 +2870,26 @@ function reconcileWithChat() {
         hashIndex.get(h).push(i);
     }
 
-    for (const t of store.turns) {
+    // mesId 오름차순 — 재생성으로 끝 턴이 지워질 때, 해시 재배치가 앞쪽 턴 mesId를 빼앗지 않게
+    const sorted = [...store.turns].sort((a, b) => (a.mesId - b.mesId) || (a.turnIndex - b.turnIndex));
+
+    for (const t of sorted) {
         const mes = chat[t.mesId];
-        if (mes && !mes.is_user && mesHashOf(mes) === t.mesHash && !usedMesIds.has(t.mesId)) {
-            validTurns.push(t);
-            usedMesIds.add(t.mesId);
-            continue;
+        if (mes && !mes.is_user && !usedMesIds.has(t.mesId)) {
+            const h = mesHashOf(mes);
+            if (h === t.mesHash || mesHashLegacyRaw(mes) === t.mesHash) {
+                if (h !== t.mesHash) { t.mesHash = h; changed = true; }
+                validTurns.push(t);
+                usedMesIds.add(t.mesId);
+                continue;
+            }
         }
-        // 번호가 밀렸다면 같은 내용의 메시지에 재연결 (기존 번호에서 가장 가까운 후보 우선).
-        // 진짜 사라진 턴만 정리한다 — 화면 길이 변화만으로 기억을 지우지 않는다.
         const candidates = (hashIndex.get(t.mesHash) || []).filter(i => !usedMesIds.has(i));
-        if (candidates.length) {
-            const relocated = candidates.reduce((best, i) => Math.abs(i - t.mesId) < Math.abs(best - t.mesId) ? i : best);
+        // 슬롯이 비었을 때(재생성·끝 삭제): 중간 삭제로 번호가 밀린 경우(c < mesId)만 재연결.
+        // 같은 해시를 가진 다른 턴의 mesId를 빼앗으면 N번 재생성 → N-2 기록 소실처럼 보인다.
+        const pool = !mes ? candidates.filter(i => i < t.mesId) : candidates;
+        if (pool.length) {
+            const relocated = pool.reduce((best, i) => Math.abs(i - t.mesId) < Math.abs(best - t.mesId) ? i : best);
             t.mesId = relocated;
             usedMesIds.add(relocated);
             for (const m of store.memories) if (m.turnIndex === t.turnIndex) m.mesId = relocated;
@@ -2883,6 +2907,21 @@ function reconcileWithChat() {
         updateStatusUI();
     }
     return changed;
+}
+
+/** 수동 동기화 — 채팅 메시지와 저장된 턴 기록을 다시 맞춘다 (이미 지워진 기록은 복구하지 않음) */
+async function repairChatSync() {
+    const store = getStore();
+    const before = store.turns.length;
+    const changed = reconcileWithChat();
+    renderAllPanels();
+    await updateInjection();
+    const after = getStore().turns.length;
+    if (changed) {
+        toastr.success(`채팅과 기록을 맞췄습니다. (기록 턴 ${before} → ${after})`, 'Memoria');
+    } else {
+        toastr.info('이미 채팅과 기록이 일치합니다.', 'Memoria');
+    }
 }
 
 function invalidateTurnByMesId(mesId) {
@@ -4444,6 +4483,7 @@ function bindUI() {
     });
     $('#memoria_bulk_cancel').on('click', function () { bulkIndexAbort = true; });
     $('#memoria_clock_recalc').on('click', () => recalibrateStoryClock());
+    $('#memoria_repair_sync').on('click', () => repairChatSync());
     $('#memoria_unhide_all').on('click', unhideAllMessages);
     $('#memoria_bible').on('click', exportStoryBible);
     $('#memoria_export').on('click', exportMemory);
@@ -4531,6 +4571,12 @@ function registerCommands() {
             name: 'memoria-clock',
             helpString: '기록된 다이제스트를 처음부터 다시 읽어 서사 시계(이야기 속 날짜)를 재계산합니다.',
             callback: async () => { recalibrateStoryClock(); return '서사 시계 재계산을 시작했습니다.'; },
+        }));
+
+        SlashCommandParser.addCommandObject(SlashCommand.fromProps({
+            name: 'memoria-reconcile',
+            helpString: '저장된 턴 기록을 현재 채팅 메시지와 다시 맞춥니다 (이미 지워진 기록은 복구하지 않음)',
+            callback: async () => { await repairChatSync(); return '채팅과 기록 동기화를 실행했습니다.'; },
         }));
 
         SlashCommandParser.addCommandObject(SlashCommand.fromProps({
@@ -4636,6 +4682,12 @@ jQuery(async () => {
         const baseUrl = new URL('.', import.meta.url).href;
         const html = await $.get(`${baseUrl}templates/settings.html`);
         $('#extensions_settings2').append(html);
+        try {
+            const manifest = await $.getJSON(`${baseUrl}manifest.json`);
+            if (manifest?.version) {
+                $('#memoria_settings .memoria__version').text(`v${manifest.version}`);
+            }
+        } catch { /* manifest 없어도 동작 */ }
         bindUI();
         bindEvents();
         registerCommands();

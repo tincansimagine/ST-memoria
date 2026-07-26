@@ -1,7 +1,7 @@
 <div id="memoria_settings" class="memoria">
     <div class="inline-drawer">
         <div class="inline-drawer-toggle inline-drawer-header">
-            <b><i class="fa-solid fa-book-bookmark"></i> Memoria — 장기기억 서고 <span class="memoria__version">v1.3.2</span></b>
+            <b><i class="fa-solid fa-book-bookmark"></i> Memoria — 장기기억 서고 <span class="memoria__version">v1.4.1</span></b>
             <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
         </div>
         <div class="inline-drawer-content">
@@ -53,7 +53,7 @@
                             <p>다음 응답 생성 시 프롬프트에 들어갈 장기기억입니다. 직접 수정한 뒤 ✏ 버튼을 누르면 <b>다음 응답 1회</b>에 한해 수정본이 주입됩니다.</p>
                         </div>
                         <span id="memoria_packet_tokens" class="memoria__token-badge"></span>
-                        <i class="fa-solid fa-pen-to-square memoria__icon-btn" id="memoria_packet_apply" title="수정한 내용을 다음 응답 1회에 주입 (장부는 매 턴 재생성되므로 영구 수정은 기억·상태·서약 탭에서)"></i>
+                        <i class="fa-solid fa-pen-to-square memoria__icon-btn" id="memoria_packet_apply" title="수정한 내용을 다음 응답 1회에 주입 (장부는 매 턴 서고에서 재생성되므로 영구 수정은 기억·상태·서약 탭에서)"></i>
                         <i class="fa-solid fa-copy memoria__icon-btn" id="memoria_packet_copy" title="주입 내용 전체 복사"></i>
                     </div>
                     <textarea id="memoria_packet_preview" class="memoria__preview" rows="12"></textarea>
@@ -73,8 +73,9 @@
                 </div>
                 <div class="memoria__hint">
                     <b>작동 방식</b> — AI 응답이 끝날 때마다 그 턴을 자동으로 기록해 구조화된 기억으로 보관하고,
-                    매 턴 현재 대화와 관련 있는 기억만 골라 토큰 예산 안에서 주입합니다.
-                    스와이프·편집·삭제 시 해당 턴의 기억은 자동으로 무효화됩니다.
+                    매 턴 현재 대화와 관련 있는 기억만 골라 토큰 예산 안에서 주입합니다.<br>
+                    <b>스와이프·편집·삭제·재생성</b> — 해당 턴(또는 지워진 마지막 턴)의 파생 기억은 자동으로 무효화되고, 새 응답이 오면 다시 기록됩니다.
+                    재생성을 자주 쓰는 경우에도 옛 턴 기록이 같이 사라지지 않도록 v1.4.1에서 정리 로직을 보강했습니다.
                 </div>
             </section>
 
@@ -257,7 +258,7 @@
                     </label>
                     <label class="memoria__toggle-row" for="memoria_auto_hide">
                         <input type="checkbox" id="memoria_auto_hide">
-                        <span><strong>요약된 메시지 자동 숨김</strong><small>"지금까지의 이야기" 요약이 커버한 옛 메시지를 채팅에서 숨겨 컨텍스트 토큰을 크게 절약합니다. 최근 메시지는 아래 설정만큼 항상 남고, 도구 탭에서 언제든 해제할 수 있습니다.</small></span>
+                        <span><strong>요약된 메시지 자동 숨김</strong><small>"지금까지의 이야기" 요약이 커버한 옛 메시지를 채팅에서 <b>숨김</b> 처리해 컨텍스트 토큰을 절약합니다. 삭제가 아니라 숨김이며, 도구 탭의 "숨긴 메시지 모두 표시"로 되돌릴 수 있습니다. 최근 메시지는 아래 설정만큼 항상 남깁니다.</small></span>
                     </label>
                     <label class="memoria__toggle-row" for="memoria_ref_profile">
                         <input type="checkbox" id="memoria_ref_profile">
@@ -409,7 +410,7 @@
                     </div>
                     <div id="memoria_embed_block" style="display:none;">
                         <div class="memoria__field">
-                            <label for="memoria_embed_url" title="예: https://api.openai.com/v1 (뒤의 /embeddings는 자동으로 붙습니다)">임베딩 URL</label>
+                            <label for="memoria_embed_url" title="예: https://api.openai.com/v1 (뒤의 /embeddings는 자동으로 붙입니다)">임베딩 URL</label>
                             <input type="text" id="memoria_embed_url" placeholder="https://api.openai.com/v1" autocomplete="off">
                         </div>
                         <div class="memoria__field">
@@ -523,6 +524,17 @@
                 <div class="memoria__section">
                     <div class="memoria__section-head">
                         <div>
+                            <h4>채팅과 기록 맞추기</h4>
+                            <p>저장된 턴 기록을 현재 채팅 메시지와 다시 대조합니다. 메시지 번호가 어긋났거나 예전 버전 버그로 기록이 꼬였을 때 쓰세요. <b>이미 지워진 기록은 복구하지 않습니다</b> — 복구가 필요하면 위 색인으로 해당 구간을 다시 기록하세요.</p>
+                        </div>
+                    </div>
+                    <div class="memoria__button-row">
+                        <div class="menu_button" id="memoria_repair_sync" title="채팅 메시지와 턴 기록을 다시 맞춥니다 (/memoria-reconcile)"><i class="fa-solid fa-link"></i><span>지금 맞추기</span></div>
+                    </div>
+                </div>
+                <div class="memoria__section">
+                    <div class="memoria__section-head">
+                        <div>
                             <h4>서사 시계 재계산</h4>
                             <p>기록된 턴 다이제스트를 처음부터 이어 읽으며 이야기 속 경과 시간을 다시 추정합니다. 일괄 색인 뒤 날짜가 꼬였을 때 재색인 없이 바로잡을 수 있습니다. (일괄 색인이 끝나면 자동으로 한 번 실행됩니다)</p>
                         </div>
@@ -584,8 +596,11 @@
                 </div>
                 <div class="memoria__hint">
                     <b>슬래시 명령어</b> — <code>/memoria</code> 켜기/끄기 · <code>/memoria-remember 내용</code> 수동 기억 ·
-                    <code>/memoria-search 검색어</code> 기억 검색 · <code>/memoria-ask 질문</code> 서고에 질문 · <code>/memoria-index</code> 전체 색인<br>
-                    <b>매크로</b> — <code>{{memoria_story}}</code> 지금까지의 이야기 · <code>{{memoria_count}}</code> 기억 수
+                    <code>/memoria-search 검색어</code> 기억 검색 · <code>/memoria-ask 질문</code> 서고에 질문 ·
+                    <code>/memoria-index</code> 전체 색인 · <code>/memoria-clock</code> 서사 시계 재계산 ·
+                    <code>/memoria-reconcile</code> 채팅과 기록 맞추기<br>
+                    <b>매크로</b> — <code>{{memoria_story}}</code> 지금까지의 이야기 · <code>{{memoria_count}}</code> 기억 수<br>
+                    <b>재생성을 자주 쓸 때</b> — v1.4.1부터 옛 턴 기록이 같이 사라지지 않습니다. 그래도 기억이 비어 보이면 자동 숨김 여부와 도구 탭의 "숨긴 메시지 모두 표시"를 확인하세요. 이미 지워진 기록은 색인으로 해당 구간을 다시 기록해야 합니다.
                 </div>
             </section>
 
