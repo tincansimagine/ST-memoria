@@ -1525,7 +1525,7 @@ function pruneMemories(store) {
  * 완결된 (user, assistant) 턴 하나를 기록한다.
  * 같은 mesId 턴이 이미 있으면(리롤/스와이프/편집) 파생 기록을 지우고 같은 turnIndex로 재기록.
  */
-async function commitTurn(mesId, { silent = true, force = false } = {}) {
+async function commitTurn(mesId, { silent = true, force = false, retry = 1 } = {}) {
     const settings = getSettings();
     const store = getStore();
     const assistantMes = chat[mesId];
@@ -1603,16 +1603,17 @@ async function commitTurn(mesId, { silent = true, force = false } = {}) {
         llmBusy = true;
         updateStatusUI('기록 중…');
         const sysPrompt = `${settings.prompts.archivist}${archivistTrackingDirective()}${pledgeDirective}\n\n${languageDirective()}`;
-        // JSON을 못 지키는 모델 대비: 파싱 실패 시 형식 경고를 덧붙여 1회 재시도
-        for (let attempt = 0; attempt < 2 && !extracted; attempt++) {
+        // 파싱 실패·API 오류(색인/시계 재계산 직후 혼잡 포함) 대비: 간격을 두고 최대 3회 시도
+        for (let attempt = 0; attempt < 3 && !extracted; attempt++) {
+            if (attempt > 0) await new Promise(r => setTimeout(r, attempt * 2500)); // 순간 혼잡·레이트리밋을 흘려보낸다
             const nudge = attempt === 0 ? '' : '\n\nFORMAT WARNING: the previous reply could not be parsed. Respond with EXACTLY ONE minified JSON object — no code fences, no commentary, nothing before "{" or after "}".';
             try {
                 const response = await callAuxLLM(sysPrompt + nudge, userPrompt);
                 const parsed = parseJsonLoose(response);
                 if (parsed) extracted = sanitizeExtraction(parsed, userText, assistantText);
-                else console.warn(`[${MODULE_NAME}] 사서 응답 파싱 실패 (시도 ${attempt + 1}/2)`);
+                else console.warn(`[${MODULE_NAME}] 사서 응답 파싱 실패 (시도 ${attempt + 1}/3)`);
             } catch (e) {
-                console.error(`[${MODULE_NAME}] 사서 호출 실패 (시도 ${attempt + 1}/2):`, e);
+                console.error(`[${MODULE_NAME}] 사서 호출 실패 (시도 ${attempt + 1}/3):`, e);
             }
         }
         if (!extracted && !silent) toastr.error('기억 기록에 실패했습니다. (모델 응답 오류)', 'Memoria');
@@ -1630,11 +1631,23 @@ async function commitTurn(mesId, { silent = true, force = false } = {}) {
         };
     }
 
-    // LLM 호출 중 재생성·삭제·편집으로 메시지가 바뀌었으면 결과를 버린다
+    // LLM 호출 중 메시지가 바뀌었으면 stale 결과를 버린다.
+    // 삭제·교체(재생성)면 reconcile이 턴을 정리하므로 조용히 물러나고,
+    // 내용만 바뀐 경우(편집·번역/에셋 확장의 후처리)는 실패로 찍지 말고 새 내용으로 재기록을 건다.
     const currentMes = chat[mesId];
-    if (!currentMes || currentMes.is_user || mesHashOf(currentMes) !== newHash) {
-        console.debug(`[${MODULE_NAME}] commit 폐기 (mes ${mesId} 내용 변경됨)`);
-        turn.failed = true;
+    if (!currentMes || currentMes.is_user) {
+        console.debug(`[${MODULE_NAME}] commit 폐기 (mes ${mesId} 삭제/교체됨)`);
+        persistStore();
+        updateStatusUI();
+        return false;
+    }
+    if (mesHashOf(currentMes) !== newHash) {
+        console.debug(`[${MODULE_NAME}] commit 폐기 (mes ${mesId} 내용 변경됨) — 재기록 ${retry > 0 ? '예약' : '포기'}`);
+        if (retry > 0) {
+            queueCommit(mesId, { silent: true, force, retry: retry - 1 });
+        } else {
+            turn.failed = true; // 재기록도 어긋나면 색인 재시도 대상으로만 남긴다
+        }
         persistStore();
         updateStatusUI();
         return false;
@@ -2978,11 +2991,8 @@ async function bulkIndexChat({ from = 0, to = Infinity, includeHidden = false } 
     for (const mesId of targets) {
         if (bulkIndexAbort) break;
         $('#memoria_bulk_progress').text(`색인 중… ${done + 1}/${total}`);
-        try {
-            await commitTurn(mesId, { silent: true, force: true });
-        } catch (e) {
-            console.error(`[${MODULE_NAME}] 일괄 색인 오류(mes ${mesId}):`, e);
-        }
+        // 기록 큐를 통해 실행 — 색인 중 도착하는 자동 기록과 직렬화되어 store·API 경합이 없다
+        await queueCommit(mesId, { silent: true, force: true });
         done++;
     }
 
@@ -3024,6 +3034,12 @@ async function recalibrateStoryClock({ silent = false } = {}) {
     clockRecalBusy = true;
     $('#memoria_clock_recalc').prop('disabled', true);
     const $prog = $('#memoria_clock_progress');
+    // 진행 중·대기 중인 턴 기록이 있으면 끝나길 기다렸다 시작 — 사서 API와 재계산 배치가 겹치면
+    // 양쪽 다 실패(⚠ 기록 실패)할 수 있다
+    if (pendingCommits > 0) {
+        $prog.text('턴 기록이 끝나길 기다리는 중…');
+        await commitQueue.catch(() => { });
+    }
     const before = store.turns.reduce((a, t) => a + (t.elapsedDays || 0), 0);
     const updates = new Map();
     const BATCH = 80;
