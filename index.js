@@ -2962,6 +2962,7 @@ async function bulkIndexChat({ from = 0, to = Infinity, includeHidden = false } 
     }
     const store = getStore();
     const targets = [];
+    let hiddenSkipped = 0;
     for (let i = 0; i < chat.length; i++) {
         if (i < from || i > to) continue;
         const m = chat[i];
@@ -2971,14 +2972,20 @@ async function bulkIndexChat({ from = 0, to = Infinity, includeHidden = false } 
         if (m.is_system && !includeHidden) {
             // 숨겨진 메시지: 기본은 기록 실패한 기존 턴만 재시도.
             // "숨김 포함"을 켜면 다른 요약 확장이 가려 둔 초반부도 색인할 수 있다.
-            if (!existing || !existing.failed) continue;
+            if (!existing || !existing.failed) {
+                if (!alreadyDone) hiddenSkipped++;
+                continue;
+            }
         } else if (alreadyDone) {
             continue;
         }
         targets.push(i);
     }
     if (!targets.length) {
-        toastr.info('색인할 새 메시지가 없습니다.', 'Memoria');
+        // 숨김 때문에 전부 건너뛴 경우(초기화 직후 등)는 이유와 해법을 알려준다
+        toastr.info(hiddenSkipped
+            ? `색인할 새 메시지가 없습니다. 숨겨진 메시지 ${hiddenSkipped}개를 건너뛰었습니다 — "숨겨진 메시지도 포함"을 켜거나, 도구 탭의 "숨긴 메시지 모두 표시" 후 다시 시도하세요.`
+            : '색인할 새 메시지가 없습니다.', 'Memoria');
         return;
     }
 
@@ -3328,10 +3335,29 @@ async function importCarryOver(file) {
     }
 }
 
-function resetMemory() {
+async function resetMemory() {
     delete chat_metadata[MODULE_NAME];
     getStore();
-    persistStore();
+    // 디바운스 저장을 기다리는 동안 새로고침·앱 전환이 일어나면 초기화 전 데이터가
+    // 파일에서 되살아난다("초기화했는데 세계 탭에 옛 데이터가 다시 로드") — 즉시 저장으로 확정
+    try {
+        await getContext().saveMetadata();
+    } catch (e) {
+        console.error(`[${MODULE_NAME}] 초기화 즉시 저장 실패, 디바운스 저장으로 대체:`, e);
+        persistStore();
+    }
+    // 요약이 사라졌으니 자동 숨김으로 가려 둔 메시지도 되살린다 —
+    // 숨긴 채로 두면 재색인이 전부 건너뛰어 "색인할 새 메시지가 없습니다"가 된다
+    if (chat.length) {
+        try {
+            await hideChatMessageRange(0, chat.length - 1, true);
+        } catch (e) {
+            console.error(`[${MODULE_NAME}] 초기화 후 숨김 해제 실패:`, e);
+        }
+    }
+    // 로컬 벡터 색인도 빈 서고 기준으로 다시 맞춘다 (옛 기억 벡터 제거)
+    localSyncedChat = null;
+    scheduleLocalSync();
     renderAllPanels();
     updateInjection();
 }
@@ -4517,10 +4543,10 @@ function bindUI() {
     });
     $('#memoria_reset').on('click', async function () {
         const ctx = getContext();
-        const ok = await ctx.callGenericPopup('이 채팅의 모든 기억(기억·인물·캐논·상태·서약·요약)을 삭제합니다.\n되돌릴 수 없습니다. 계속할까요?', ctx.POPUP_TYPE.CONFIRM, '', { okButton: '전부 삭제' });
+        const ok = await ctx.callGenericPopup('이 채팅의 모든 기억(기억·인물·캐논·상태·서약·요약)을 삭제합니다.\n숨겨 둔 메시지도 모두 표시로 되돌립니다 (재색인 가능하도록).\n되돌릴 수 없습니다. 계속할까요?', ctx.POPUP_TYPE.CONFIRM, '', { okButton: '전부 삭제' });
         if (ok !== ctx.POPUP_RESULT.AFFIRMATIVE && ok !== true) return;
-        resetMemory();
-        toastr.success('이 채팅의 기억을 초기화했습니다.', 'Memoria');
+        await resetMemory();
+        toastr.success('이 채팅의 기억을 초기화했습니다. 도구 탭에서 다시 색인할 수 있습니다.', 'Memoria');
     });
 }
 
