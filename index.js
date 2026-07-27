@@ -692,9 +692,11 @@ async function syncLocalVectors() {
     }
     const toDelete = [...existing].filter(h => !wanted.has(h));
     if (toDelete.length) await vectorApi('delete', { collectionId, hashes: toDelete });
-    // 첫 색인은 모델 다운로드가 겹칠 수 있어 작은 배치로 나눠 보낸다
-    for (let i = 0; i < toInsert.length; i += 50) {
-        await vectorApi('insert', { collectionId, items: toInsert.slice(i, i + 50) });
+    // 임베딩 계산은 ST 서버(같은 기기) CPU를 쓴다 — 대량 색인을 쉼 없이 밀어넣으면
+    // 저사양 PC·모바일에서 실리태번 전체가 버벅인다. 작은 배치 + 배치 사이 숨 고르기.
+    for (let i = 0; i < toInsert.length; i += 32) {
+        if (i > 0) await new Promise(r => setTimeout(r, 300));
+        await vectorApi('insert', { collectionId, items: toInsert.slice(i, i + 32) });
     }
     localSyncedChat = getCurrentChatId();
     return true;
@@ -2708,7 +2710,7 @@ async function buildPacketWithinBudget(query, supervisorPlan) {
         && !parts.rules.length && !parts.states.length && !parts.characters.length && !parts.scene?.any
         && !parts.milestones.length && !parts.items.length && !parts.summaries.length
         && !(parts.sources || []).length && !parts.supervisorPlan;
-    if (empty) return '';
+    if (empty) { lastPacketTokens = 0; return ''; }
 
     // 예산 부족 시 자료실 대목부터 줄인다 (배경 참고는 우선순위 최하)
     const ladder = [
@@ -2722,13 +2724,20 @@ async function buildPacketWithinBudget(query, supervisorPlan) {
         { withExcerpts: false, recallLimit: 0, protectedLimit: 0, summaryLimit: 0, stateLimit: 0, ruleLimit: 0, charLimit: 0, extraLimit: 0, sourceLimit: 0, includeSupervisorDetail: false },
     ];
 
+    // 토큰 계산(getTokenCountAsync)은 서버 왕복일 수 있어 매 단 호출하면 전송 직전 렉의 원인이 된다.
+    // 첫 단의 실측으로 "글자당 토큰 밀도"를 배우고, 명백히 예산 초과인 단은 계산 없이 건너뛴다.
+    let density = 0; // 실측 tokens / chars
     for (let i = 0; i < ladder.length; i++) {
         const text = renderPacket(parts, ladder[i]);
+        if (density > 0 && text.length * density > settings.tokenBudget * 1.15 && i < ladder.length - 1) continue;
         const tokens = await getTokenCountAsync(text);
-        if (tokens <= settings.tokenBudget) { lastPacketTrim = i; return text; }
+        if (text.length) density = tokens / text.length;
+        if (tokens <= settings.tokenBudget) { lastPacketTrim = i; lastPacketTokens = tokens; return text; }
     }
     lastPacketTrim = ladder.length;
-    return renderPacket(parts, ladder[ladder.length - 1]);
+    const text = renderPacket(parts, ladder[ladder.length - 1]);
+    lastPacketTokens = text ? await getTokenCountAsync(text) : 0;
+    return text;
 }
 
 // 감독 대기 상한: 이 시간을 넘기면 연출 없이 생성을 진행한다.
@@ -2766,11 +2775,16 @@ function injectionType() {
     return extension_prompt_types.IN_CHAT;
 }
 
+// 직전 장부 빌드의 지문 — 같은 상태로 연달아 불리면(전송 직후 + 생성 시작) 재계산을 건너뛴다
+let lastBuildKey = '';
+let lastBuildAt = 0;
+
 async function updateInjection({ runSupervisorPass = false } = {}) {
     const settings = getSettings();
     if (!settings.enabled || !getCurrentChatId()) {
         setExtensionPrompt(INJECT_KEY, '', injectionType(), settings.injectDepth, false, extension_prompt_roles.SYSTEM);
         lastPacketText = '';
+        lastBuildKey = '';
         return;
     }
 
@@ -2779,6 +2793,7 @@ async function updateInjection({ runSupervisorPass = false } = {}) {
         lastPacketText = packetOverrideOnce;
         setExtensionPrompt(INJECT_KEY, packetOverrideOnce, injectionType(), settings.injectDepth, false, extension_prompt_roles.SYSTEM);
         lastPacketTokens = packetOverrideOnce ? await getTokenCountAsync(packetOverrideOnce) : 0;
+        lastBuildKey = '';
         refreshPacketPreview();
         return;
     }
@@ -2790,11 +2805,21 @@ async function updateInjection({ runSupervisorPass = false } = {}) {
     if (!query) query = chat[chat.length - 1]?.mes || '';
     query = visibleProse(query);
 
+    // 전송(MESSAGE_SENT)과 생성 시작(GENERATION_STARTED)이 같은 상태로 연달아 부르는 경우,
+    // 두 번째 호출은 장부를 다시 짓지 않는다 (연출 패스는 매번 새로 지어야 하므로 제외).
+    // 창은 짧게(5초) — 그 사이 설정을 바꿔도 다음 턴이면 자연히 반영된다.
+    const buildKey = `${getCurrentChatId()}|${chat.length}|${getStringHash(query)}|${settings.tokenBudget}`;
+    if (!runSupervisorPass && buildKey === lastBuildKey && Date.now() - lastBuildAt < 5000 && lastPacketText !== '') {
+        setExtensionPrompt(INJECT_KEY, lastPacketText, injectionType(), settings.injectDepth, false, extension_prompt_roles.SYSTEM);
+        return;
+    }
+
     const plan = runSupervisorPass ? await runSupervisor(query) : null;
-    const packet = await buildPacketWithinBudget(query, plan);
+    const packet = await buildPacketWithinBudget(query, plan); // lastPacketTokens도 여기서 갱신
     lastPacketText = packet;
     setExtensionPrompt(INJECT_KEY, packet, injectionType(), settings.injectDepth, false, extension_prompt_roles.SYSTEM);
-    lastPacketTokens = packet ? await getTokenCountAsync(packet) : 0;
+    lastBuildKey = buildKey;
+    lastBuildAt = Date.now();
     refreshPacketPreview();
 }
 
