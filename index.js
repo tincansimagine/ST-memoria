@@ -207,6 +207,7 @@ const DEFAULT_SETTINGS = Object.freeze({
     autoHide: false,          // 요약이 커버한 옛 메시지를 채팅에서 숨겨 토큰 절약
     preserveRecent: 6,        // 자동 숨김 시 항상 남길 최근 메시지 수
     characterTracking: true,  // 인물 도감 자동 기록
+    lockEditedCharacters: true, // 사용자가 직접 고친 인물 카드는 자동으로 프로필 잠금
     eventTracking: false,     // 이벤트 연표 자동 기록 (결정적 전환점만)
     itemTracking: false,      // 아이템 도감 자동 기록 (스토리에 중요한 물건만)
     refProfile: true,         // 사서·요약 호출 시 캐릭터 카드·페르소나 요지를 참고 자료로 제공
@@ -367,7 +368,7 @@ function getStore() {
             locks: [],          // { id, kind, summary, status, priority, owner, turnIndex }
             chunkSummaries: [], // { id, fromTurn, toTurn, text }
             arcSummaries: [],   // { id, fromTurn, toTurn, text }
-            characters: [],     // { id, name, role, age, occupation, appearance, traits, relationships, firstTurn, updatedTurn, disabled }
+            characters: [],     // { id, name, role, age, occupation, appearance, traits, relationships, firstTurn, updatedTurn, disabled, locked }
             milestones: [],     // { id, title, summary, participants, grade, turnIndex }
             items: [],          // { id, name, meaning, holder, status, firstTurn, updatedTurn, disabled }
             dossier: [],        // { id, title, chunks: [string], addedAt } — 설정 자료실 (배경 참고 문서)
@@ -1349,7 +1350,7 @@ function removeDerivedForTurn(store, turnIndex) {
     }
     // 인물 도감: 이 턴에서 처음 만들어졌고 이후 갱신이 없는 인물만 제거 (병합된 프로필은 유지)
     if (Array.isArray(store.characters)) {
-        store.characters = store.characters.filter(c => c.manual || c.firstTurn !== turnIndex || c.updatedTurn !== turnIndex);
+        store.characters = store.characters.filter(c => c.manual || c.locked || c.firstTurn !== turnIndex || c.updatedTurn !== turnIndex);
     }
     if (Array.isArray(store.milestones)) {
         store.milestones = store.milestones.filter(e => e.manual || e.turnIndex !== turnIndex);
@@ -1415,7 +1416,8 @@ function upsertLock(store, lock, turnIndex) {
 }
 
 /** 인물 도감 upsert: 새 정보만 채우고, 관계는 대상별 최신값으로 갱신.
- * 이름 또는 별칭이 겹치면 같은 인물 — 이름 없는 인물의 핸들 카드가 본명 카드로 접힌다. */
+ * 이름 또는 별칭이 겹치면 같은 인물 — 이름 없는 인물의 핸들 카드가 본명 카드로 접힌다.
+ * 🔒 잠긴 카드는 프로필 칸(이름·별칭·역할·나이·직업·외모·말투·특성)이 동결되고 관계만 갱신된다. */
 function upsertCharacter(store, c, turnIndex) {
     const norm = (s) => String(s || '').toLowerCase();
     const findCard = (n) => store.characters.find(x =>
@@ -1428,10 +1430,13 @@ function upsertCharacter(store, c, turnIndex) {
             const old = findCard(handle);
             if (!old) continue;
             existing = old;
-            existing.aliases = [...new Set([...(existing.aliases || []), existing.name, ...c.aka])]
-                .filter(a => norm(a) !== norm(c.name)).slice(0, 6);
-            existing.name = c.name;
-            existing.provisional = false;
+            // 잠긴 카드는 이름도 사용자가 정한 그대로 — 정체 공개로도 덮어쓰지 않는다
+            if (!existing.locked) {
+                existing.aliases = [...new Set([...(existing.aliases || []), existing.name, ...c.aka])]
+                    .filter(a => norm(a) !== norm(c.name)).slice(0, 6);
+                existing.name = c.name;
+                existing.provisional = false;
+            }
             break;
         }
     }
@@ -1442,21 +1447,26 @@ function upsertCharacter(store, c, turnIndex) {
             id: uuidv4(), ...card,
             aliases: (aka || []).filter(a => norm(a) !== norm(c.name)).slice(0, 6),
             firstTurn: turnIndex, updatedTurn: turnIndex, disabled: false, manual: false,
+            locked: card.locked === true,
         });
         return;
     }
     // 비활성(주입 제외) 카드는 기록도 동결 — 사용자가 치운 인물을 사서가 계속 되살리지 못하게
     if (existing.disabled) return;
-    if (c.aka?.length) {
-        existing.aliases = [...new Set([...(existing.aliases || []), ...c.aka])]
-            .filter(a => norm(a) !== norm(existing.name)).slice(0, 6);
-    }
-    if (existing.provisional && c.provisional !== true) existing.provisional = false;
-    for (const field of ['role', 'age', 'occupation', 'appearance', 'voice']) {
-        if (c[field]) existing[field] = c[field];
-    }
-    if (c.traits?.length) {
-        existing.traits = [...new Set([...(existing.traits || []), ...c.traits])].slice(0, 10);
+    // 🔒 프로필 잠금: 사용자가 확정한 프로필을 사서가 덮어쓰지 못하게 동결한다.
+    // 관계만 계속 갱신 — 이야기가 흐르면서 변하는 게 당연한 칸이라 여기까지 얼리진 않는다.
+    if (!existing.locked) {
+        if (c.aka?.length) {
+            existing.aliases = [...new Set([...(existing.aliases || []), ...c.aka])]
+                .filter(a => norm(a) !== norm(existing.name)).slice(0, 6);
+        }
+        if (existing.provisional && c.provisional !== true) existing.provisional = false;
+        for (const field of ['role', 'age', 'occupation', 'appearance', 'voice']) {
+            if (c[field]) existing[field] = c[field];
+        }
+        if (c.traits?.length) {
+            existing.traits = [...new Set([...(existing.traits || []), ...c.traits])].slice(0, 10);
+        }
     }
     for (const rel of (c.relationships || [])) {
         const list = existing.relationships || (existing.relationships = []);
@@ -1485,6 +1495,7 @@ function mergeCharacterCards(store, keep, absorb) {
     keep.updatedTurn = Math.max(keep.updatedTurn || 0, absorb.updatedTurn || 0);
     keep.provisional = keep.provisional === true && absorb.provisional === true;
     if (absorb.manual) keep.manual = true;
+    if (absorb.locked) keep.locked = true; // 접힌 쪽이 잠겨 있었다면 보호를 승계
     store.characters = store.characters.filter(x => x.id !== absorb.id);
 }
 
@@ -1582,11 +1593,14 @@ async function commitTurn(mesId, { silent = true, force = false, retry = 1 } = {
     // 명단에 없는 등장인물(주역 포함)은 이번 턴에 바로 카드를 연다.
     // 비활성 카드도 명단에 올린다 — 사용자가 치운 인물을 사서가 새 카드로 되살리지 못하게.
     const filedCast = settings.characterTracking
-        ? store.characters.map(c => c.name).slice(0, 40)
+        ? store.characters.slice(0, 40).map(c => (c.locked ? `${c.name} [LOCKED]` : c.name))
         : null;
+    const lockedNote = settings.characterTracking && store.characters.some(c => c.locked)
+        ? ' Cards marked [LOCKED] are fixed by the user: never restate or revise their name, age, role, occupation, looks, voice, or traits — for them file relationship changes only.'
+        : '';
     const castLine = !settings.characterTracking ? ''
         : filedCast.length
-            ? `Cast already on file: ${filedCast.join(', ')}. Anyone present in this exchange who is NOT on this list — the leads included — gets a card now; for those already listed, file only meaningful changes.\n`
+            ? `Cast already on file: ${filedCast.join(', ')}. Anyone present in this exchange who is NOT on this list — the leads included — gets a card now; for those already listed, file only meaningful changes.${lockedNote}\n`
             : 'The cast shelf is empty — no one has a card yet, not even the leads. Anyone characterized in this exchange gets a card now.\n';
 
     const refBlock = await buildReferenceBlock();
@@ -3330,7 +3344,9 @@ async function importCarryOver(file) {
             if (!c?.name) continue;
             upsertCharacter(store, {
                 name: c.name, role: c.role || null, age: c.age || null, occupation: c.occupation || null,
-                appearance: c.appearance || null, traits: c.traits || [], relationships: c.relationships || [],
+                appearance: c.appearance || null, voice: c.voice || null,
+                traits: c.traits || [], relationships: c.relationships || [],
+                aka: c.aliases || [], locked: c.locked === true, // 고정한 프로필은 잠금째로 인계
             }, 0);
             carriedChars++;
         }
@@ -3544,11 +3560,13 @@ function renderCharactersPanel() {
     for (const c of chars) {
         const meta = [c.role, c.age, c.occupation].filter(Boolean).map(escapeHtml).join(' · ');
         list.append($(`
-            <div class="memoria__char-card${c.disabled ? ' is-disabled' : ''}" data-id="${c.id}">
+            <div class="memoria__char-card${c.disabled ? ' is-disabled' : ''}${c.locked ? ' is-locked' : ''}" data-id="${c.id}">
                 <div class="memoria__char-head">
                     <strong class="memoria__char-name">${escapeHtml(c.name)}</strong>
                     ${c.provisional ? '<span class="memoria__badge memoria__badge--provisional" title="아직 이름이 밝혀지지 않은 인물 — 정체가 드러나면 자동 병합됩니다">미확인</span>' : ''}
+                    ${c.locked ? '<span class="memoria__badge memoria__badge--locked" title="프로필 고정 — 사서가 이 카드의 이름·나이·외모·말투·특성을 바꾸지 못합니다 (관계만 계속 갱신)"><i class="fa-solid fa-lock"></i> 고정</span>' : ''}
                     <span class="memoria__mem-actions">
+                        <i class="fa-solid ${c.locked ? 'fa-lock' : 'fa-lock-open'} memoria-char-lock" title="${c.locked ? '프로필 고정 해제 — 사서가 다시 갱신합니다' : '프로필 고정 — 사서가 이 카드의 프로필을 바꾸지 못하게 잠급니다 (관계는 계속 갱신)'}"></i>
                         <i class="fa-solid ${c.disabled ? 'fa-eye-slash' : 'fa-eye'} memoria-char-toggle" title="${c.disabled ? '주입에 포함' : '주입·기록에서 제외 (사서가 이 인물을 다시 등록하지 않음)'}"></i>
                         <i class="fa-solid fa-code-merge memoria-char-merge" title="다른 카드를 이 카드로 병합"></i>
                         <i class="fa-solid fa-pen memoria-char-edit" title="편집"></i>
@@ -3757,6 +3775,7 @@ function renderSettingsPanel() {
     $('#memoria_supervisor').prop('checked', s.supervisorEnabled);
     $('#memoria_authorize_private').prop('checked', s.authorizeCharPrivate);
     $('#memoria_character_tracking').prop('checked', s.characterTracking);
+    $('#memoria_lock_edited_chars').prop('checked', s.lockEditedCharacters);
     $('#memoria_auto_hide').prop('checked', s.autoHide);
     $('#memoria_ref_profile').prop('checked', s.refProfile);
     $('#memoria_ref_worldinfo').prop('checked', s.refWorldInfo);
@@ -3948,6 +3967,16 @@ function bindUI() {
     });
 
     // ── 인물 도감
+    $('#memoria_settings').on('click', '.memoria-char-lock', function () {
+        const store = getStore();
+        const c = store.characters.find(x => x.id === $(this).closest('.memoria__char-card').data('id'));
+        if (!c) return;
+        c.locked = !c.locked;
+        persistStore(); renderCharactersPanel();
+        toastr.info(c.locked
+            ? `"${c.name}" 프로필을 고정했습니다. 사서가 더는 바꾸지 않습니다. (관계는 계속 갱신)`
+            : `"${c.name}" 프로필 고정을 해제했습니다.`, 'Memoria');
+    });
     $('#memoria_settings').on('click', '.memoria-char-toggle', function () {
         const store = getStore();
         const c = store.characters.find(x => x.id === $(this).closest('.memoria__char-card').data('id'));
@@ -3972,7 +4001,11 @@ function bindUI() {
         if (!edited || typeof edited !== 'string') return;
         Object.assign(c, parseCharacterEditText(edited));
         c.manual = true; // 사용자가 다듬은 프로필은 롤백에서 보호
+        // 직접 고친 프로필은 기본적으로 잠근다 — 애써 고쳐놔도 사서가 되돌려놓는 일을 막는다
+        const justLocked = getSettings().lockEditedCharacters && !c.locked;
+        if (justLocked) c.locked = true;
         persistStore(); renderCharactersPanel(); updateInjection();
+        if (justLocked) toastr.info(`"${c.name}" 프로필을 고정했습니다. 🔒 아이콘으로 해제할 수 있습니다.`, 'Memoria');
     });
     $('#memoria_settings').on('click', '.memoria-char-merge', async function () {
         const store = getStore();
@@ -4275,6 +4308,10 @@ function bindUI() {
     });
     $('#memoria_character_tracking').on('change', function () {
         getSettings().characterTracking = $(this).prop('checked');
+        saveSettingsDebounced();
+    });
+    $('#memoria_lock_edited_chars').on('change', function () {
+        getSettings().lockEditedCharacters = $(this).prop('checked');
         saveSettingsDebounced();
     });
     $('#memoria_auto_hide').on('change', async function () {

@@ -427,6 +427,17 @@
 
 .memoria__char-card.is-disabled { opacity: 0.45; }
 
+/* 프로필 고정 — 사서가 못 건드리는 카드 */
+.memoria__char-card.is-locked {
+    border-color: color-mix(in srgb, var(--mm-accent) 55%, var(--mm-border));
+    box-shadow: inset 2px 0 0 var(--mm-accent);
+}
+
+.memoria__char-card.is-locked .memoria-char-lock {
+    opacity: 1;
+    color: var(--mm-accent);
+}
+
 .memoria__char-head {
     display: flex;
     align-items: center;
@@ -462,6 +473,17 @@
     font-size: 0.85em;
     opacity: 0.6;
     margin-right: 3px;
+}
+
+.memoria__badge--locked {
+    border-color: color-mix(in srgb, var(--mm-accent) 65%, transparent);
+    color: var(--mm-text);
+}
+
+.memoria__badge--locked i {
+    font-size: 0.85em;
+    opacity: 0.75;
+    margin-right: 2px;
 }
 
 .memoria__badge--provisional {
