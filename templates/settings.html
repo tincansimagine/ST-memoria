@@ -1,7 +1,7 @@
 <div id="memoria_settings" class="memoria">
     <div class="inline-drawer">
         <div class="inline-drawer-toggle inline-drawer-header">
-            <b><i class="fa-solid fa-book-bookmark"></i> Memoria — 장기기억 서고 <span class="memoria__version">v1.4.4</span></b>
+            <b><i class="fa-solid fa-book-bookmark"></i> Memoria — 장기기억 서고 <span class="memoria__version">v1.5.1</span></b>
             <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
         </div>
         <div class="inline-drawer-content">
@@ -424,6 +424,11 @@
                         <div class="memoria__field">
                             <label for="memoria_embed_model">모델</label>
                             <input type="text" id="memoria_embed_model" placeholder="text-embedding-3-small" autocomplete="off">
+                        </div>
+                        <div class="memoria__field">
+                            <label for="memoria_embed_floor" title="이 코사인 값 아래는 '무관'으로 보고 버립니다. 임베딩 모델마다 점수 분포가 달라, 회상이 잘 안 되면 낮춰 보세요.">유사도 바닥값</label>
+                            <input type="number" id="memoria_embed_floor" min="0" max="0.9" step="0.05">
+                            <p class="memoria__hint">OpenAI 계열은 0.35~0.5, bge·e5 계열처럼 점수가 낮게 깔리는 모델은 0.2~0.3이 적당합니다. 회상이 안 되면 낮추고, 엉뚱한 기억이 딸려오면 올리세요. (기본 0.35)</p>
                         </div>
                         <div class="memoria__button-row">
                             <div class="menu_button" id="memoria_embed_test"><i class="fa-solid fa-plug-circle-check"></i><span>연결 테스트</span></div>
