@@ -1,7 +1,7 @@
 <div id="memoria_settings" class="memoria">
     <div class="inline-drawer">
         <div class="inline-drawer-toggle inline-drawer-header">
-            <b><i class="fa-solid fa-book-bookmark"></i> Memoria — 장기기억 서고 <span class="memoria__version">v1.5.1</span></b>
+            <b><i class="fa-solid fa-book-bookmark"></i> Memoria — 장기기억 서고 <span class="memoria__version">v1.5.2</span></b>
             <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
         </div>
         <div class="inline-drawer-content">
@@ -385,10 +385,15 @@
                     </div>
                     <div class="memoria__field-grid">
                         <div class="memoria__field">
-                            <label for="memoria_response_tokens" title="사서 응답의 최대 토큰. 요약·기록이 중간에 잘리지 않도록 넉넉하게 잡으세요 (기본 30000)">사서 최대 토큰</label>
+                            <label for="memoria_response_tokens" title="사서 응답의 최대 토큰. 요약·기록이 중간에 잘리지 않도록 넉넉하게 잡으세요 (기본 24000)">사서 최대 토큰</label>
                             <input type="number" id="memoria_response_tokens" min="256" max="65536" step="512">
                         </div>
+                        <div class="memoria__field">
+                            <label for="memoria_reasoning_headroom" title="추론 모델은 '생각'에 쓴 토큰도 출력 상한을 함께 먹습니다. 이 값만큼 여유를 얹어 응답이 잘리지 않게 합니다.">사고 토큰 여유분</label>
+                            <input type="number" id="memoria_reasoning_headroom" min="0" max="32768" step="1000">
+                        </div>
                     </div>
+                    <p class="memoria__hint">Gemini Thinking·GPT o 시리즈처럼 <b>생각하는 모델</b>을 사서로 쓰면, 사고에 쓴 토큰이 출력 상한을 함께 먹어 응답이 중간에 잘립니다(<code>finishReason: MAX_TOKENS</code>). 서고 정리·요약이 "모델 응답 오류"로 실패한다면 이 값을 12000~16000으로 올려 보세요. 상한일 뿐이라 실제로 쓴 만큼만 과금됩니다. 생각하지 않는 모델을 쓴다면 0으로 둬도 됩니다. (기본 8000)</p>
                 </div>
                 <div class="memoria__section">
                     <div class="memoria__section-head">

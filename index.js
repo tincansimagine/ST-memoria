@@ -201,6 +201,7 @@ const DEFAULT_SETTINGS = Object.freeze({
     arcMergeAt: 6,            // 청크 요약이 이 개수를 넘으면 오래된 4개를 연대기로 병합
     maxMemories: 400,
     responseTokens: 24000,   // 사서 응답 상한 — 요약·기록이 잘리지 않도록 넉넉하게
+    reasoningHeadroom: 8000, // 추론 모델의 사고 토큰 여유분 — 용도별 상한에 얹는다 (0 = 얹지 않음)
     supervisorEnabled: false,
     authorizeCharPrivate: true,
     summaryLanguage: 'auto',  // auto | ko | en | ja | hybrid
@@ -1006,6 +1007,19 @@ async function callCustomApi(systemPrompt, userPrompt, tokens) {
  * 2) profileId가 설정돼 있으면 커넥션 매니저 프로필로
  * 3) 아니면 현재 연결된 API로 raw 생성(generateRaw — 채팅 잠금 없음)
  */
+/**
+ * 보조 호출의 출력 상한. 용도별 상한(요약 4000, 서고 정리 8000 …)은 "본문이 이만큼이면 넉넉하다"는
+ * 뜻으로 정한 값인데, 추론 모델은 사고 토큰이 같은 상한을 함께 먹는다 — 사고 7,680 + 본문 316으로
+ * 8,000에 부딪히면(finishReason: MAX_TOKENS) 응답이 잘려 JSON 파싱이 통째로 실패하고,
+ * "모델 응답 오류"로만 보인다. 그래서 용도별 상한 위에 사고 여유분을 얹는다.
+ * 상한은 사용자가 정한 '사서 최대 토큰'까지, 바닥은 용도별 상한 — 여유분 0이면 옛 동작 그대로.
+ */
+function auxTokens(want) {
+    const s = getSettings();
+    const headroom = Math.max(0, Number(s.reasoningHeadroom) || 0);
+    return Math.max(want, Math.min(s.responseTokens, want + headroom));
+}
+
 async function callAuxLLM(systemPrompt, userPrompt, { maxTokens } = {}) {
     const settings = getSettings();
     const tokens = maxTokens || settings.responseTokens;
@@ -1824,7 +1838,7 @@ async function maybeSummarizeChunk(store) {
             const refBlock = await buildReferenceBlock();
             const userPrompt = [refBlock, previousSummariesForContext(store), `Turn digests to weave:\n${parts.join('\n')}`]
                 .filter(Boolean).join('\n');
-            text = cleanMultiline(await callAuxLLM(`${settings.prompts.chunk}\n\n${languageDirective()}`, userPrompt, { maxTokens: 4000 }), 2000);
+            text = cleanMultiline(await callAuxLLM(`${settings.prompts.chunk}\n\n${languageDirective()}`, userPrompt, { maxTokens: auxTokens(4000) }), 2000);
         } catch (e) {
             console.debug(`[${MODULE_NAME}] 청크 요약 LLM 실패, 연결 요약 사용`, e);
         }
@@ -1845,7 +1859,7 @@ async function maybeMergeArc(store) {
     const merging = store.chunkSummaries.slice(0, 4);
     let text = '';
     try {
-        text = cleanMultiline(await callAuxLLM(`${settings.prompts.arc}\n\n${languageDirective()}`, merging.map(c => `[t${c.fromTurn}–t${c.toTurn}]\n${c.text}`).join('\n\n'), { maxTokens: 4000 }), 2400);
+        text = cleanMultiline(await callAuxLLM(`${settings.prompts.arc}\n\n${languageDirective()}`, merging.map(c => `[t${c.fromTurn}–t${c.toTurn}]\n${c.text}`).join('\n\n'), { maxTokens: auxTokens(4000) }), 2400);
     } catch (e) {
         console.debug(`[${MODULE_NAME}] 연대기 병합 LLM 실패`, e);
     }
@@ -1884,9 +1898,17 @@ async function runConsolidation(store) {
         return `[${tag}] (${m.kind}, t${m.turnIndex}, imp ${Number(m.importance).toFixed(2)}) ${m.summary}`;
     });
 
-    const response = await callAuxLLM(CURATOR_PROMPT, lines.join('\n'), { maxTokens: 8000 });
+    const response = await callAuxLLM(CURATOR_PROMPT, lines.join('\n'), { maxTokens: auxTokens(8000) });
     const plan = parseJsonLoose(response);
-    if (!plan || typeof plan !== 'object') return null;
+    if (!plan || typeof plan !== 'object') {
+        // "모델 응답 오류" 한 줄로는 무엇을 만져야 할지 알 수 없다 — 실제 응답 앞부분을 콘솔에 남기고,
+        // 가장 흔한 원인(추론 모델이 사고에 출력 상한을 다 써서 응답이 잘림)을 짚어 준다.
+        const head = cleanStr(response, 300);
+        console.warn(`[${MODULE_NAME}] 서고 정리: 사서 응답을 JSON으로 읽지 못했습니다. 응답 앞부분:`, head || '(빈 응답)');
+        throw new Error(head
+            ? '사서 응답을 JSON으로 읽지 못했습니다 (응답이 중간에 잘렸을 수 있습니다 — 설정 탭의 "사고 토큰 여유분"을 늘려 보세요)'
+            : '사서 응답이 비어 있습니다 (추론 모델이 사고에 출력 상한을 다 썼을 수 있습니다 — 설정 탭의 "사고 토큰 여유분"을 늘려 보세요)');
+    }
 
     const stats = { merged: 0, dropped: 0, reweighted: 0 };
     const removeIds = new Set();
@@ -2811,7 +2833,7 @@ async function runSupervisor(query) {
         const userPrompt = `Latest player input:\n${query}\n\nRecent messages:\n${recent}\n\nArchive ledger:\n${contextBlock}`;
         // 데드라인 초과 시 연출을 포기하고 즉시 진행 (호출 자체는 뒤에서 끝나든 말든 무해)
         const response = await Promise.race([
-            callAuxLLM(settings.prompts.supervisor, userPrompt, { maxTokens: 2000 }),
+            callAuxLLM(settings.prompts.supervisor, userPrompt, { maxTokens: auxTokens(2000) }),
             new Promise((_, reject) => setTimeout(() => reject(new Error(`감독 응답 ${SUPERVISOR_DEADLINE_MS / 1000}초 초과`)), SUPERVISOR_DEADLINE_MS)),
         ]);
         const plan = parseJsonLoose(response);
@@ -3142,7 +3164,7 @@ async function recalibrateStoryClock({ silent = false } = {}) {
                 ...batch.map(t => `[t${t.turnIndex}] ${t.summary}`),
             ].join('\n');
             try {
-                const raw = await callAuxLLM(CLOCK_RECAL_PROMPT, lines, { maxTokens: 4000 });
+                const raw = await callAuxLLM(CLOCK_RECAL_PROMPT, lines, { maxTokens: auxTokens(4000) });
                 const parsed = parseJsonLoose(raw);
                 if (!parsed) { failedBatches++; continue; }
                 for (const [k, v] of Object.entries(parsed)) {
@@ -3193,7 +3215,7 @@ async function askLibrarian(question) {
 
     const parts = await buildPacketSections(q, null);
     const context = renderPacket(parts, { recallLimit: 14, protectedLimit: 5 });
-    const reply = await callAuxLLM(ASK_LIBRARIAN_PROMPT, `Archive records:\n${context}\n\nPlayer's question: ${q}`, { maxTokens: 4000 });
+    const reply = await callAuxLLM(ASK_LIBRARIAN_PROMPT, `Archive records:\n${context}\n\nPlayer's question: ${q}`, { maxTokens: auxTokens(4000) });
     const answer = String(reply || '').trim();
     if (!answer) throw new Error('빈 응답');
     return answer;
@@ -3832,6 +3854,7 @@ function renderSettingsPanel() {
     $('#memoria_chunk_turns').val(s.chunkTurns);
     $('#memoria_max_memories').val(s.maxMemories);
     $('#memoria_response_tokens').val(s.responseTokens);
+    $('#memoria_reasoning_headroom').val(s.reasoningHeadroom ?? 8000);
 
     const $sel = $('#memoria_profile');
     $sel.empty().append('<option value="">현재 연결된 API 사용</option>');
@@ -4281,7 +4304,7 @@ function bindUI() {
             const refBlock = await buildReferenceBlock();
             const userPrompt = [refBlock, previousSummariesForContext(store), `Turn digests to weave:\n${parts.join('\n')}`]
                 .filter(Boolean).join('\n');
-            const text = cleanMultiline(await callAuxLLM(`${settings.prompts.chunk}\n\n${languageDirective()}`, userPrompt, { maxTokens: 4000 }), 2000);
+            const text = cleanMultiline(await callAuxLLM(`${settings.prompts.chunk}\n\n${languageDirective()}`, userPrompt, { maxTokens: auxTokens(4000) }), 2000);
             if (!text) throw new Error('빈 응답');
             s.text = text;
             s.avec = null;
@@ -4440,7 +4463,7 @@ function bindUI() {
         toastr.info('연결을 테스트합니다…', 'Memoria');
         try {
             // 추론(thinking) 모델은 대답 전에 생각 토큰을 쓰므로 예산을 넉넉히 준다
-            const reply = await callAuxLLM('You are a connection test. Reply with exactly: OK', 'ping', { maxTokens: 2048 });
+            const reply = await callAuxLLM('You are a connection test. Reply with exactly: OK', 'ping', { maxTokens: auxTokens(2048) });
             if (String(reply).trim()) toastr.success(`연결 성공 — 응답: ${cleanStr(reply, 60)}`, 'Memoria');
             else toastr.warning('응답이 비어 있습니다. 모델 설정을 확인하세요.', 'Memoria');
         } catch (e) {
@@ -4468,6 +4491,7 @@ function bindUI() {
     numBind('#memoria_chunk_turns', 'chunkTurns', 3, 40);
     numBind('#memoria_max_memories', 'maxMemories', 50, 2000);
     numBind('#memoria_response_tokens', 'responseTokens', 256, 65536);
+    numBind('#memoria_reasoning_headroom', 'reasoningHeadroom', 0, 32768);
     numBind('#memoria_preserve_recent', 'preserveRecent', 1, 50);
     numBind('#memoria_consolidate_every', 'consolidateEvery', 0, 200);
 
@@ -4593,10 +4617,10 @@ function bindUI() {
             store.lastConsolidateTurn = store.turnCounter;
             persistStore(); renderMemoriesPanel(); updateStatusUI(); updateInjection();
             if (stats) toastr.success(`서고 정리 완료 — 병합 ${stats.merged} · 정리 ${stats.dropped} · 중요도 재조정 ${stats.reweighted}`, 'Memoria');
-            else toastr.error('서고 정리에 실패했습니다. (모델 응답 오류)', 'Memoria');
+            else toastr.info('정리할 만큼 기억이 쌓이지 않았습니다. (최소 12개)', 'Memoria');
         } catch (e) {
             console.error(`[${MODULE_NAME}] 서고 정리 실패:`, e);
-            toastr.error('서고 정리에 실패했습니다.', 'Memoria');
+            toastr.error(`서고 정리에 실패했습니다. ${e.message || ''}`, 'Memoria', { timeOut: 12000 });
         } finally {
             $btn.removeClass('disabled');
             $prog.text('');
