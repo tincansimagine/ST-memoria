@@ -87,9 +87,9 @@ function normVisibility(v) { return VISIBILITIES.includes(v) ? v : (LEGACY_VIS_M
 const DEFAULT_ARCHIVIST_PROMPT = `You are the Librarian of Memoria, the long-term archive of an ongoing roleplay. One exchange has just ended — a player message and the story's reply. Read it like a reader first, then shelve only what the story will want back later.
 
 THE FIVE SHELVES
-1. memories — moments worth recalling: things that happened, shifts between people, facts learned, tastes shown, promises made, goals set, meaningful items and places, secrets, strong impressions. Give each one a kind.
+1. memories — moments worth recalling: things that happened, shifts between people, facts learned, tastes shown, promises made, goals set, meaningful items and places, secrets, strong impressions. An impression is something a character privately thought, judged, or realized but never said aloud — a silent irony, an unspoken judgment, a private reaction that reveals who they are (noticing the hypocrisy in someone's boast without calling it out, feeling a pang they hide behind a smile). File these as kind "impression" with visibility "private" (or "secret" if they'd actively hide having thought it). Give each one a kind.
 2. canon — standing facts of the world or its systems, stored as a snake_case key with a value. Refiling a key replaces its old value. This shelf may also pin what the world explicitly LACKS when the story makes it clear (key "no_magic", value "magic does not exist here") so later scenes stop inventing it. Canon is for facts expected to hold for the rest of the story; anything that could plausibly change in play (a passcode, an address, who holds an item) belongs in status instead.
-3. status — the current value of one slot for one entity. Use these slots whenever they fit, always the same name: location, whereabouts, outfit, condition, injury, mood, holding, activity, goal — invent a new slot only when none of them fits, then reuse that exact name every time after. "activity" is what they are doing right now, stance included, as ONE line ("lying on the window seat", "sitting in a chair, unpacking") — never split posture into its own slot, so a stale pose can't contradict a fresh action. One fact lives in ONE slot: an injury goes under "injury" alone, never echoed into "condition" or "appearance" too. Refiling the same (entity, slot) replaces it. When a state ENDS, refile the slot with its new reality ("uninjured", "hands free", "calm") — a stale value left standing is worse than no entry. When the scene itself moves or time passes, file entity "scene" with slots "location", "time_of_day", "date" — and "relationship" for the main pair when it clearly shifts. A home or workplace merely mentioned is NOT the scene's location; move "scene" only when the story actually moves there. When a named character exits the scene with a stated destination or errand, file their slot "whereabouts". Skip anything unchanged. Status holds the current value only — how it came to be belongs in memories, not in the value.
+3. status — the current value of one slot for one entity. Use these slots whenever they fit, always the same name: location, whereabouts, outfit, condition, injury, mood, holding, activity, goal — invent a new slot only when none of them fits, then reuse that exact name every time after. "activity" is what they are doing right now, stance included, as ONE line ("lying on the window seat", "sitting in a chair, unpacking") — never split posture into its own slot, so a stale pose can't contradict a fresh action. One fact lives in ONE slot: an injury goes under "injury" alone, never echoed into "condition" or "appearance" too. Refiling the same (entity, slot) replaces it. When a state ENDS, refile the slot with its new reality ("uninjured", "hands free", "calm") — a stale value left standing is worse than no entry. When the scene itself moves or time passes, file entity "scene" with slots "location", "time_of_day", "date" — and "relationship" for the main pair when it clearly shifts. Keep "date" as concrete as the story supports: a stated calendar date, or a day count ("day 12") if the story tracks one, rather than a vague relative phrase once enough has happened to anchor a real one — fall back to relative phrasing ("that night") only early on or when nothing firmer is available. A home or workplace merely mentioned is NOT the scene's location; move "scene" only when the story actually moves there. When a named character exits the scene with a stated destination or errand, file their slot "whereabouts". Skip anything unchanged. Status holds the current value only — how it came to be belongs in memories, not in the value.
 4. pledges — promises the story must keep: a thread that must stay open (keep_unresolved, loose_end), a secret that must not leak (keep_secret), knowledge a character must not have yet (knowledge_gap), a consent line (consent), or a hard limit of the world (world_limit).
 5. cast — the people of this story. The two leads — the player's character and the story's main character — belong here first: the archive starts empty, so nobody is "already known". Open a lead's card at their first clear characterization and keep it current as their role, relationships, or voice evolve. Every other named character gets a card at their first real characterization, or when their role, occupation, or relationships meaningfully change. Only throwaway NPCs never get a card. Unknown fields stay null; temporary states (drunk, blushing) are not profile material. "relationships" lists standing ties to other named characters, e.g. [{"target":"Aria","relation":"childhood friend"}]. "voice" captures HOW they speak as a compact pattern — politeness level or typical sentence endings, pet phrases, what they call other people; a pattern only, never sample lines (those belong in quotes). Identity is precise: two people who share a name, title, or trade are still two people — and one person spelled two ways (nickname, romanization, translation) is still one. Reuse the exact name already on file. A pivotal character the story deliberately leaves unnamed may still get a card: use a short stable handle as the name (the SAME words every time, e.g. "the scarred courier") and set "provisional":true. When the story finally names them, file the card under the real name with "aka":["the scarred courier"] so the old records fold in.
 
@@ -103,6 +103,7 @@ SHELVING RULES
 - Truth has a chain of custody. Only what the scene directly shows goes down as fact. What a character says, suspects, overhears, or is told secondhand is THEIR knowledge — shelve it as status with "claim":"belief" and name the holder in "owner". Rumor and suspicion never graduate to fact on their own; they graduate when the story confirms them on screen. If a belief later proves false, the fact and the mistaken belief coexist on different lines — never average them into one.
 - A memory about hearsay records the telling, not the content as truth: "X told Y that the king is dying" — not "the king is dying".
 - The player is off-limits. File what their character did and said inside the fiction — never what the real person feels, wants, or consents to.
+- Memories compete for attention and can fall out of view — never let something the story must still act on live there alone. A relationship shift that should hold going forward belongs in status too (the relevant entity, slot "relationship"), not just a memories[kind=relationship] entry. A promise the story must keep belongs in pledges (keep_unresolved) too, not just memories[kind=promise]. A secret that must not leak belongs in pledges (keep_secret) too, not just memories[kind=secret]. Use those memories kinds freely for color and texture — just never as the ONLY record of something with a job still to do.
 - "quote" is ONE short verbatim line of SPOKEN dialogue (about 15 words max), copied exactly from the user or assistant text in its original language. Never narration or description — prose that merely restates the summary is dead weight; the shelf wants the words a voice actually said. Never a whole passage. Copy, never compose. Use null when nothing was worth hearing twice — most memories need no quote.
 - visibility marks who may know a memory: "public" (open knowledge), "private" (only the holder — inner thoughts, personal facts), "secret" (deliberately hidden). "owner" names the holder.
 - Small talk shelves nothing; empty arrays are a valid answer. A few sharp entries beat many vague ones — when torn between filing and skipping, skip. Caps: 8 memories, 4 canon, 6 status, 4 pledges, 3 cast.
@@ -140,7 +141,52 @@ Never invent facts. Never use ids missing from the list. Most shelves need littl
 Reply with ONE minified JSON object and nothing else:
 {"merge":[{"keep":"m1","absorb":["m2"],"summary":"..."}],"drop":["m9"],"reweight":[{"id":"m4","importance":0.7}]}`;
 
+const CHUNK_REGROUP_PROMPT = `You are reviewing a run of "story so far" chunk records from a roleplay chat, in chronological order, each tagged like [c3]. These were cut at a fixed turn interval, so a single continuous event may have been split across two or more consecutive chunks purely by coincidence of where the cutoff fell — while other chunks genuinely are separate, unrelated events.
+
+Group them into clusters: consecutive chunks belong in the SAME cluster only if they describe one continuous event, conflict, or scene arc that just happened to get cut apart. A chunk that starts something new and unrelated — even with the same characters, even right after — starts its own cluster. When unsure, keep them separate: a real event left split costs less than two unrelated events wrongly fused together.
+
+Reply with ONE minified JSON object and nothing else: {"groups":[["c1","c2"],["c3"],["c4","c5","c6"]]}
+Every chunk tag must appear in exactly one group. Groups must stay in the same chronological order as the input. A group of a single chunk means it stays independent — that is a normal, common answer.`;
+
+const ARC_REGROUP_PROMPT = `You are reviewing already-compressed chronicle records ("arcs") from a roleplay chat, in chronological order, each tagged like [a2]. Each arc already covers a whole event or era. Occasionally two consecutive arcs turn out to be the same continuous story thread that only got split because of when the earlier compression happened to run — not because they were ever meant to be separate.
+
+Be far more conservative than a first-pass summary edit would be: these records have already been through one round of compression, so merging them again costs real detail. Group two or more consecutive arcs together ONLY when it is obvious they are literally the same ongoing event, relationship, or conflict with no real break in between. A short arc next to a long one is not by itself a reason to merge — merge only on genuine continuity. When unsure, leave them as separate arcs.
+
+Reply with ONE minified JSON object and nothing else: {"groups":[["a1","a2"],["a3"]]}
+Every arc tag must appear in exactly one group, in the same chronological order as the input. Most of the time nearly every group will have just one arc in it — that is the expected, normal answer.`;
+
+
 const ASK_LIBRARIAN_PROMPT = `You are Memoria's Librarian. The player asks a question about the history of this roleplay chat. Answer using ONLY the archive records provided — never invent, never fill gaps with guesses. When a record supports your answer, cite its turn like (t12). Records marked as a belief or rumor are somebody's view, not established fact — answer them as such ("X believes..."). If the archive does not contain the answer, say plainly that nothing is filed about it. Answer in the same language as the question. Be concise and direct.`;
+
+const EDITOR_PROMPT = `You are Memoria's archivist. The user is now correcting your records directly (not playing the story) — fixing wrong dates, wrong summaries, wrong story-clock durations, or adding/editing a character card. You do not act it out; you only propose precise edits to the archive shown below.
+
+Reply with ONE minified JSON object and nothing else, in this shape:
+{"reply":"<one short sentence in the user's language, explaining what you will change, or why you can't>","ops":[...]}
+
+Each entry in "ops" is one of these shapes:
+{"op":"canon","scope":"session|world|region|location|faction|system","scopeName":"<name, empty string if not scoped to one>","key":"<slot name>","value":"<corrected value>"}
+{"op":"status","entity":"<name>","slot":"<slot name>","value":"<corrected value>","claim":"objective|belief","owner":"<name, empty string if not a belief>"}
+{"op":"clock","fromTurn":<int>,"toTurn":<int>,"totalDays":<number>}
+{"op":"addMemory","kind":"event|relationship|fact|preference|promise|goal|item|place|secret|impression","summary":"<new memory text>","importance":0.5}
+{"op":"editMemory","id":"<memory id copied exactly from the archive below>","summary":"<corrected text>"}
+{"op":"deleteMemory","id":"<memory id copied exactly from the archive below>"}
+{"op":"editSummary","id":"<summary id copied exactly from the archive below>","text":"<corrected text>"}
+{"op":"deleteSummary","id":"<summary id copied exactly from the archive below>"}
+{"op":"addPledge","kind":"keep_unresolved|keep_secret|knowledge_gap|consent|world_limit|loose_end","summary":"<pledge text>","priority":2,"owner":"<name, empty string if none>"}
+{"op":"editPledge","id":"<pledge id copied exactly from the archive below>","summary":"<corrected text>","status":"active|resolved","priority":2}
+{"op":"deletePledge","id":"<pledge id copied exactly from the archive below>"}
+{"op":"character","name":"<character name>","patch":{"role":"...","age":"...","occupation":"...","appearance":"...","voice":"...","traits":["..."]}}
+
+Rules:
+- "clock" rescales the story-clock time already recorded across [fromTurn,toTurn] so it totals totalDays instead. Use the narrowest turn range that actually needs correcting — never the whole story unless the user says so.
+- "canon" is a permanent world fact (e.g. current in-story date, a standing rule). "status" is a per-entity current value (e.g. scene.date, a character's location or condition). If the user says "it's March now" and the archive shows a scene date slot, correct that slot with "status"; if it's tracked as a world fact instead, use "canon".
+- id fields (editMemory, deleteMemory, editSummary, deleteSummary, editPledge, deletePledge) must be copied character-for-character from the archive below. Never invent an id. If you can't find a matching record, say so in "reply" and omit that op.
+- "addPledge" files a new standing pressure the story must keep true — an unresolved thread, a secret, a consent boundary, a world limit. Use "editPledge" to mark one resolved (the user says it's been settled) or to fix its wording/priority; use "deletePledge" only when the user says it should never have been tracked at all, not merely that it's now resolved.
+- "character" patch only includes the fields actually being set; omit fields you're not changing. Use it for both adding a new character and editing an existing one (matched by name).
+- Only propose ops for what the user actually asked to change in this message — do not "fix" unrelated things you notice.
+- If the request is ambiguous (e.g. which of several similar records to change), ask a short clarifying question in "reply" and return an empty "ops" array.
+- If nothing in the archive matches the request, say so plainly in "reply" and return an empty "ops" array.
+- Never include markdown, code fences, or commentary outside the JSON object.`;
 
 const DEFAULT_CHUNK_PROMPT = `You are a skilled editor who condenses roleplay turn digests into one compact "story so far" record. The record is read by another language model mid-story, so it must be scannable at a glance — bullets, not prose.
 
@@ -174,9 +220,9 @@ Never invent or reinterpret events. Drop SHIFTS/OPEN entries that later records 
 const LANG_DIRECTIVES = {
     auto: 'LANGUAGE: Write the output in the same language as the chat.',
     ko: 'LANGUAGE (MANDATORY): Write ALL output in Korean (한국어). Keep quoted dialogue in its original language.',
-    en: 'LANGUAGE (MANDATORY): Write ALL output in English. Translate everything, including dialogue.',
-    ja: 'LANGUAGE (MANDATORY): Write ALL output in Japanese (日本語). Keep quoted dialogue in its original language.',
-    hybrid: 'LANGUAGE (MANDATORY, HYBRID MODE): Write narrative/summary text in English, but keep ALL quoted dialogue verbatim in its ORIGINAL language — never translate quotes.',
+    en: 'LANGUAGE (MANDATORY): Write ALL output in English. Translate everything, including dialogue. NAMES ARE NOT TRANSLATED: every proper name — people, places, factions — stays in the exact spelling already on file, in its original script. Never romanize or transliterate a name.',
+    ja: 'LANGUAGE (MANDATORY): Write ALL output in Japanese (日本語). Keep quoted dialogue in its original language. NAMES ARE NOT TRANSLATED: every proper name stays in the exact spelling already on file, in its original script.',
+    hybrid: 'LANGUAGE (MANDATORY, HYBRID MODE): Write narrative/summary text in English, but keep ALL quoted dialogue verbatim in its ORIGINAL language — never translate quotes. NAMES ARE NOT TRANSLATED EITHER: every proper name — people, places, factions — stays in the exact spelling the story and the cast list use, in its original script. Romanizing a name splits one character into two records that then drift apart; the English is for sentences, never for names.',
 };
 
 /* ============================================================
@@ -198,7 +244,7 @@ const DEFAULT_SETTINGS = Object.freeze({
     maxPerTurn: 2,
     multiQueryRecent: 3,
     chunkTurns: 8,
-    arcMergeAt: 6,            // 청크 요약이 이 개수를 넘으면 오래된 4개를 연대기로 병합
+    arcMergeAt: 6,            // 안전 상한: 서고 정리를 못 기다릴 만큼 청크가 이 개수 넘게 쌓이면 즉시 재그룹핑
     maxMemories: 400,
     responseTokens: 24000,   // 사서 응답 상한 — 요약·기록이 잘리지 않도록 넉넉하게
     reasoningHeadroom: 8000, // 추론 모델의 사고 토큰 여유분 — 용도별 상한에 얹는다 (0 = 얹지 않음)
@@ -217,13 +263,15 @@ const DEFAULT_SETTINGS = Object.freeze({
     apiMode: 'st',            // 'st' = 실리태번(현재 API/연결 프로필), 'custom' = 커스텀 OpenAI 호환 API
     // flexTier: 절감 티어(반값·지연 감수) — 'off' | 'openai'(본문 service_tier) | 'gemini'(헤더)
     // extraHeaders/extraBody: JSON 문자열 — 요청에 얹을 추가 헤더·본문 필드 (프록시 라우팅 등 고급용)
-    customApi: { url: '', key: '', model: '', temperature: 0.7, timeoutSec: 90, flexTier: 'off', extraHeaders: '', extraBody: '' },
+    // authMode: 'apikey' = url/key로 OpenAI 호환 호출, 'vertex' = 구글 서비스 계정 JSON으로 Vertex AI 직접 호출
+    customApi: { url: '', key: '', model: '', temperature: 0.7, timeoutSec: 90, flexTier: 'off', extraHeaders: '', extraBody: '', authMode: 'apikey', vertexJson: '', vertexLocation: 'us-central1' },
     // 의미 검색 소스: 'off' = 내장 해시만, 'local' = 실리태번 내장 임베딩(무료), 'api' = OpenAI 호환 임베딩 API
     // floor: API 코사인 바닥값 — 이 아래는 무관으로 보고 0으로 깎는다 (모델마다 분포가 달라 조정 가능)
     embedApi: { mode: 'off', enabled: false, url: '', key: '', model: '', floor: 0.35 },
     consolidateEvery: 30,     // N턴마다 서고 정리(중복 병합·중요도 재조정). 0 = 끔
+    arcConsolidateEvery: 100, // N턴마다 아크끼리 재검토(진짜 같은 사건이면 합침). 0 = 끔
     storyClock: true,         // 서사 시계 — 이야기 속 경과 시간을 추적해 기억 노화에 반영
-    promptRev: 19,
+    promptRev: 20,
     settingsRev: 3,
     fossil: { settling: 12, fossilized: 40, deep: 120 },
     prompts: {
@@ -1020,12 +1068,155 @@ function auxTokens(want) {
     return Math.max(want, Math.min(s.responseTokens, want + headroom));
 }
 
+/* ============================================================
+ * Vertex AI 직접 호출 (서비스 계정 JSON, 브라우저에서 JWT 서명 → OAuth2 토큰 발급)
+ *
+ * 실리태번 본 채팅과 별도의 구글 클라우드 키(별도 프로젝트/서비스 계정)를 쓰고 싶을 때 사용.
+ * 같은 키를 본 채팅과 memoria 보조 호출이 나눠 쓰면 두 트래픽이 캐시를 서로 밀어내
+ * 컨텍스트 캐싱 적중률이 떨어지므로, 키를 분리하면 각자 캐시가 그대로 쌓인다.
+ * ============================================================ */
+
+function b64urlFromBytes(bytes) {
+    let bin = '';
+    for (const b of bytes) bin += String.fromCharCode(b);
+    return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+function b64urlFromStr(str) { return b64urlFromBytes(new TextEncoder().encode(str)); }
+
+/** PEM(PKCS8) 개인키 문자열 → CryptoKey (RS256 서명용) */
+async function importPrivateKeyPem(pem) {
+    const clean = String(pem || '')
+        .replace(/-----BEGIN PRIVATE KEY-----/g, '')
+        .replace(/-----END PRIVATE KEY-----/g, '')
+        .replace(/\s+/g, '');
+    if (!clean) throw new Error('service account JSON에 private_key가 없습니다');
+    const raw = atob(clean);
+    const bytes = new Uint8Array(raw.length);
+    for (let i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i);
+    return crypto.subtle.importKey(
+        'pkcs8', bytes.buffer,
+        { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' },
+        false, ['sign'],
+    );
+}
+
+/** 서비스 계정 JSON으로 self-signed JWT를 만들고 구글 OAuth2 엔드포인트에서 액세스 토큰 교환 */
+async function fetchVertexAccessToken(sa) {
+    const now = Math.floor(Date.now() / 1000);
+    const header = { alg: 'RS256', typ: 'JWT' };
+    const claim = {
+        iss: sa.client_email,
+        scope: 'https://www.googleapis.com/auth/cloud-platform',
+        aud: sa.token_uri || 'https://oauth2.googleapis.com/token',
+        iat: now,
+        exp: now + 3600,
+    };
+    const unsigned = `${b64urlFromStr(JSON.stringify(header))}.${b64urlFromStr(JSON.stringify(claim))}`;
+    const key = await importPrivateKeyPem(sa.private_key);
+    const sig = await crypto.subtle.sign({ name: 'RSASSA-PKCS1-v1_5' }, key, new TextEncoder().encode(unsigned));
+    const jwt = `${unsigned}.${b64urlFromBytes(new Uint8Array(sig))}`;
+
+    const resp = await fetch(sa.token_uri || 'https://oauth2.googleapis.com/token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({
+            grant_type: 'urn:ietf:params:oauth:grant-type:jwt-bearer',
+            assertion: jwt,
+        }),
+    });
+    if (!resp.ok) {
+        let detail = resp.statusText;
+        try { detail = (await resp.json())?.error_description || detail; } catch { /* ignore */ }
+        throw new Error(`Vertex 토큰 발급 실패 (HTTP ${resp.status}): ${detail}`);
+    }
+    const data = await resp.json();
+    if (!data.access_token) throw new Error('Vertex 토큰 응답에 access_token이 없습니다');
+    return { token: data.access_token, expiresAt: Date.now() + (Number(data.expires_in) || 3600) * 1000 };
+}
+
+// 서비스 계정 JSON 원문 해시별로 액세스 토큰을 캐싱 — 매 호출마다 새로 서명/왕복하지 않게
+const _vertexTokenCache = new Map(); // jsonRaw -> { token, expiresAt }
+
+async function getVertexAccessToken(jsonRaw) {
+    const cached = _vertexTokenCache.get(jsonRaw);
+    // 캐시 경로와 발급 경로가 같은 모양을 돌려야 한다 — 한쪽만 문자열이면
+    // 호출부의 .token이 undefined가 돼 인증 헤더가 조용히 깨진다
+    if (cached && cached.expiresAt - Date.now() > 60000) return { token: cached.token, projectId: cached.projectId };
+    let sa;
+    try { sa = JSON.parse(jsonRaw); } catch { throw new Error('Vertex 서비스 계정 JSON을 파싱할 수 없습니다'); }
+    if (!sa.private_key || !sa.client_email || !sa.project_id) {
+        throw new Error('Vertex 서비스 계정 JSON에 private_key/client_email/project_id가 필요합니다');
+    }
+    const fresh = await fetchVertexAccessToken(sa);
+    _vertexTokenCache.set(jsonRaw, { ...fresh, projectId: sa.project_id });
+    return { token: fresh.token, projectId: sa.project_id };
+}
+
+/** Vertex AI generateContent 직접 호출 (구글 서비스 계정 JSON, ST 연결 프로필과 완전히 독립) */
+async function callVertexApi(systemPrompt, userPrompt, tokens) {
+    const cfg = getSettings().customApi;
+    const jsonRaw = String(cfg.vertexJson || '').trim();
+    if (!jsonRaw) throw new Error('Vertex 서비스 계정 JSON을 입력하세요');
+    if (!cfg.model) throw new Error('Vertex 모델 ID를 입력하세요 (예: gemini-2.5-pro)');
+
+    let sa;
+    try { sa = JSON.parse(jsonRaw); } catch { throw new Error('Vertex 서비스 계정 JSON을 파싱할 수 없습니다'); }
+    const cached = _vertexTokenCache.get(jsonRaw);
+    const accessToken = (cached && cached.expiresAt - Date.now() > 60000)
+        ? cached.token
+        : (await getVertexAccessToken(jsonRaw)).token;
+
+    const location = String(cfg.vertexLocation || 'us-central1').trim() || 'us-central1';
+    const host = location === 'global' ? 'aiplatform.googleapis.com' : `${location}-aiplatform.googleapis.com`;
+    const url = `https://${host}/v1/projects/${sa.project_id}/locations/${location}/publishers/google/models/${encodeURIComponent(cfg.model)}:generateContent`;
+
+    const body = {
+        contents: [{ role: 'user', parts: [{ text: userPrompt }] }],
+        systemInstruction: { role: 'system', parts: [{ text: systemPrompt }] },
+        generationConfig: {
+            maxOutputTokens: tokens,
+            temperature: Number.isFinite(Number(cfg.temperature)) ? Number(cfg.temperature) : 0.7,
+        },
+    };
+    const extraBody = parseJsonObjectSetting(cfg.extraBody);
+    if (extraBody) Object.assign(body, extraBody);
+    const headers = { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` };
+    const extraHeaders = parseJsonObjectSetting(cfg.extraHeaders);
+    if (extraHeaders) for (const [k, v] of Object.entries(extraHeaders)) headers[k] = String(v);
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), Math.max(10, cfg.timeoutSec || 90) * 1000);
+    try {
+        const response = await fetch(url, { method: 'POST', headers, signal: controller.signal, body: JSON.stringify(body) });
+        if (!response.ok) {
+            let detail = response.statusText;
+            try {
+                const err = await response.json();
+                detail = err?.error?.message || (Array.isArray(err) ? err[0]?.error?.message : null) || detail;
+            } catch { /* ignore */ }
+            throw new Error(`HTTP ${response.status}: ${detail}`);
+        }
+        const data = await response.json();
+        const cand = data?.candidates?.[0];
+        const content = (cand?.content?.parts || []).map(p => p.text || '').join('');
+        if (!content) {
+            if (cand?.finishReason === 'MAX_TOKENS') throw new Error('빈 응답 (MAX_TOKENS — 토큰 상한을 늘려보세요)');
+            throw new Error('빈 응답');
+        }
+        return content;
+    } finally {
+        clearTimeout(timeoutId);
+    }
+}
+
 async function callAuxLLM(systemPrompt, userPrompt, { maxTokens } = {}) {
     const settings = getSettings();
     const tokens = maxTokens || settings.responseTokens;
 
     if (settings.apiMode === 'custom') {
-        return await callCustomApi(systemPrompt, userPrompt, tokens);
+        return settings.customApi.authMode === 'vertex'
+            ? await callVertexApi(systemPrompt, userPrompt, tokens)
+            : await callCustomApi(systemPrompt, userPrompt, tokens);
     }
 
     if (settings.profileId) {
@@ -1104,6 +1295,24 @@ function clamp01(x, dflt = 0.5) {
 
 function toSnake(s) {
     return String(s || '').trim().toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '_').replace(/^_+|_+$/g, '').slice(0, 64);
+}
+
+/* 손으로 고친 글의 상한. 자동 기록 상한(요약 300자 등)은 "사서가 이 정도면 충분하다"는
+ * 기준이지, 사람이 직접 쓴 글까지 묶어 둘 이유가 없다. 예전엔 둘이 같은 값이라
+ * 이미 상한에 닿은 기록은 편집창에서 글자를 지울 수는 있어도 더 넣을 수가 없었다. */
+const MANUAL_TEXT_MAX = 2000;
+
+/** 자동 기록용 자르기 — 문장/단어 경계에서 끊어 단어 중간에서 잘리지 않게 한다 */
+function clipStr(s, max) {
+    const t = cleanStr(s, max * 2);
+    if (t.length <= max) return t;
+    const head = t.slice(0, max);
+    // 마지막 문장 끝에서 자르되, 너무 많이 버려야 하면 마지막 공백에서
+    const sentence = Math.max(head.lastIndexOf('. '), head.lastIndexOf('! '), head.lastIndexOf('? '),
+        head.lastIndexOf('｡'), head.lastIndexOf('。'), head.lastIndexOf('! '), head.lastIndexOf('！'), head.lastIndexOf('？'));
+    if (sentence > max * 0.6) return head.slice(0, sentence + 1).trim();
+    const space = head.lastIndexOf(' ');
+    return (space > max * 0.6 ? head.slice(0, space) : head).trim() + '…';
 }
 
 function cleanStr(s, max = 400) {
@@ -1202,14 +1411,14 @@ function validExcerpt(excerpt, userText, assistantText) {
 
 function sanitizeExtraction(raw, userText, assistantText) {
     const out = {
-        turnSummary: cleanStr(raw?.digest ?? raw?.turn_summary, 300),
+        turnSummary: clipStr(raw?.digest ?? raw?.turn_summary, 700),
         importance: clamp01(raw?.weight ?? raw?.importance, 0.4),
         elapsedDays: parseDurationDays(raw?.time_passed),
         memories: [], worldRules: [], entityStates: [], locks: [], characters: [], milestones: [], items: [],
     };
 
     for (const m of (Array.isArray(raw?.memories) ? raw.memories : []).slice(0, 12)) {
-        const summary = cleanStr(m?.summary, 300);
+        const summary = clipStr(m?.summary, 400);
         if (!summary) continue;
         out.memories.push({
             kind: normKind(m?.kind),
@@ -1364,7 +1573,21 @@ function removeDerivedForTurn(store, turnIndex) {
     store.entityStates = rollbackOrDrop(store.entityStates, turnIndex);
     // 스와이프 롤백은 "그 턴에 처음 생긴" 서약만 지운다 — 옛 서약이 이 턴에 재발행돼
     // turnIndex만 갱신된 경우까지 지우면 오래 지켜온 서약이 통째로 증발한다
-    store.locks = store.locks.filter(l => (l.createdTurn ?? l.turnIndex) !== turnIndex || l.manual);
+    store.locks = store.locks.flatMap(l => {
+        if ((l.createdTurn ?? l.turnIndex) === turnIndex && !l.manual) return []; // 이 턴에 처음 생김 → 삭제
+        if (l.turnIndex !== turnIndex) return [l];
+        if (l.prev) {
+            // 이 턴에서 문구/우선순위/상태가 재발행된 서약 → 그 이전 값으로 되돌린다
+            return [{
+                ...l,
+                summary: l.prev.summary, status: l.prev.status, priority: l.prev.priority, owner: l.prev.owner,
+                turnIndex: l.prevTurn ?? l.createdTurn ?? 0,
+                prev: null, prevTurn: null,
+            }];
+        }
+        // 이 턴엔 "재확인"만 됨(내용 변화 없음) — 재확인 이전 시점으로만 되돌린다
+        return [{ ...l, turnIndex: l.createdTurn ?? 0 }];
+    });
     // 이 턴에서 "해소됨" 판정을 받은 서약은 다시 활성으로 (스와이프/삭제 롤백)
     for (const l of store.locks) {
         if (l.status === 'resolved' && l.resolvedTurn === turnIndex) {
@@ -1376,15 +1599,26 @@ function removeDerivedForTurn(store, turnIndex) {
             l.suggestTurn = null;
         }
     }
-    // 인물 도감: 이 턴에서 처음 만들어졌고 이후 갱신이 없는 인물만 제거 (병합된 프로필은 유지)
+    // 인물 도감 존재 여부(카드를 통째로 지울지)는 여기서 안 본다 — "생성턴==이 턴"만 보면
+    // 한 번이라도 갱신된 뒤로는 절대 안 지워지는 버그가 있었다. reconcileWithChat 마지막에
+    // 전체 삭제 결과를 놓고 "생성턴·갱신턴 둘 다 이제 없는지"를 한 번에 정확히 판단한다.
+    // 다만 "이 턴에 갱신된 필드값"은 여기서 되돌린다 — 서약과 같은 1단계 이전 값 방식.
     if (Array.isArray(store.characters)) {
-        store.characters = store.characters.filter(c => c.manual || c.locked || c.firstTurn !== turnIndex || c.updatedTurn !== turnIndex);
+        for (const c of store.characters) {
+            if (c.updatedTurn !== turnIndex) continue;
+            if (c.prev) {
+                c.role = c.prev.role; c.age = c.prev.age; c.occupation = c.prev.occupation;
+                c.appearance = c.prev.appearance; c.voice = c.prev.voice; c.traits = c.prev.traits;
+                c.updatedTurn = c.prevTurn ?? c.firstTurn ?? 0;
+                c.prev = null; c.prevTurn = null;
+            } else {
+                // 재확인만 됐던 경우(이전 값 없음) — 재확인 이전 시점으로만 되돌린다
+                c.updatedTurn = c.firstTurn ?? 0;
+            }
+        }
     }
     if (Array.isArray(store.milestones)) {
         store.milestones = store.milestones.filter(e => e.manual || e.turnIndex !== turnIndex);
-    }
-    if (Array.isArray(store.items)) {
-        store.items = store.items.filter(i => i.manual || i.firstTurn !== turnIndex || i.updatedTurn !== turnIndex);
     }
 }
 
@@ -1405,9 +1639,104 @@ function upsertWorldRule(store, rule, turnIndex) {
     store.worldRules[idx] = { id: cur.id, ...rule, turnIndex, createdTurn, prev: cur.value, prevTurn: cur.turnIndex };
 }
 
+/* ------------------------------------------------------------
+ * 개체 이름 정규화 — 한 사람이 두 이름으로 갈라지는 것을 막는다.
+ *
+ * 인물 도감은 별칭(aliases)으로 "깡 = kkang"을 이미 알고 있지만, 상태 보드와 기억의
+ * entities는 사서가 써 준 문자열을 그대로 키로 썼다. 그래서 하이브리드 요약처럼 사서가
+ * 어떤 턴엔 원어("깡"), 어떤 턴엔 로마자("kkang")로 적으면 같은 인물이 두 줄로 갈라지고,
+ * 한쪽은 최신 상태 · 다른 쪽은 며칠 전에서 멈춘 채 둘 다 주입돼 응답이 오락가락한다.
+ * ------------------------------------------------------------ */
+
+/** 비교용 정규화 — 대소문자·공백·구두점 무시 (kkang / Kkang / 깡 은 각각 자기 형태로 유지) */
+function entityKey(s) {
+    return String(s || '').toLowerCase().replace(/[\s._\-'"`]+/g, '').trim();
+}
+
+/** 이름을 인물 도감의 정식 이름으로 바꾼다. 도감에 없으면 원래 이름 그대로. */
+function canonEntityName(store, name) {
+    const raw = String(name || '').trim();
+    if (!raw) return raw;
+    const k = entityKey(raw);
+    if (!k) return raw;
+    for (const c of (store.characters || [])) {
+        if (entityKey(c.name) === k) return c.name;
+        if ((c.aliases || []).some(a => entityKey(a) === k)) return c.name;
+    }
+    return raw;
+}
+
+/**
+ * 상태 보드와 기억의 개체 이름을 정식 이름으로 접어 넣고, 그 결과 같아진 줄을 합친다.
+ * 인물 카드를 병합했을 때·별칭을 추가했을 때, 그리고 채팅을 열 때 한 번 돌린다.
+ * 반환: 바뀐 항목 수 {states, memories}
+ */
+function foldEntityAliases(store) {
+    let states = 0;
+    let memories = 0;
+
+    // 1) 상태 보드 — 이름을 접은 뒤 (개체·슬롯·주장·소유자)가 겹치면 최신 턴만 남긴다
+    const byKey = new Map();
+    const kept = [];
+    for (const s of store.entityStates) {
+        const canon = canonEntityName(store, s.entity);
+        if (canon !== s.entity) { s.entity = canon; states++; }
+        const key = `${entityKey(s.entity)}|${canonSlot(s.slot)}|${s.claim || ''}|${entityKey(s.owner || '')}`;
+        const prior = byKey.get(key);
+        if (!prior) { byKey.set(key, s); kept.push(s); continue; }
+        // 같은 줄이 둘 — 최신 턴을 남기고, 처음 생긴 턴은 더 이른 쪽을 물려받는다
+        const winner = (s.turnIndex || 0) >= (prior.turnIndex || 0) ? s : prior;
+        const loser = winner === s ? prior : s;
+        winner.createdTurn = Math.min(winner.createdTurn ?? winner.turnIndex ?? 0, loser.createdTurn ?? loser.turnIndex ?? 0);
+        if (winner !== prior) {
+            byKey.set(key, winner);
+            kept[kept.indexOf(prior)] = winner;
+        }
+        states++;
+    }
+    if (kept.length !== store.entityStates.length) store.entityStates = kept;
+
+    // 2) 기억의 entities — 회상 점수의 개체 축이 갈라지지 않게 같은 이름으로 접는다
+    for (const m of store.memories) {
+        if (!Array.isArray(m.entities) || !m.entities.length) continue;
+        const folded = [];
+        let touched = false;
+        for (const e of m.entities) {
+            const canon = canonEntityName(store, e);
+            if (canon !== e) touched = true;
+            if (!folded.some(x => entityKey(x) === entityKey(canon))) folded.push(canon);
+        }
+        if (touched || folded.length !== m.entities.length) {
+            m.entities = folded;
+            // 개체명은 색인 텍스트에 들어가므로 벡터를 다시 잡아준다
+            m.vec = encodeVec(embedText(memoryIndexText(m)));
+            m.cvec = memoryCueText(m).length >= 4 ? encodeVec(embedText(memoryCueText(m))) : '';
+            m.avec = null; m.acvec = null;
+            memories++;
+        }
+    }
+
+    // 3) 서약·인물 관계의 소유자/대상 이름도 같은 이름으로
+    for (const l of (store.locks || [])) {
+        if (!l.owner) continue;
+        const canon = canonEntityName(store, l.owner);
+        if (canon !== l.owner) l.owner = canon;
+    }
+    for (const c of (store.characters || [])) {
+        for (const r of (c.relationships || [])) {
+            const canon = canonEntityName(store, r.target);
+            if (canon !== r.target) r.target = canon;
+        }
+    }
+
+    return { states, memories };
+}
+
 function upsertEntityState(store, state, turnIndex) {
+    // 이름 별칭 병합: 사서가 같은 인물을 원어·로마자로 번갈아 적어도 도감의 정식 이름 한 줄로 합친다
+    state = { ...state, entity: canonEntityName(store, state.entity), owner: state.owner ? canonEntityName(store, state.owner) : state.owner };
     // 슬롯 별칭 병합: 기존 항목이 구식 슬롯명(physical_state 등)으로 저장돼 있어도 같은 줄로 합쳐진다
-    const idx = store.entityStates.findIndex(s => s.entity.toLowerCase() === state.entity.toLowerCase() && canonSlot(s.slot) === canonSlot(state.slot) && s.claim === state.claim && (s.owner || '') === (state.owner || ''));
+    const idx = store.entityStates.findIndex(s => entityKey(s.entity) === entityKey(state.entity) && canonSlot(s.slot) === canonSlot(state.slot) && s.claim === state.claim && entityKey(s.owner || '') === entityKey(state.owner || ''));
     if (idx < 0) {
         store.entityStates.push({ id: uuidv4(), ...state, turnIndex, createdTurn: turnIndex, prev: null, prevTurn: null });
         return;
@@ -1429,17 +1758,29 @@ function upsertLock(store, lock, turnIndex) {
     // 같은 종류의 사실상 같은 서약(문구만 다른 재발행)은 새 문구로 갱신 — 서약 목록 증식 방지
     if (idx < 0) idx = store.locks.findIndex(l => l.kind === lock.kind && textOverlap(l.summary, lock.summary) >= 0.55);
     if (idx < 0) {
-        store.locks.push({ id: uuidv4(), ...lock, turnIndex, createdTurn: turnIndex });
+        store.locks.push({ id: uuidv4(), ...lock, turnIndex, createdTurn: turnIndex, prev: null, prevTurn: null });
         return;
     }
     const cur = store.locks[idx];
     // 수기 서약은 사서의 재발행이 건드리지 못한다 — 덮어쓰기로 manual 플래그가 지워지면
     // 스와이프 롤백 보호가 풀려 서약이 통째로 사라지는 사고가 났었다
     if (cur.manual && !lock.manual) return;
+    const createdTurn = cur.createdTurn ?? cur.turnIndex; // 재발행돼도 "처음 생긴 턴"은 보존
+    const unchanged = cur.summary === lock.summary && cur.status === lock.status
+        && cur.priority === lock.priority && (cur.owner || null) === (lock.owner || null);
+    if (unchanged) {
+        // 내용은 그대로, "재확인"만 됨 — turnIndex만 갱신하고 기존 prev 이력은 건드리지 않는다
+        cur.turnIndex = turnIndex;
+        cur.createdTurn = createdTurn;
+        return;
+    }
     store.locks[idx] = {
         id: cur.id, ...lock, turnIndex,
         manual: cur.manual || lock.manual || false,
-        createdTurn: cur.createdTurn ?? cur.turnIndex, // 재발행돼도 "처음 생긴 턴"은 보존
+        createdTurn,
+        // 내용이 실제로 바뀐 재발행 — 이전 값을 남겨둬야 이 턴이 삭제될 때 되돌릴 수 있다
+        prev: { summary: cur.summary, status: cur.status, priority: cur.priority, owner: cur.owner ?? null },
+        prevTurn: cur.turnIndex,
     };
 }
 
@@ -1475,7 +1816,7 @@ function upsertCharacter(store, c, turnIndex) {
             id: uuidv4(), ...card,
             aliases: (aka || []).filter(a => norm(a) !== norm(c.name)).slice(0, 6),
             firstTurn: turnIndex, updatedTurn: turnIndex, disabled: false, manual: false,
-            locked: card.locked === true,
+            locked: card.locked === true, prev: null, prevTurn: null,
         });
         return;
     }
@@ -1489,6 +1830,20 @@ function upsertCharacter(store, c, turnIndex) {
                 .filter(a => norm(a) !== norm(existing.name)).slice(0, 6);
         }
         if (existing.provisional && c.provisional !== true) existing.provisional = false;
+
+        // 실제로 내용이 바뀌는지 먼저 확인 — 재확인(변화 없음)이면 이전 값 이력을 건드리지 않는다
+        const scalarChanged = ['role', 'age', 'occupation', 'appearance', 'voice']
+            .some(f => c[f] && c[f] !== existing[f]);
+        const incomingTraits = (c.traits || []).filter(t => !(existing.traits || []).includes(t));
+        if (scalarChanged || incomingTraits.length) {
+            // 이 턴이 삭제되면 되돌릴 수 있게, 바뀌기 직전 값을 한 단계만 남겨둔다 (캐논·서약과 동일한 방식)
+            existing.prev = {
+                role: existing.role, age: existing.age, occupation: existing.occupation,
+                appearance: existing.appearance, voice: existing.voice,
+                traits: existing.traits ? [...existing.traits] : [],
+            };
+            existing.prevTurn = existing.updatedTurn;
+        }
         for (const field of ['role', 'age', 'occupation', 'appearance', 'voice']) {
             if (c[field]) existing[field] = c[field];
         }
@@ -1525,6 +1880,8 @@ function mergeCharacterCards(store, keep, absorb) {
     if (absorb.manual) keep.manual = true;
     if (absorb.locked) keep.locked = true; // 접힌 쪽이 잠겨 있었다면 보호를 승계
     store.characters = store.characters.filter(x => x.id !== absorb.id);
+    // 카드만 합치고 끝내면 상태 보드에는 접힌 이름의 줄이 그대로 남아 계속 주입된다 — 기록까지 같은 이름으로 접는다
+    foldEntityAliases(store);
 }
 
 /** 이벤트 연표: 같은 제목 또는 사실상 같은 사건이면 건너뛴다 (중복 방지) */
@@ -1555,10 +1912,22 @@ function pruneMemories(store) {
     const settings = getSettings();
     const max = Math.max(50, settings.maxMemories);
     if (store.memories.length <= max) return;
-    const removable = store.memories
-        .filter(m => !m.pinned && !m.manual)
+    // 아직 청크로 압축되지 않은 최근 턴의 기억은 정리 대상에서 뺀다 — 그 내용이 아직
+    // 요약으로 보존되기 전이라, 여기서 잘리면 그 턴의 흔적이 완전히 사라질 수 있다.
+    // 이미 청크/아크로 안전하게 보존된 옛 기억부터 먼저 정리 대상으로 삼는다.
+    const cursor = store.summaryCursor || 0;
+    let removable = store.memories
+        .filter(m => !m.pinned && !m.manual && m.turnIndex <= cursor)
         .sort((a, b) => (a.importance + a.turnIndex / 10000) - (b.importance + b.turnIndex / 10000));
-    const toRemove = new Set(removable.slice(0, store.memories.length - max).map(m => m.id));
+    let need = store.memories.length - max;
+    if (removable.length < need) {
+        // 보존된 옛 기억만으로 한도를 못 맞추면(전체가 거의 다 최신), 어쩔 수 없이
+        // pinned/manual만 빼고 나머지 중 가장 오래되고 안 중요한 것부터 마저 정리한다
+        removable = store.memories
+            .filter(m => !m.pinned && !m.manual)
+            .sort((a, b) => (a.importance + a.turnIndex / 10000) - (b.importance + b.turnIndex / 10000));
+    }
+    const toRemove = new Set(removable.slice(0, need).map(m => m.id));
     store.memories = store.memories.filter(m => !toRemove.has(m.id));
 }
 
@@ -1628,7 +1997,7 @@ async function commitTurn(mesId, { silent = true, force = false, retry = 1 } = {
         : '';
     const castLine = !settings.characterTracking ? ''
         : filedCast.length
-            ? `Cast already on file: ${filedCast.join(', ')}. Anyone present in this exchange who is NOT on this list — the leads included — gets a card now; for those already listed, file only meaningful changes.${lockedNote}\n`
+            ? `Cast already on file: ${filedCast.join(', ')}. Anyone present in this exchange who is NOT on this list — the leads included — gets a card now; for those already listed, file only meaningful changes. Spell every one of these names EXACTLY as written here (same script, same characters) everywhere you use them this turn: cast names, status "entity" and "owner", and memories "entities". A name respelled (romanized, translated, or abbreviated) opens a second record for the same person, and the two then hold different versions of where they are and how they feel.${lockedNote}\n`
             : 'The cast shelf is empty — no one has a card yet, not even the leads. Anyone characterized in this exchange gets a card now.\n';
 
     const refBlock = await buildReferenceBlock();
@@ -1725,7 +2094,7 @@ async function commitTurn(mesId, { silent = true, force = false, retry = 1 } = {
             summary: m.summary,
             excerpt: m.excerpt || null,
             importance: m.importance,
-            entities: m.entities || [],
+            entities: (m.entities || []).map(e => canonEntityName(store, e)),
             tags: m.tags || [],
             hints: m.hints || [],
             visibility: m.visibility || 'public',
@@ -1770,6 +2139,7 @@ async function commitTurn(mesId, { silent = true, force = false, retry = 1 } = {
     pruneMemories(store);
     await maybeSummarizeChunk(store);
     await maybeConsolidate(store);
+    await maybeConsolidateArcs(store);
     persistStore();
     updateStatusUI();
     refreshOverviewUI();
@@ -1846,17 +2216,20 @@ async function maybeSummarizeChunk(store) {
 
         store.chunkSummaries.push({ id: uuidv4(), fromTurn, toTurn, text });
         pushed = true;
-        await maybeMergeArc(store);
+    }
+
+    // 안전 상한: 서고 정리 주기(consolidateEvery)가 길거나 꺼져 있어도, 청크가 이 개수를
+    // 넘으면 다음 정리를 기다리지 않고 바로 재그룹핑한다 — 무한정 안 쌓이게 하는 안전장치
+    if (store.chunkSummaries.length > Math.max(3, settings.arcMergeAt)) {
+        try { await regroupChunksIntoArcs(store); } catch (e) { console.warn(`[${MODULE_NAME}] 안전 상한 재그룹핑 실패`, e); }
     }
 
     if (pushed) await applyAutoHide();
 }
 
-async function maybeMergeArc(store) {
+/** 청크 여러 개를 하나의 아크 요약으로 압축해 밀어넣는 공통 로직 */
+async function pushArcFromChunks(store, merging) {
     const settings = getSettings();
-    if (store.chunkSummaries.length <= Math.max(3, settings.arcMergeAt)) return;
-
-    const merging = store.chunkSummaries.slice(0, 4);
     let text = '';
     try {
         text = cleanMultiline(await callAuxLLM(`${settings.prompts.arc}\n\n${languageDirective()}`, merging.map(c => `[t${c.fromTurn}–t${c.toTurn}]\n${c.text}`).join('\n\n'), { maxTokens: auxTokens(4000) }), 2400);
@@ -1870,8 +2243,172 @@ async function maybeMergeArc(store) {
         fromTurn: merging[0].fromTurn,
         toTurn: merging[merging.length - 1].toTurn,
         text,
+        // 병합 전 청크 경계를 남겨둔다 — 나중에 삭제로 아크 일부만 걸리면
+        // 안 걸린 청크는 독립 청크로 되살리고, 걸린 청크만 버릴 수 있게 해준다
+        sourceChunks: merging.map(c => ({ fromTurn: c.fromTurn, toTurn: c.toTurn, text: c.text })),
     });
-    store.chunkSummaries = store.chunkSummaries.slice(4);
+}
+
+/** 서고 정리 주기에 청크들을 사건 단위로 재그룹핑해 아크로 병합한다 — 개수 기준이 아니라
+ * 실제로 같은 사건인지를 한 번에 통째로 보고 판단한다. 청크 생성 자체는 그대로 고정 턴수라,
+ * 한 사건이 우연히 청크 경계에 걸려 반토막 나 있어도 여기서 다시 하나로 묶일 수 있다.
+ * 반환: 병합된 그룹 수, 또는 null(대상 없음/판정 실패 — 다음 주기에 재시도) */
+async function regroupChunksIntoArcs(store) {
+    const chunks = store.chunkSummaries;
+    if (chunks.length < 2) return null;
+
+    const idMap = new Map();
+    const indexOf = new Map();
+    const lines = chunks.map((c, i) => {
+        const tag = `c${i + 1}`;
+        idMap.set(tag, c);
+        indexOf.set(c, i);
+        return `[${tag}] (t${c.fromTurn}–t${c.toTurn})\n${c.text}`;
+    });
+
+    let plan;
+    try {
+        const response = await callAuxLLM(CHUNK_REGROUP_PROMPT, lines.join('\n\n'), { maxTokens: auxTokens(2000) });
+        plan = parseJsonLoose(response);
+    } catch (e) {
+        console.warn(`[${MODULE_NAME}] 청크 재그룹핑 실패 (다음 주기에 재시도)`, e);
+        return null;
+    }
+    const groups = Array.isArray(plan?.groups) ? plan.groups : null;
+    if (!groups) return null;
+
+    // 모든 청크가 정확히 한 번씩, 원본 순서대로 연속되게 등장해야 안전하게 적용한다 —
+    // "1번과 3번을 묶고 2번은 따로"처럼 시간순을 건너뛰는 그룹은 절대 허용하지 않는다.
+    // (프롬프트가 연속만 묶으라고 지시하지만, 모델이 어길 가능성까지 여기서 막는다)
+    const seen = new Set();
+    const resolvedGroups = [];
+    let expectedNextIndex = 0;
+    for (const g of groups) {
+        const items = (Array.isArray(g) ? g : []).map(t => idMap.get(String(t || '').trim())).filter(Boolean);
+        if (!items.length) continue;
+        const indices = items.map(c => indexOf.get(c));
+        for (let k = 0; k < indices.length; k++) {
+            if (indices[k] !== expectedNextIndex) return null; // 순서 이탈·건너뜀·중복 — 신뢰 불가, 다음 주기에 재시도
+            if (seen.has(items[k])) return null;
+            seen.add(items[k]);
+            expectedNextIndex++;
+        }
+        resolvedGroups.push(items);
+    }
+    if (seen.size !== chunks.length) return null;
+
+    let mergedGroups = 0;
+    const remaining = [];
+    for (const group of resolvedGroups) {
+        if (group.length < 2) { remaining.push(group[0]); continue; }
+        await pushArcFromChunks(store, group);
+        mergedGroups++;
+    }
+    store.chunkSummaries = remaining;
+    return mergedGroups;
+}
+
+/* ============================================================
+ * 아크 정리 — 청크 재그룹핑과 완전히 별개. 이미 압축된 아크들끼리만 훨씬 보수적으로
+ * 재검토해서, 진짜 같은 사건인데 아크 생성 타이밍상 우연히 갈라진 것만 다시 합친다.
+ * ============================================================ */
+
+/** 아크 여러 개를 하나로 재압축한다 (sourceChunks는 이어붙여 보존 — 삭제 시 부분 복구용) */
+async function mergeArcsIntoOne(store, arcs) {
+    const settings = getSettings();
+    let text = '';
+    try {
+        text = cleanMultiline(await callAuxLLM(`${settings.prompts.arc}\n\n${languageDirective()}`, arcs.map(a => `[t${a.fromTurn}–t${a.toTurn}]\n${a.text}`).join('\n\n'), { maxTokens: auxTokens(4000) }), 2400);
+    } catch (e) {
+        console.debug(`[${MODULE_NAME}] 아크 재병합 LLM 실패`, e);
+    }
+    if (!text) text = cleanStr(arcs.map(a => a.text).join(' '), 2400);
+    return {
+        id: uuidv4(),
+        fromTurn: arcs[0].fromTurn,
+        toTurn: arcs[arcs.length - 1].toTurn,
+        text,
+        sourceChunks: arcs.flatMap(a => Array.isArray(a.sourceChunks) && a.sourceChunks.length ? a.sourceChunks : [{ fromTurn: a.fromTurn, toTurn: a.toTurn, text: a.text }]),
+    };
+}
+
+/** N턴마다 아크들을 재검토해 진짜 같은 사건인 것만 합친다. 커서(arcReviewCursor) 이전은
+ * "이미 결론 남"으로 보고 재검토 안 하되, 커서 바로 이전 아크 하나는 다음 것과 이어질 수 있으니
+ * 매번 다시 후보에 넣는다. (설정 0 = 끔) */
+async function maybeConsolidateArcs(store) {
+    const every = getSettings().arcConsolidateEvery;
+    if (!every || every < 1) return;
+    if (store.turnCounter - (store.lastArcConsolidateTurn || 0) < every) return;
+    store.lastArcConsolidateTurn = store.turnCounter; // 실패해도 다음 주기까지 대기
+
+    const cursor = store.arcReviewCursor || 0;
+    const localArcs = store.arcSummaries.filter(a => !a.carried).sort((a, b) => a.fromTurn - b.fromTurn);
+    let startIdx = localArcs.findIndex(a => a.toTurn > cursor);
+    if (startIdx === -1) return; // 커서 이후 새 아크가 없음 — 검토할 게 없음
+    if (startIdx > 0) startIdx -= 1; // 커서 직전의 "이미 결론 난" 아크 하나는 계속 후보에 포함
+    const reviewPool = localArcs.slice(startIdx);
+    if (reviewPool.length < 2) return;
+
+    const idMap = new Map();
+    const indexOf = new Map();
+    const lines = reviewPool.map((a, i) => {
+        const tag = `a${i + 1}`;
+        idMap.set(tag, a);
+        indexOf.set(a, i);
+        return `[${tag}] (t${a.fromTurn}–t${a.toTurn})\n${a.text}`;
+    });
+
+    let plan;
+    try {
+        const response = await callAuxLLM(ARC_REGROUP_PROMPT, lines.join('\n\n'), { maxTokens: auxTokens(2000) });
+        plan = parseJsonLoose(response);
+    } catch (e) {
+        console.warn(`[${MODULE_NAME}] 아크 정리 실패 (다음 주기에 재시도)`, e);
+        return;
+    }
+    const groups = Array.isArray(plan?.groups) ? plan.groups : null;
+    if (!groups) return;
+
+    // 청크 재그룹핑과 동일한 안전장치: 순서 이탈·중복·누락이 있으면 통째로 무시하고 다음 주기 재시도
+    const seen = new Set();
+    const resolvedGroups = [];
+    let expectedNextIndex = 0;
+    for (const g of groups) {
+        const items = (Array.isArray(g) ? g : []).map(t => idMap.get(String(t || '').trim())).filter(Boolean);
+        if (!items.length) continue;
+        const indices = items.map(a => indexOf.get(a));
+        for (let k = 0; k < indices.length; k++) {
+            if (indices[k] !== expectedNextIndex) return;
+            if (seen.has(items[k])) return;
+            seen.add(items[k]);
+            expectedNextIndex++;
+        }
+        resolvedGroups.push(items);
+    }
+    if (seen.size !== reviewPool.length) return;
+
+    let mergedCount = 0;
+    const finalArcs = [];
+    for (const group of resolvedGroups) {
+        if (group.length < 2) { finalArcs.push(group[0]); continue; }
+        finalArcs.push(await mergeArcsIntoOne(store, group));
+        mergedCount++;
+    }
+
+    const reviewPoolSet = new Set(reviewPool);
+    store.arcSummaries = [
+        ...store.arcSummaries.filter(a => !reviewPoolSet.has(a)),
+        ...finalArcs,
+    ];
+    // 마지막 그룹은 다음 사이클에서도 이어질 수 있으니 커서에 안 넣고, 그 앞까지만 "결론 남" 처리
+    if (finalArcs.length >= 2) store.arcReviewCursor = finalArcs[finalArcs.length - 2].toTurn;
+
+    if (mergedCount) {
+        console.info(`[${MODULE_NAME}] 아크 정리: ${mergedCount}개 그룹 병합`);
+        renderSummariesPanel();
+        await updateInjection();
+    }
+    persistStore();
 }
 
 /* ============================================================
@@ -1973,6 +2510,15 @@ async function maybeConsolidate(store) {
         }
     } catch (e) {
         console.warn(`[${MODULE_NAME}] 서고 정리 실패 (다음 주기에 재시도):`, e);
+    }
+    try {
+        const mergedGroups = await regroupChunksIntoArcs(store);
+        if (mergedGroups) {
+            console.info(`[${MODULE_NAME}] 서고 정리: 청크 재그룹핑 — 아크 ${mergedGroups}개로 병합`);
+            renderSummariesPanel();
+        }
+    } catch (e) {
+        console.warn(`[${MODULE_NAME}] 청크 재그룹핑 실패 (다음 주기에 재시도):`, e);
     }
 }
 
@@ -2560,11 +3106,16 @@ async function buildPacketSections(query, supervisorPlan) {
         .map(x => ({ ...x.c, sceneNow: x.scene === 1 }));
     const milestones = [...store.milestones].sort((a, b) => (a.turnIndex || 0) - (b.turnIndex || 0)).slice(-8);
     const items = store.items.filter(i => !i.disabled).slice(-8);
-    // 시간순: 인계(이전 채팅) → 이 채팅의 연대기 → 최근 청크 요약
-    const summaries = [
-        ...store.arcSummaries.filter(s => s.carried).map(s => ({ ...s, level: 'arc' })),
+    // 시간순: 인계(이전 채팅)가 항상 맨 앞, 그 뒤로는 이 채팅의 아크·청크를 fromTurn 기준으로 섞어 배치
+    // (아크를 통째로 먼저 나열하면, 나중에 독립으로 남은 옛 청크가 더 최근 아크보다 뒤에 나와
+    // 시간순이 뒤집히는 문제가 생긴다 — 청크·아크 구분보다 실제 시점이 우선이다)
+    const localSummaries = [
         ...store.arcSummaries.filter(s => !s.carried).map(s => ({ ...s, level: 'arc' })),
         ...store.chunkSummaries.slice(-3).map(s => ({ ...s, level: 'chunk' })),
+    ].sort((a, b) => a.fromTurn - b.fromTurn);
+    const summaries = [
+        ...store.arcSummaries.filter(s => s.carried).map(s => ({ ...s, level: 'arc' })),
+        ...localSummaries,
     ];
     // 챕터 회상: 주입 창(최근 3개)에서 밀려난 옛 챕터도 지금 질의와 강하게 맞으면 한 자리 소환 —
     // 기억 조각은 파편이지만 챕터 레코드는 그 시절의 연결된 맥락을 준다
@@ -2649,20 +3200,7 @@ function renderPacket(parts, { withExcerpts = true, excerptLimit = Infinity, rec
         lines.push('Knowledge is not shared: each character acts only on what they have personally seen, been told, or could plainly infer. An entry marked as a belief is that holder\'s view alone — others do not share it, and the truth may differ. Let the gap between who-knows-what create tension; never close it with an all-knowing reply.');
     }
 
-    if (parts.scene?.any) {
-        const bits = [];
-        if (parts.scene.location) bits.push(`place: ${parts.scene.location}`);
-        if (parts.scene.date) bits.push(`date: ${parts.scene.date}`);
-        if (parts.scene.time) bits.push(`time: ${parts.scene.time}`);
-        if ((parts.storyTotalDays || 0) >= 1) bits.push(`story clock: ~${humanizeStoryDays(parts.storyTotalDays)} since the story began`);
-        lines.push(`## Scene Now — ${bits.join(' · ')}`);
-    }
-    if (parts.locks.length) {
-        // "지금 일어나는 일"이 아니라 "깔려 있는 압력"임을 명시 — 모델이 서약 소재를
-        // 매 턴 억지로 무대에 올리거나 성급히 해소해 버리는 과잉 반응 방지
-        lines.push('## Pledges (the story must keep these true — standing pressure in the background, not events happening right now; never rush to stage or resolve them)');
-        for (const l of parts.locks) lines.push(`- [${normLockKind(l.kind)}] ${l.summary}`);
-    }
+    // ── 안정적인 섹션부터 (턴이 지나도 거의 안 바뀜 — 프롬프트 캐싱이 여기까지는 재사용되게)
     const rules = takeLast(parts.rules, ruleLimit);
     if (rules.length) {
         lines.push('## Canon (standing facts of this world)');
@@ -2686,26 +3224,29 @@ function renderPacket(parts, { withExcerpts = true, excerptLimit = Infinity, rec
             lines.push(`- ${m.title}${m.summary ? ` — ${m.summary}` : ''}${mAgo}`);
         }
     }
-    const states = takeLast(parts.states, stateLimit);
-    if (states.length) {
-        lines.push('## Status Board (current values)');
-        // 지속 상태(부상·위치·목표 등)를 먼저, 장면 휘발성 상태(자세·복장·기분)를 뒤에 —
-        // 모델이 "오래 유지할 값"과 "이번 장면에서 재확인할 값"을 구분해 읽도록
-        // 인물별로 묶어 정렬 — 같은 인물의 상태가 흩어져 실리면 모순을 알아채기 어렵다
-        const byEntity = (a, b) => String(a.entity).localeCompare(String(b.entity)) || String(a.slot).localeCompare(String(b.slot));
-        const persistent = states.filter(s => !isVolatileSlot(s.slot)).sort(byEntity);
-        const volatile = states.filter(s => isVolatileSlot(s.slot)).sort(byEntity);
-        const fmtState = (s) => {
-            const freshChange = s.prev != null && (parts.turnNow || 0) - (s.turnIndex || 0) <= 6;
-            const was = freshChange ? ` (was: ${s.prev})` : '';
-            return `- ${s.entity}.${s.slot} = ${s.value}${was}${s.claim === 'belief' ? ` (belief${s.owner ? ` of ${s.owner}` : ''})` : ''}`;
-        };
-        for (const s of persistent) lines.push(fmtState(s));
-        if (volatile.length) {
-            if (persistent.length) lines.push('(scene-volatile — verify against the visible chat before relying on these:)');
-            for (const s of volatile) lines.push(fmtState(s));
+    const sums = takeLast(parts.summaries, summaryLimit); // 예산 부족 시 오래된 요약부터 제외
+    if (sums.length) {
+        lines.push('## Story So Far (chronological, oldest first)');
+        let chapterNo = 0;
+        for (const s of sums) {
+            // 구조형 레코드(PLOT/SHIFTS/OPEN)는 줄을 살려 들여쓰기로 정리 (빈 줄은 제거)
+            const t = String(s.text || '').replace(/\n\s*\n+/g, '\n').trim();
+            const body = t.includes('\n') ? `\n  ${t.replace(/\n/g, '\n  ')}` : ` ${t}`;
+            const tag = s.carried ? 'earlier chat'
+                : s.recalled ? 'a much earlier chapter — surfaced because it relates to now'
+                : s.level === 'arc' ? 'earlier era'
+                : `recent chapter ${++chapterNo}`;
+            lines.push(`- [${tag}]${body}`);
         }
     }
+    if (parts.locks.length) {
+        // "지금 일어나는 일"이 아니라 "깔려 있는 압력"임을 명시 — 모델이 서약 소재를
+        // 매 턴 억지로 무대에 올리거나 성급히 해소해 버리는 과잉 반응 방지
+        lines.push('## Pledges (the story must keep these true — standing pressure in the background, not events happening right now; never rush to stage or resolve them)');
+        for (const l of parts.locks) lines.push(`- [${normLockKind(l.kind)}] ${l.summary}`);
+    }
+
+    // ── 여기부터는 매 턴 달라지는 섹션 (캐싱 재사용 구간은 여기서 끝남)
     const recall = parts.publicRecall.slice(0, recallLimit === Infinity ? parts.publicRecall.length : recallLimit);
     if (recall.length) {
         // 먼 과거 회상 프레이밍: 이야기 속에서 오래된 기억이 실릴 때만 다루는 법을 지시
@@ -2726,25 +3267,44 @@ function renderPacket(parts, { withExcerpts = true, excerptLimit = Infinity, rec
     if (parts.hiddenProtected > 0) {
         lines.push(`(The archive holds ${parts.hiddenProtected} more entries sealed from this scene. Do not guess what they contain.)`);
     }
-    const sums = takeLast(parts.summaries, summaryLimit); // 예산 부족 시 오래된 요약부터 제외
-    if (sums.length) {
-        lines.push('## Story So Far (chronological, oldest first)');
-        let chapterNo = 0;
-        for (const s of sums) {
-            // 구조형 레코드(PLOT/SHIFTS/OPEN)는 줄을 살려 들여쓰기로 정리 (빈 줄은 제거)
-            const t = String(s.text || '').replace(/\n\s*\n+/g, '\n').trim();
-            const body = t.includes('\n') ? `\n  ${t.replace(/\n/g, '\n  ')}` : ` ${t}`;
-            const tag = s.carried ? 'earlier chat'
-                : s.recalled ? 'a much earlier chapter — surfaced because it relates to now'
-                : s.level === 'arc' ? 'earlier era'
-                : `recent chapter ${++chapterNo}`;
-            lines.push(`- [${tag}]${body}`);
-        }
-    }
     const sources = (parts.sources || []).slice(0, sourceLimit === Infinity ? (parts.sources || []).length : sourceLimit);
     if (sources.length) {
         lines.push('## Source Excerpts (background reference from imported documents — everything above outranks these; never force them into the scene)');
         for (const s of sources) lines.push(`- [${s.title}] ${cleanMultiline(s.text, 900)}`);
+    }
+    if (parts.scene?.any) {
+        const bits = [];
+        if (parts.scene.location) bits.push(`place: ${parts.scene.location}`);
+        if (parts.scene.date) bits.push(`date: ${parts.scene.date}`);
+        if (parts.scene.time) bits.push(`time: ${parts.scene.time}`);
+        if ((parts.storyTotalDays || 0) >= 1) bits.push(`story clock: ~${humanizeStoryDays(parts.storyTotalDays)} since the story began`);
+        lines.push(`## Scene Now — ${bits.join(' · ')}`);
+    }
+    const states = takeLast(parts.states, stateLimit);
+    if (states.length) {
+        lines.push('## Status Board (current values)');
+        // 지속 상태(부상·위치·목표 등)를 먼저, 장면 휘발성 상태(자세·복장·기분)를 뒤에 —
+        // 모델이 "오래 유지할 값"과 "이번 장면에서 재확인할 값"을 구분해 읽도록
+        // 인물별로 묶어 정렬 — 같은 인물의 상태가 흩어져 실리면 모순을 알아채기 어렵다
+        const byEntity = (a, b) => String(a.entity).localeCompare(String(b.entity)) || String(a.slot).localeCompare(String(b.slot));
+        const persistent = states.filter(s => !isVolatileSlot(s.slot)).sort(byEntity);
+        const volatile = states.filter(s => isVolatileSlot(s.slot)).sort(byEntity);
+        const fmtState = (s) => {
+            const freshChange = s.prev != null && (parts.turnNow || 0) - (s.turnIndex || 0) <= 6;
+            const was = freshChange ? ` (was: ${s.prev})` : '';
+            // 본문이 "다 나았다"처럼 명시적으로 안 바꿔줬을 뿐, 시간은 계속 흐르고 있다 —
+            // 이미 추적 중인 서사시계로 "며칠째 그대로인지" 계산해서 보여주면, 글 쓰는 모델이
+            // 스스로 "어 이거 꽤 됐네" 하고 자연스럽게 짚고 넘어갈 기회가 생긴다 (사서가 지어내지 않고도)
+            const staleDays = parts.storyAges?.get(s.turnIndex) ?? 0;
+            const stale = !freshChange && staleDays >= 3
+                ? ` (unchanged for ~${humanizeStoryDays(staleDays)} in-story — consider whether this should still hold)` : '';
+            return `- ${s.entity}.${s.slot} = ${s.value}${was}${stale}${s.claim === 'belief' ? ` (belief${s.owner ? ` of ${s.owner}` : ''})` : ''}`;
+        };
+        for (const s of persistent) lines.push(fmtState(s));
+        if (volatile.length) {
+            if (persistent.length) lines.push('(scene-volatile — verify against the visible chat before relying on these:)');
+            for (const s of volatile) lines.push(fmtState(s));
+        }
     }
     if (parts.supervisorPlan) {
         const p = parts.supervisorPlan;
@@ -2942,10 +3502,12 @@ function renumberTurns(store) {
         l.turnIndex = remap(l.turnIndex);
         if (l.resolvedTurn != null) l.resolvedTurn = remap(l.resolvedTurn);
         if (l.createdTurn != null) l.createdTurn = remap(l.createdTurn);
+        if (l.prevTurn != null) l.prevTurn = remap(l.prevTurn);
     }
     for (const c of store.characters) {
         c.firstTurn = remap(c.firstTurn);
         c.updatedTurn = remap(c.updatedTurn);
+        if (c.prevTurn != null) c.prevTurn = remap(c.prevTurn);
     }
     for (const e of store.milestones) e.turnIndex = remap(e.turnIndex);
     for (const it of store.items) {
@@ -2961,11 +3523,64 @@ function renumberTurns(store) {
         if (s.carried) continue;
         s.fromTurn = remap(s.fromTurn);
         s.toTurn = remap(s.toTurn);
+        if (Array.isArray(s.sourceChunks)) {
+            for (const c of s.sourceChunks) { c.fromTurn = remap(c.fromTurn); c.toTurn = remap(c.toTurn); }
+        }
     }
     if (store.lastConsolidateTurn) store.lastConsolidateTurn = remap(store.lastConsolidateTurn);
     if (store.summaryCursor) store.summaryCursor = remap(store.summaryCursor);
+    if (store.lastArcConsolidateTurn) store.lastArcConsolidateTurn = remap(store.lastArcConsolidateTurn);
+    if (store.arcReviewCursor) store.arcReviewCursor = remap(store.arcReviewCursor);
     store.turnCounter = ordered.length;
     return true;
+}
+
+/** 삭제된 턴이 걸친 청크/아크 요약을 정리한다. 아크는 병합 전 청크 경계(sourceChunks)가
+ * 남아있으면 실제로 안 걸친 청크는 독립 청크로 되살리고, 걸친 것만 버린다. */
+function dropAffectedSummaries(store, deletedTurnIndexes) {
+    const hits = (fromTurn, toTurn) => deletedTurnIndexes.some(idx => idx >= fromTurn && idx <= toTurn);
+    let minFrom = Infinity;
+    let minArcFrom = Infinity;
+    const revivedChunks = [];
+
+    store.chunkSummaries = store.chunkSummaries.filter(s => {
+        if (!hits(s.fromTurn, s.toTurn)) return true;
+        minFrom = Math.min(minFrom, s.fromTurn);
+        return false;
+    });
+    store.arcSummaries = store.arcSummaries.filter(s => {
+        if (s.carried || !hits(s.fromTurn, s.toTurn)) return true;
+        minArcFrom = Math.min(minArcFrom, s.fromTurn);
+        if (Array.isArray(s.sourceChunks) && s.sourceChunks.length) {
+            for (const c of s.sourceChunks) {
+                if (hits(c.fromTurn, c.toTurn)) {
+                    minFrom = Math.min(minFrom, c.fromTurn);
+                } else {
+                    revivedChunks.push({ id: uuidv4(), fromTurn: c.fromTurn, toTurn: c.toTurn, text: c.text });
+                }
+            }
+        } else {
+            // 원본 청크 경계가 없는(구버전) 아크 — 통째로 버리는 수밖에 없다
+            minFrom = Math.min(minFrom, s.fromTurn);
+        }
+        return false;
+    });
+    if (revivedChunks.length) {
+        store.chunkSummaries.push(...revivedChunks);
+        store.chunkSummaries.sort((a, b) => a.fromTurn - b.fromTurn);
+    }
+
+    if (minArcFrom < Infinity && (store.arcReviewCursor || 0) >= minArcFrom) {
+        // 아크가 실제로 삭제로 사라졌을 때만 되감는다 — 안 그러면 삭제로 사라진 옛 아크 자리에
+        // 새로 생길 아크가 낡은 커서 값 때문에 "이미 검토됨"으로 잘못 건너뛰어질 수 있다
+        store.arcReviewCursor = minArcFrom - 1;
+    }
+
+    if (minFrom < Infinity) {
+        // 뒤에 아직 안 지워진 더 최신 요약이 남아있으면(=드문 중간 구간 삭제),
+        // 다음 lastCovered 계산의 Math.max()가 그쪽을 기준으로 알아서 잡아준다 — 여기선 덮어써도 안전
+        store.summaryCursor = Math.min(store.summaryCursor || 0, minFrom - 1);
+    }
 }
 
 function reconcileWithChat() {
@@ -2973,6 +3588,7 @@ function reconcileWithChat() {
     let changed = false;
     const validTurns = [];
     const usedMesIds = new Set();
+    const deletedTurnIndexes = [];
 
     // 채팅 전체의 (내용 해시 → 메시지 번호들) 지도 — 앞쪽 삭제로 번호가 밀려도 내용으로 턴을 다시 찾는다
     const hashIndex = new Map();
@@ -3011,11 +3627,34 @@ function reconcileWithChat() {
             changed = true;
         } else {
             removeDerivedForTurn(store, t.turnIndex);
+            deletedTurnIndexes.push(t.turnIndex);
             changed = true;
         }
     }
     store.turns = validTurns;
+    if (deletedTurnIndexes.length) {
+        dropAffectedSummaries(store, deletedTurnIndexes);
+        // 인물·물건은 "생성턴 또는 마지막 갱신턴 중 하나라도 아직 남아있으면" 유지한다 —
+        // 병합된 최신 프로필은 지키되, 둘 다 사라졌으면(그와 관련된 턴이 전부 지워졌으면) 정리한다.
+        // (턴별로 하나씩 지우면서 판단하면 갱신 이력이 있는 인물은 영원히 안 지워지는 버그가 있었다)
+        const survivingTurns = new Set(store.turns.map(t => t.turnIndex));
+        if (Array.isArray(store.characters)) {
+            store.characters = store.characters.filter(c =>
+                c.manual || c.locked || survivingTurns.has(c.firstTurn) || survivingTurns.has(c.updatedTurn));
+        }
+        if (Array.isArray(store.items)) {
+            store.items = store.items.filter(i =>
+                i.manual || survivingTurns.has(i.firstTurn) || survivingTurns.has(i.updatedTurn));
+        }
+    }
     if (renumberTurns(store)) changed = true;
+    // 별칭이 있는데도 다른 표기로 남아 있는 상태·기억을 정식 이름으로 접는다.
+    // 접을 게 없으면 순회만 하고 끝난다 — 바뀌는 게 있을 때만 벡터를 다시 잡는다.
+    const foldedOnLoad = foldEntityAliases(store);
+    if (foldedOnLoad.states || foldedOnLoad.memories) {
+        console.info(`[${MODULE_NAME}] 이름 접기: 상태 ${foldedOnLoad.states}건 · 기억 ${foldedOnLoad.memories}건을 정식 이름으로 통합`);
+        changed = true;
+    }
     if (changed) {
         persistStore();
         updateStatusUI();
@@ -3219,6 +3858,275 @@ async function askLibrarian(question) {
     const answer = String(reply || '').trim();
     if (!answer) throw new Error('빈 응답');
     return answer;
+}
+
+/* ============================================================
+ * 사서 편집 — 자연어 정정 요청을 구조화된 편집안으로 받아, 확인 후 적용
+ * ============================================================ */
+
+/** 편집안(op) 하나를 사람이 읽을 한 줄 설명으로 바꾼다 (미리보기용) */
+function describeEditorOp(op) {
+    switch (op.op) {
+        case 'canon': return `캐논: ${op.scopeName ? `${op.scopeName}의 ` : ''}${op.key} → "${op.value}"`;
+        case 'status': return `상태: ${op.entity}.${op.slot} → "${op.value}"${op.claim === 'belief' ? ` (${op.owner || '누군가'}의 믿음)` : ''}`;
+        case 'clock': return `서사시계: t${op.fromTurn}–t${op.toTurn} 구간을 총 ${op.totalDays}일로 재조정`;
+        case 'addMemory': return `기억 추가 (${op.kind || 'fact'}) → "${op.summary}"`;
+        case 'editMemory': return `기억 수정 (${op.id}) → "${op.summary}"`;
+        case 'deleteMemory': return `기억 삭제 (${op.id})`;
+        case 'editSummary': return `요약 수정 (${op.id})`;
+        case 'deleteSummary': return `요약 삭제 (${op.id})`;
+        case 'addPledge': return `서약 추가 (${normLockKind(op.kind)}) → "${op.summary}"`;
+        case 'editPledge': return `서약 수정 (${op.id})${op.status ? ` → ${op.status}` : ''}${op.summary ? ` "${op.summary}"` : ''}`;
+        case 'deletePledge': return `서약 삭제 (${op.id})`;
+        case 'character': return `인물 카드: ${op.name} — ${Object.keys(op.patch || {}).join(', ')} 갱신`;
+        default: return JSON.stringify(op);
+    }
+}
+
+// 최근 몇 턴 대화만 기억 (길게 쌓일수록 편집 프롬프트가 무거워지니 3왕복으로 제한)
+let editorHistory = [];
+
+function resetEditorChat() {
+    editorHistory = [];
+}
+
+/** 캐논·상태·서약·인물 전체 + 요청과 관련된 기억/요약(id 포함)을 편집용으로 덤프한다.
+ * renderPacket()과 달리 id를 노출해 LLM이 editMemory/editSummary로 정확히 짚을 수 있게 한다. */
+async function buildEditorArchiveText(instruction) {
+    const store = getStore();
+    const parts = await buildPacketSections(instruction, null);
+    const lines = [];
+
+    if (parts.rules?.length) {
+        lines.push('## Canon');
+        for (const r of parts.rules) lines.push(`- (${r.scope}${r.scopeName ? `:${r.scopeName}` : ''}) ${r.key} = ${r.value}`);
+    }
+    if (parts.states?.length) {
+        lines.push('## Status Board');
+        for (const s of parts.states) lines.push(`- ${s.entity}.${s.slot} = ${s.value}${s.claim === 'belief' ? ` (belief${s.owner ? ` of ${s.owner}` : ''})` : ''}`);
+    }
+    if (parts.locks?.length) {
+        lines.push('## Pledges');
+        for (const l of parts.locks) lines.push(`- [${l.id}] (${normLockKind(l.kind)}, ${l.status}) ${l.summary}`);
+    }
+    if (parts.characters?.length) {
+        lines.push('## Cast');
+        for (const c of parts.characters) lines.push(`- ${c.name}${c.role ? ` (${c.role})` : ''}${c.age ? `, ${c.age}` : ''}${c.occupation ? `, ${c.occupation}` : ''}`);
+    }
+    const totalDays = store.turns.reduce((a, t) => a + (t.elapsedDays || 0), 0);
+    lines.push(`## Story Clock\n- turns recorded: t1–t${store.turnCounter}\n- total elapsed so far: ${totalDays >= 1 ? humanizeStoryDays(totalDays) : '1일 미만'}`);
+
+    const mem = [...(parts.publicRecall || []), ...(parts.protectedRecall || [])];
+    if (mem.length) {
+        lines.push('## Memories (id — turn — text)');
+        for (const m of mem) lines.push(`- [${m.id}] (t${m.turnIndex}) ${m.summary}`);
+    }
+    const sums = parts.summaries || [];
+    if (sums.length) {
+        lines.push('## Summaries (id — turn range — text)');
+        for (const s of sums) lines.push(`- [${s.id}] (t${s.fromTurn}–t${s.toTurn}) ${s.text}`);
+    }
+    return lines.join('\n');
+}
+
+/** 정정 요청 1턴을 사서에게 보내 편집안(ops)만 받아온다. 아직 store에는 아무것도 반영하지 않는다. */
+async function proposeEditorTurn(instruction) {
+    const text = String(instruction || '').trim();
+    if (!text) throw new Error('요청이 비어 있습니다');
+    if (!getCurrentChatId()) throw new Error('열린 채팅이 없습니다');
+
+    const archive = await buildEditorArchiveText(text);
+    const historyBlock = editorHistory.length
+        ? `Recent conversation (for context only, e.g. "취소해" refers to the last message):\n${editorHistory.map(h => `${h.role === 'user' ? 'User' : 'Archivist'}: ${h.content}`).join('\n')}\n\n`
+        : '';
+    const userPrompt = `Archive:\n${archive}\n\n${historyBlock}User's correction request: ${text}`;
+    const raw = await callAuxLLM(`${EDITOR_PROMPT}\n\n${languageDirective()}`, userPrompt, { maxTokens: auxTokens(3000) });
+    const parsed = parseJsonLoose(raw);
+    if (!parsed || typeof parsed.reply !== 'string') throw new Error('사서 응답을 이해하지 못했습니다');
+    const ops = Array.isArray(parsed.ops) ? parsed.ops.filter(o => o && typeof o === 'object' && typeof o.op === 'string') : [];
+
+    editorHistory.push({ role: 'user', content: text });
+    editorHistory.push({ role: 'assistant', content: parsed.reply + (ops.length ? ` (변경 ${ops.length}건 제안)` : '') });
+    editorHistory = editorHistory.slice(-6); // 최근 3왕복
+
+    return { reply: String(parsed.reply).trim(), ops };
+}
+
+/** 사람이 확인한 편집안을 실제로 store에 반영한다. 반환: {applied, skipped} */
+async function applyEditorOps(ops) {
+    const store = getStore();
+    const now = store.turnCounter;
+    let applied = 0;
+    const skipped = [];
+
+    for (const op of (ops || [])) {
+        try {
+            switch (op.op) {
+                case 'canon': {
+                    const key = cleanStr(op.key, 60);
+                    const value = cleanStr(op.value, 200);
+                    if (!key || !value) break;
+                    upsertWorldRule(store, {
+                        scope: RULE_SCOPES.includes(op.scope) ? op.scope : 'session',
+                        scopeName: cleanStr(op.scopeName, 60) || null,
+                        key, value,
+                    }, now);
+                    applied++;
+                    break;
+                }
+                case 'status': {
+                    const entity = cleanStr(op.entity, 60);
+                    const slot = canonSlot(toSnake(op.slot));
+                    const value = cleanStr(op.value, 200);
+                    if (!entity || !slot || !value) break;
+                    upsertEntityState(store, {
+                        entity, slot, value,
+                        claim: op.claim === 'belief' ? 'belief' : 'objective',
+                        owner: cleanStr(op.owner, 60) || null,
+                    }, now);
+                    applied++;
+                    break;
+                }
+                case 'clock': {
+                    const fromTurn = Math.max(1, Number(op.fromTurn) || 0);
+                    const toTurn = Math.max(fromTurn, Number(op.toTurn) || 0);
+                    const totalDays = Math.max(0, Number(op.totalDays) || 0);
+                    const span = store.turns.filter(t => t.turnIndex >= fromTurn && t.turnIndex <= toTurn);
+                    if (!span.length) break;
+                    const currentTotal = span.reduce((a, t) => a + (t.elapsedDays || 0), 0);
+                    if (currentTotal > 0) {
+                        const scale = totalDays / currentTotal;
+                        for (const t of span) t.elapsedDays = (t.elapsedDays || 0) * scale;
+                    } else {
+                        span[span.length - 1].elapsedDays = totalDays;
+                    }
+                    applied++;
+                    break;
+                }
+                case 'addMemory': {
+                    const summary = cleanStr(op.summary, 300);
+                    if (!summary) break;
+                    const kind = normKind(op.kind);
+                    const m = {
+                        id: uuidv4(), turnIndex: now, mesId: -1,
+                        kind, summary, excerpt: null,
+                        importance: Number.isFinite(Number(op.importance)) ? clamp01(op.importance, 0.5) : 0.5,
+                        entities: [], tags: ['manual'], hints: [], visibility: 'public', owner: null,
+                        pinned: false, disabled: false, manual: true, trigger: '',
+                    };
+                    m.vec = encodeVec(embedText(memoryIndexText(m)));
+                    m.cvec = memoryCueText(m).length >= 4 ? encodeVec(embedText(memoryCueText(m))) : '';
+                    store.memories.push(m);
+                    await attachApiEmbeddings([m]);
+                    applied++;
+                    break;
+                }
+                case 'editMemory': {
+                    const m = store.memories.find(x => x.id === op.id);
+                    const summary = cleanStr(op.summary, 300);
+                    if (!m || !summary) break;
+                    m.summary = summary;
+                    m.vec = encodeVec(embedText(memoryIndexText(m)));
+                    m.cvec = memoryCueText(m).length >= 4 ? encodeVec(embedText(memoryCueText(m))) : '';
+                    await attachApiEmbeddings([m]);
+                    applied++;
+                    break;
+                }
+                case 'deleteMemory': {
+                    const before = store.memories.length;
+                    store.memories = store.memories.filter(x => x.id !== op.id);
+                    if (store.memories.length < before) applied++;
+                    break;
+                }
+                case 'editSummary': {
+                    const text = cleanStr(op.text, 2400);
+                    if (!text) break;
+                    const c = store.chunkSummaries.find(x => x.id === op.id);
+                    const a = c ? null : store.arcSummaries.find(x => x.id === op.id);
+                    const target = c || a;
+                    if (!target) break;
+                    target.text = text;
+                    applied++;
+                    break;
+                }
+                case 'deleteSummary': {
+                    let target = store.chunkSummaries.find(x => x.id === op.id);
+                    if (target) store.chunkSummaries = store.chunkSummaries.filter(x => x.id !== op.id);
+                    else {
+                        target = store.arcSummaries.find(x => x.id === op.id);
+                        if (target) store.arcSummaries = store.arcSummaries.filter(x => x.id !== op.id);
+                    }
+                    if (!target) break;
+                    store.summaryCursor = Math.min(store.summaryCursor || 0, target.fromTurn - 1);
+                    applied++;
+                    break;
+                }
+                case 'addPledge': {
+                    const summary = cleanStr(op.summary, 200);
+                    if (!summary) break;
+                    upsertLock(store, {
+                        kind: normLockKind(op.kind),
+                        summary,
+                        status: 'active',
+                        priority: Number.isFinite(Number(op.priority)) ? Math.max(1, Math.min(5, Number(op.priority))) : 2,
+                        owner: cleanStr(op.owner, 60) || null,
+                    }, now);
+                    applied++;
+                    break;
+                }
+                case 'editPledge': {
+                    const l = store.locks.find(x => x.id === op.id);
+                    if (!l) break;
+                    if (op.summary != null) l.summary = cleanStr(op.summary, 200) || l.summary;
+                    if (op.status === 'resolved' || op.status === 'active') {
+                        l.status = op.status;
+                        l.resolvedTurn = op.status === 'resolved' ? now : null;
+                    }
+                    if (Number.isFinite(Number(op.priority))) l.priority = Math.max(1, Math.min(5, Number(op.priority)));
+                    l.turnIndex = now;
+                    l.manual = true; // 사용자가 직접 정정했으니 이후 사서 자동 재발행이 덮어쓰지 못하게 보호
+                    applied++;
+                    break;
+                }
+                case 'deletePledge': {
+                    const before = store.locks.length;
+                    store.locks = store.locks.filter(x => x.id !== op.id);
+                    if (store.locks.length < before) applied++;
+                    break;
+                }
+                case 'character': {
+                    const name = cleanStr(op.name, 60);
+                    if (!name || !op.patch || typeof op.patch !== 'object') break;
+                    const norm = (s) => String(s || '').toLowerCase();
+                    const existing = store.characters.find(x =>
+                        norm(x.name) === norm(name) || (x.aliases || []).some(a => norm(a) === norm(name)));
+                    if (existing?.locked) {
+                        skipped.push(`${existing.name} 카드는 잠겨 있어 수정하지 못했습니다 (인물 탭에서 잠금을 먼저 풀어주세요)`);
+                        break;
+                    }
+                    const card = { name };
+                    for (const k of ['role', 'age', 'occupation', 'appearance', 'voice']) {
+                        if (op.patch[k] != null) card[k] = cleanStr(op.patch[k], 200);
+                    }
+                    if (Array.isArray(op.patch.traits)) card.traits = op.patch.traits.map(t => cleanStr(t, 40)).filter(Boolean).slice(0, 8);
+                    upsertCharacter(store, card, now);
+                    applied++;
+                    break;
+                }
+                default:
+                    break;
+            }
+        } catch (e) {
+            console.error(`[${MODULE_NAME}] 사서 편집 op 적용 실패`, op, e);
+        }
+    }
+
+    if (applied) {
+        persistStore();
+        renderAllPanels();
+        await updateInjection();
+    }
+    return { applied, skipped };
 }
 
 /* ============================================================
@@ -3864,6 +4772,7 @@ function renderSettingsPanel() {
     $sel.val(s.profileId || '');
 
     $('#memoria_api_mode').val(s.apiMode === 'custom' ? 'custom' : 'st');
+    $('#memoria_custom_auth_mode').val(s.customApi.authMode === 'vertex' ? 'vertex' : 'apikey');
     $('#memoria_custom_url').val(s.customApi.url);
     $('#memoria_custom_key').val(s.customApi.key);
     $('#memoria_custom_model').val(s.customApi.model);
@@ -3872,10 +4781,15 @@ function renderSettingsPanel() {
     $('#memoria_custom_flex').val(s.customApi.flexTier || 'off');
     $('#memoria_custom_headers').val(s.customApi.extraHeaders || '');
     $('#memoria_custom_body').val(s.customApi.extraBody || '');
+    $('#memoria_vertex_json').val(s.customApi.vertexJson || '');
+    $('#memoria_vertex_location').val(s.customApi.vertexLocation || 'us-central1');
     $('#memoria_st_api_block').toggle(s.apiMode !== 'custom');
     $('#memoria_custom_api_block').toggle(s.apiMode === 'custom');
+    $('#memoria_custom_apikey_block').toggle(s.apiMode === 'custom' && s.customApi.authMode !== 'vertex');
+    $('#memoria_custom_vertex_block').toggle(s.apiMode === 'custom' && s.customApi.authMode === 'vertex');
 
     $('#memoria_consolidate_every').val(s.consolidateEvery);
+    $('#memoria_arc_consolidate_every').val(s.arcConsolidateEvery);
     $('#memoria_embed_mode').val(s.embedApi.mode || 'off');
     $('#memoria_embed_url').val(s.embedApi.url);
     $('#memoria_embed_key').val(s.embedApi.key);
@@ -3977,6 +4891,68 @@ function bindUI() {
         }
     });
 
+    // ── 사서에게 정정 요청 (편집 채팅)
+    const appendEditorLine = (role, html) => {
+        const $log = $('#memoria_editor_log');
+        const label = role === 'user' ? '나' : '사서';
+        const align = role === 'user' ? 'right' : 'left';
+        $log.append(`<div style="margin:4px 0; text-align:${align};"><b>${label}:</b> ${html}</div>`);
+        $log.scrollTop($log[0].scrollHeight);
+        return $log.children().last();
+    };
+
+    $('#memoria_editor_send_btn').on('click', async function () {
+        const $btn = $(this);
+        const $input = $('#memoria_editor_input');
+        const text = String($input.val() || '').trim();
+        if (!text) return toastr.warning('요청을 입력하세요.', 'Memoria');
+        $btn.addClass('disabled');
+        $input.val('');
+        appendEditorLine('user', escapeHtml(text));
+        const $thinking = appendEditorLine('assistant', '<i>서고를 확인하는 중…</i>');
+        try {
+            const { reply, ops } = await proposeEditorTurn(text);
+            if (!ops.length) {
+                $thinking.html(`<b>사서:</b> ${escapeHtml(reply)}`);
+            } else {
+                const opLines = ops.map(o => `<li>${escapeHtml(describeEditorOp(o))}</li>`).join('');
+                const confirmId = `memoria_editor_confirm_${Date.now()}`;
+                $thinking.html(`<b>사서:</b> ${escapeHtml(reply)}<ul style="margin:4px 0 4px 18px;">${opLines}</ul>` +
+                    `<div class="menu_button" id="${confirmId}_ok" style="display:inline-block; margin-right:6px;">적용</div>` +
+                    `<div class="menu_button" id="${confirmId}_no" style="display:inline-block;">취소</div>`);
+                $(`#${confirmId}_ok`).on('click', async function () {
+                    $(this).addClass('disabled');
+                    const { applied, skipped } = await applyEditorOps(ops);
+                    $(this).parent().find(`#${confirmId}_no`).remove();
+                    const skipHtml = skipped.length
+                        ? `<div style="margin-top:4px; opacity:0.85;">⚠ ${skipped.map(escapeHtml).join('<br>⚠ ')}</div>` : '';
+                    $(this).replaceWith(`<i>✔ ${applied}건 반영됨</i>${skipHtml}`);
+                    if (applied) toastr.success(`서고에 ${applied}건 반영했습니다.`, 'Memoria');
+                    if (skipped.length) toastr.warning(`${skipped.length}건은 반영하지 못했습니다.`, 'Memoria');
+                });
+                $(`#${confirmId}_no`).on('click', function () {
+                    $(this).parent().find(`#${confirmId}_ok`).remove();
+                    $(this).replaceWith('<i>취소함</i>');
+                });
+            }
+        } catch (e) {
+            $thinking.html(`<b>사서:</b> 처리 실패 — ${escapeHtml(e.message)}`);
+        } finally {
+            $btn.removeClass('disabled');
+        }
+    });
+    $('#memoria_editor_input').on('keydown', function (e) {
+        if (e.key === 'Enter' && !e.shiftKey) {
+            e.preventDefault();
+            $('#memoria_editor_send_btn').trigger('click');
+        }
+    });
+    $('#memoria_editor_reset_btn').on('click', function () {
+        resetEditorChat();
+        $('#memoria_editor_log').empty();
+        toastr.info('편집 대화를 초기화했습니다.', 'Memoria');
+    });
+
     // ── 기억 브라우저
     $('#memoria_memory_search').on('input', renderMemoriesPanel);
     $('#memoria_memory_kind_filter').on('change', renderMemoriesPanel);
@@ -4006,7 +4982,7 @@ function bindUI() {
         const ctx = getContext();
         const edited = await ctx.callGenericPopup('기억 내용 수정', ctx.POPUP_TYPE.INPUT, m.summary, { rows: 4 });
         if (!edited || typeof edited !== 'string') return;
-        m.summary = cleanStr(edited, 300);
+        m.summary = cleanStr(edited, MANUAL_TEXT_MAX);
         m.manual = true; // 사용자가 다듬은 기억은 스와이프 롤백·상한 정리·서고 정리에서 보호 (인물 편집과 동일)
         m.vec = encodeVec(embedText(memoryIndexText(m)));
         m.avec = null;
@@ -4021,7 +4997,7 @@ function bindUI() {
         const store = getStore();
         store.memories.push({
             id: uuidv4(), turnIndex: store.turnCounter, mesId: -1,
-            kind: 'fact', summary: cleanStr(text, 300), excerpt: null,
+            kind: 'fact', summary: cleanStr(text, MANUAL_TEXT_MAX), excerpt: null,
             importance: 0.8, entities: [], tags: ['manual'], visibility: 'public', owner: null,
             pinned: false, disabled: false, manual: true, trigger: '',
             vec: encodeVec(embedText(text)),
@@ -4068,7 +5044,12 @@ function bindUI() {
         // 직접 고친 프로필은 기본적으로 잠근다 — 애써 고쳐놔도 사서가 되돌려놓는 일을 막는다
         const justLocked = getSettings().lockEditedCharacters && !c.locked;
         if (justLocked) c.locked = true;
-        persistStore(); renderCharactersPanel(); updateInjection();
+        // 별칭을 손봤다면 그 이름으로 갈라져 있던 상태·기억도 바로 이 카드로 접는다
+        const folded = foldEntityAliases(store);
+        persistStore(); renderCharactersPanel(); renderStatePanel(); renderMemoriesPanel(); updateInjection();
+        if (folded.states || folded.memories) {
+            toastr.success(`별칭으로 갈라져 있던 기록을 합쳤습니다 — 상태 ${folded.states}건 · 기억 ${folded.memories}건`, 'Memoria');
+        }
         if (justLocked) toastr.info(`"${c.name}" 프로필을 고정했습니다. 🔒 아이콘으로 해제할 수 있습니다.`, 'Memoria');
     });
     $('#memoria_settings').on('click', '.memoria-char-merge', async function () {
@@ -4082,18 +5063,34 @@ function bindUI() {
         }
         const ctx = getContext();
         const name = await ctx.callGenericPopup(
-            `"${keep.name}" 카드로 접을 인물 이름을 입력하세요.\n(같은 인물이 두 카드로 나뉘었을 때 — 접힌 카드의 이름은 별칭으로 남고 기록이 합쳐집니다)\n\n다른 카드: ${others.map(x => x.name).join(', ')}`,
+            `"${keep.name}" 카드로 접을 이름을 입력하세요.
+· 같은 인물이 두 카드로 나뉜 경우 → 카드를 합칩니다
+· 카드는 하나인데 상태 보드가 다른 표기로 갈라진 경우(예: kkang) → 별칭으로 묶고 상태·기억을 이 카드로 접습니다
+
+다른 카드: ${others.map(x => x.name).join(", ")}`,
             ctx.POPUP_TYPE.INPUT, '', { rows: 1 });
         if (!name || typeof name !== 'string') return;
-        const norm = (s) => String(s || '').toLowerCase().trim();
-        const absorb = others.find(x => norm(x.name) === norm(name) || (x.aliases || []).some(a => norm(a) === norm(name)));
-        if (!absorb) {
-            toastr.warning(`"${cleanStr(name, 60)}" 카드를 찾지 못했습니다.`, 'Memoria');
+        const typed = cleanStr(name, 60);
+        const absorb = others.find(x => entityKey(x.name) === entityKey(typed) || (x.aliases || []).some(a => entityKey(a) === entityKey(typed)));
+        if (absorb) {
+            mergeCharacterCards(store, keep, absorb);
+            persistStore(); renderCharactersPanel(); renderStatePanel(); renderMemoriesPanel(); updateInjection();
+            toastr.success(`"${absorb.name}" 카드를 "${keep.name}"(으)로 병합했습니다.`, 'Memoria');
             return;
         }
-        mergeCharacterCards(store, keep, absorb);
-        persistStore(); renderCharactersPanel(); updateInjection();
-        toastr.success(`"${absorb.name}" 카드를 "${keep.name}"(으)로 병합했습니다.`, 'Memoria');
+        // 카드는 하나인데 사서가 로마자로 적어 상태 보드에만 떠돌기는 이름일 수 있다
+        // (예: 카드는 "깡" 하나인데 상태만 "kkang"으로 갈라짐). 별칭으로 묶고 기록을 접는다.
+        const usedElsewhere = store.entityStates.some(x => entityKey(x.entity) === entityKey(typed))
+            || store.memories.some(m => (m.entities || []).some(e => entityKey(e) === entityKey(typed)));
+        if (!usedElsewhere) {
+            toastr.warning(`"${typed}" — 인물 카드에도, 상태 보드나 기억에도 없는 이름입니다.`, 'Memoria');
+            return;
+        }
+        keep.aliases = [...new Set([...(keep.aliases || []), typed])]
+            .filter(a => a && entityKey(a) !== entityKey(keep.name)).slice(0, 8);
+        const folded = foldEntityAliases(store);
+        persistStore(); renderCharactersPanel(); renderStatePanel(); renderMemoriesPanel(); updateInjection();
+        toastr.success(`"${typed}" → "${keep.name}" 별칭으로 묶었습니다 (상태 ${folded.states}건 · 기억 ${folded.memories}건 합침)`, 'Memoria');
     });
     $('#memoria_character_add').on('click', async function () {
         const ctx = getContext();
@@ -4280,7 +5277,7 @@ function bindUI() {
         const ctx = getContext();
         const edited = await ctx.callGenericPopup('요약 수정', ctx.POPUP_TYPE.INPUT, s.text, { rows: 8 });
         if (!edited || typeof edited !== 'string') return;
-        s.text = cleanMultiline(edited, 2400);
+        s.text = cleanMultiline(edited, 4000);
         s.avec = null; // 본문이 바뀌었으니 챕터 API 임베딩은 다음 회상 때 재계산
         persistStore(); renderSummariesPanel(); updateInjection();
     });
@@ -4325,7 +5322,7 @@ function bindUI() {
         const ctx = getContext();
         const edited = await ctx.callGenericPopup('턴 기록 수정 (이후 요약 생성에 반영됩니다)', ctx.POPUP_TYPE.INPUT, t.summary, { rows: 4 });
         if (!edited || typeof edited !== 'string') return;
-        t.summary = cleanStr(edited, 300);
+        t.summary = cleanStr(edited, MANUAL_TEXT_MAX);
         persistStore(); renderSummariesPanel();
     });
     $('#memoria_packet_copy').on('click', async function () {
@@ -4426,6 +5423,30 @@ function bindUI() {
         saveSettingsDebounced();
         renderSettingsPanel();
     });
+    $('#memoria_custom_auth_mode').on('change', function () {
+        getSettings().customApi.authMode = String($(this).val()) === 'vertex' ? 'vertex' : 'apikey';
+        saveSettingsDebounced();
+        renderSettingsPanel();
+    });
+    $('#memoria_vertex_json').on('change', function () {
+        const raw = String($(this).val() || '').trim();
+        if (raw) {
+            try {
+                const sa = JSON.parse(raw);
+                if (!sa.private_key || !sa.client_email || !sa.project_id) {
+                    toastr.warning('service account JSON에 private_key/client_email/project_id가 없습니다.', 'Memoria');
+                }
+            } catch {
+                toastr.warning('올바른 JSON이 아닙니다. 서비스 계정 키 파일 내용을 그대로 붙여넣으세요.', 'Memoria');
+            }
+        }
+        getSettings().customApi.vertexJson = raw;
+        saveSettingsDebounced();
+    });
+    $('#memoria_vertex_location').on('change', function () {
+        getSettings().customApi.vertexLocation = String($(this).val() || 'us-central1').trim() || 'us-central1';
+        saveSettingsDebounced();
+    });
     const customBind = (sel, key, isNumber = false) => {
         $(sel).on('change', function () {
             const raw = String($(this).val() || '').trim();
@@ -4494,6 +5515,7 @@ function bindUI() {
     numBind('#memoria_reasoning_headroom', 'reasoningHeadroom', 0, 32768);
     numBind('#memoria_preserve_recent', 'preserveRecent', 1, 50);
     numBind('#memoria_consolidate_every', 'consolidateEvery', 0, 200);
+    numBind('#memoria_arc_consolidate_every', 'arcConsolidateEvery', 0, 500);
 
     // ── 의미 검색 임베딩
     $('#memoria_embed_mode').on('change', function () {
@@ -4706,6 +5728,20 @@ function registerCommands() {
         }));
 
         SlashCommandParser.addCommandObject(SlashCommand.fromProps({
+            name: 'memoria-autorecord',
+            helpString: '자동 기록(매 턴 사서 호출) 켜기/끄기 (on/off 생략 시 토글). Memoria 자체는 계속 켜져 있고 새로 기록만 멈춥니다.',
+            unnamedArgumentList: [SlashCommandArgument.fromProps({ description: 'on / off', typeList: [ARGUMENT_TYPE.STRING], isRequired: false })],
+            callback: async (_, value) => {
+                const s = getSettings();
+                const v = String(value || '').toLowerCase();
+                s.autoRecord = v === 'on' ? true : v === 'off' ? false : !s.autoRecord;
+                saveSettingsDebounced();
+                $('#memoria_auto_record').prop('checked', s.autoRecord);
+                return `자동 기록: ${s.autoRecord ? 'ON' : 'OFF'}`;
+            },
+        }));
+
+        SlashCommandParser.addCommandObject(SlashCommand.fromProps({
             name: 'memoria-remember',
             helpString: '수동으로 기억을 추가합니다. 예: /memoria-remember 아리아는 고양이 알레르기가 있다',
             unnamedArgumentList: [SlashCommandArgument.fromProps({ description: '기억할 내용', typeList: [ARGUMENT_TYPE.STRING], isRequired: true })],
@@ -4844,6 +5880,8 @@ function bindEvents() {
         queryEmbedCache.clear();
         dossierVecCache.clear();
         localSyncedChat = null;
+        resetEditorChat();
+        $('#memoria_editor_log').empty();
         getStore();
         reconcileWithChat();
         renderAllPanels();
