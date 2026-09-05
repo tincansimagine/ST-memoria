@@ -1,7 +1,7 @@
 <div id="memoria_settings" class="memoria">
     <div class="inline-drawer">
         <div class="inline-drawer-toggle inline-drawer-header">
-            <b><i class="fa-solid fa-book-bookmark"></i> Memoria — 장기기억 서고 <span class="memoria__version">v1.5.2</span></b>
+            <b><i class="fa-solid fa-book-bookmark"></i> Memoria — 장기기억 서고 <span class="memoria__version">v1.6.0</span></b>
             <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
         </div>
         <div class="inline-drawer-content">
@@ -70,6 +70,16 @@
                         <div class="menu_button" id="memoria_ask_btn"><i class="fa-solid fa-comment-dots"></i><span>질문</span></div>
                     </div>
                     <div id="memoria_ask_answer" class="memoria__ask-answer" style="display:none;"></div>
+                    <details class="memoria__details">
+                        <summary>사서에게 정정 요청 — 날짜·기록·요약·인물 설정을 대화로 고치기</summary>
+                        <p class="memoria__hint" style="margin-top:6px;">읽기 전용 질문이 아니라 <b>실제 기록을 고치는</b> 채팅입니다. 예: "지금 11월인데 3월로 바꿔줘", "그 요약 틀렸어, ○○가 아니라 △△였어", "서사시계 2주가 아니라 3주야", "인물 설정 추가해줘". 사서가 바꿀 내용을 먼저 보여주면, 확인 버튼을 눌러야 실제로 반영됩니다.</p>
+                        <div id="memoria_editor_log" style="max-height:220px; overflow-y:auto; margin:6px 0; padding:6px; border:1px solid var(--SmartThemeBorderColor, #444); border-radius:6px; font-size:0.9em;"></div>
+                        <div class="memoria__ask-row">
+                            <input type="text" id="memoria_editor_input" placeholder="고치고 싶은 걸 말해보세요…">
+                            <div class="menu_button" id="memoria_editor_send_btn"><i class="fa-solid fa-paper-plane"></i><span>보내기</span></div>
+                        </div>
+                        <div class="menu_button" id="memoria_editor_reset_btn" style="margin-top:6px;"><i class="fa-solid fa-broom"></i><span>대화 초기화</span></div>
+                    </details>
                 </div>
                 <div class="memoria__hint">
                     <b>작동 방식</b> — AI 응답이 끝날 때마다 그 턴을 자동으로 기록해 구조화된 기억으로 보관하고,
@@ -203,7 +213,7 @@
                     <div class="memoria__section-head">
                         <div>
                             <h4>지금까지의 이야기</h4>
-                            <p>N턴마다 자동 요약되고, 오래된 요약은 연대기로 병합됩니다. {{memoria_story}} 매크로로도 쓸 수 있습니다.</p>
+                            <p>N턴마다 자동 요약되고, 서고 정리 때 같은 사건끼리 묶여 연대기로 병합됩니다. {{memoria_story}} 매크로로도 쓸 수 있습니다.</p>
                         </div>
                         <div class="memoria__compact-actions">
                             <div class="menu_button" id="memoria_summarize_now">
@@ -342,15 +352,34 @@
                     </div>
                     <div id="memoria_custom_api_block" style="display:none;">
                         <div class="memoria__field">
-                            <label for="memoria_custom_url" title="예: https://api.openai.com/v1 (뒤의 /chat/completions는 자동으로 붙습니다)">API URL</label>
-                            <input type="text" id="memoria_custom_url" placeholder="https://api.openai.com/v1" autocomplete="off">
+                            <label for="memoria_custom_auth_mode" title="같은 구글 클라우드 키를 실리태번 본 채팅과 나눠 쓰면 캐싱 적중률이 떨어져 비용이 늘 수 있습니다. 별도 서비스 계정을 쓰려면 Vertex JSON을 선택하세요.">인증 방식</label>
+                            <select id="memoria_custom_auth_mode">
+                                <option value="apikey">API 키 (OpenAI 호환)</option>
+                                <option value="vertex">Vertex AI 서비스 계정 JSON</option>
+                            </select>
+                        </div>
+                        <div id="memoria_custom_apikey_block">
+                            <div class="memoria__field">
+                                <label for="memoria_custom_url" title="예: https://api.openai.com/v1 (뒤의 /chat/completions는 자동으로 붙습니다)">API URL</label>
+                                <input type="text" id="memoria_custom_url" placeholder="https://api.openai.com/v1" autocomplete="off">
+                            </div>
+                            <div class="memoria__field">
+                                <label for="memoria_custom_key">API Key</label>
+                                <input type="password" id="memoria_custom_key" placeholder="sk-..." autocomplete="off">
+                            </div>
+                        </div>
+                        <div id="memoria_custom_vertex_block" style="display:none;">
+                            <div class="memoria__field">
+                                <label for="memoria_vertex_json" title="구글 클라우드 서비스 계정 키 파일(.json)의 내용을 그대로 붙여넣으세요. private_key가 포함된 전체 JSON입니다.">서비스 계정 JSON</label>
+                                <textarea id="memoria_vertex_json" rows="4" placeholder='{"type":"service_account","project_id":"...","private_key":"...","client_email":"..."}' autocomplete="off"></textarea>
+                            </div>
+                            <div class="memoria__field">
+                                <label for="memoria_vertex_location" title="Vertex AI 리전. 예: us-central1, global">리전</label>
+                                <input type="text" id="memoria_vertex_location" placeholder="us-central1" autocomplete="off">
+                            </div>
                         </div>
                         <div class="memoria__field">
-                            <label for="memoria_custom_key">API Key</label>
-                            <input type="password" id="memoria_custom_key" placeholder="sk-..." autocomplete="off">
-                        </div>
-                        <div class="memoria__field">
-                            <label for="memoria_custom_model">모델</label>
+                            <label for="memoria_custom_model" title="예: gpt-4o-mini (API 키 모드) 또는 gemini-2.5-pro (Vertex 모드)">모델</label>
                             <input type="text" id="memoria_custom_model" placeholder="gpt-4o-mini" autocomplete="off">
                         </div>
                         <div class="memoria__field-grid">
@@ -476,8 +505,12 @@
                             <input type="number" id="memoria_max_memories" min="50" max="2000" step="50">
                         </div>
                         <div class="memoria__field">
-                            <label for="memoria_consolidate_every" title="N턴마다 사서가 서고를 훑어 중복 기억 병합·소음 제거·중요도 재조정을 합니다. 0 = 끔. 고정·수동 기억은 건드리지 않습니다.">서고 정리 주기(턴)</label>
+                            <label for="memoria_consolidate_every" title="N턴마다 사서가 서고를 훑어 중복 기억 병합·소음 제거·중요도 재조정을 합니다. 0 = 끔. 고정·수동 기억은 건드리지 않습니다. 이때 청크들도 같은 사건끼리 재그룹핑돼 아크로 병합됩니다.">서고 정리 주기(턴)</label>
                             <input type="number" id="memoria_consolidate_every" min="0" max="200" step="5">
+                        </div>
+                        <div class="memoria__field">
+                            <label for="memoria_arc_consolidate_every" title="N턴마다 이미 만들어진 아크들끼리만 재검토해서, 정말 같은 사건인데 타이밍상 우연히 갈라진 것만 다시 합칩니다. 0 = 끔. 청크 재그룹핑(서고 정리)과는 완전히 별개로, 훨씬 보수적으로 병합합니다.">아크 정리 주기(턴)</label>
+                            <input type="number" id="memoria_arc_consolidate_every" min="0" max="500" step="10">
                         </div>
                     </div>
                 </div>
@@ -609,7 +642,7 @@
                     </div>
                 </div>
                 <div class="memoria__hint">
-                    <b>슬래시 명령어</b> — <code>/memoria</code> 켜기/끄기 · <code>/memoria-remember 내용</code> 수동 기억 ·
+                    <b>슬래시 명령어</b> — <code>/memoria</code> 켜기/끄기 · <code>/memoria-autorecord</code> 자동 기록 켜기/끄기 · <code>/memoria-remember 내용</code> 수동 기억 ·
                     <code>/memoria-search 검색어</code> 기억 검색 · <code>/memoria-ask 질문</code> 서고에 질문 ·
                     <code>/memoria-index</code> 전체 색인 · <code>/memoria-clock</code> 서사 시계 재계산 ·
                     <code>/memoria-reconcile</code> 채팅과 기록 맞추기<br>
