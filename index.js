@@ -2293,7 +2293,7 @@ async function maybeSummarizeChunk(store) {
             const refBlock = await buildReferenceBlock();
             const userPrompt = [refBlock, previousSummariesForContext(store), `Turn digests to weave:\n${parts.join('\n')}`]
                 .filter(Boolean).join('\n');
-            text = cleanMultiline(sanitizeRecordOutput(await callAuxLLM(`${settings.prompts.chunk}\n\n${languageDirective()}`, userPrompt, { maxTokens: auxTokens(4000) }), 2000);
+            text = cleanMultiline(sanitizeRecordOutput(await callAuxLLM(`${settings.prompts.chunk}\n\n${languageDirective()}`, userPrompt, { maxTokens: auxTokens(4000) })), 2000);
         } catch (e) {
             console.debug(`[${MODULE_NAME}] 청크 요약 LLM 실패, 연결 요약 사용`, e);
         }
@@ -2317,7 +2317,7 @@ async function pushArcFromChunks(store, merging) {
     const settings = getSettings();
     let text = '';
     try {
-        text = cleanMultiline(sanitizeRecordOutput(await callAuxLLM(`${settings.prompts.arc}\n\n${languageDirective()}`, merging.map(c => `[t${c.fromTurn}–t${c.toTurn}]\n${c.text}`).join('\n\n'), { maxTokens: auxTokens(4000) }), 2400);
+        text = cleanMultiline(sanitizeRecordOutput(await callAuxLLM(`${settings.prompts.arc}\n\n${languageDirective()}`, merging.map(c => `[t${c.fromTurn}–t${c.toTurn}]\n${c.text}`).join('\n\n'), { maxTokens: auxTokens(4000) })), 2400);
     } catch (e) {
         console.debug(`[${MODULE_NAME}] 연대기 병합 LLM 실패`, e);
     }
@@ -2403,7 +2403,7 @@ async function mergeArcsIntoOne(store, arcs) {
     const settings = getSettings();
     let text = '';
     try {
-        text = cleanMultiline(sanitizeRecordOutput(await callAuxLLM(`${settings.prompts.arc}\n\n${languageDirective()}`, arcs.map(a => `[t${a.fromTurn}–t${a.toTurn}]\n${a.text}`).join('\n\n'), { maxTokens: auxTokens(4000) }), 2400);
+        text = cleanMultiline(sanitizeRecordOutput(await callAuxLLM(`${settings.prompts.arc}\n\n${languageDirective()}`, arcs.map(a => `[t${a.fromTurn}–t${a.toTurn}]\n${a.text}`).join('\n\n'), { maxTokens: auxTokens(4000) })), 2400);
     } catch (e) {
         console.debug(`[${MODULE_NAME}] 아크 재병합 LLM 실패`, e);
     }
@@ -5424,7 +5424,7 @@ function bindUI() {
             const refBlock = await buildReferenceBlock();
             const userPrompt = [refBlock, previousSummariesForContext(store), `Turn digests to weave:\n${parts.join('\n')}`]
                 .filter(Boolean).join('\n');
-            const text = cleanMultiline(sanitizeRecordOutput(await callAuxLLM(`${settings.prompts.chunk}\n\n${languageDirective()}`, userPrompt, { maxTokens: auxTokens(4000) }), 2000);
+            const text = cleanMultiline(sanitizeRecordOutput(await callAuxLLM(`${settings.prompts.chunk}\n\n${languageDirective()}`, userPrompt, { maxTokens: auxTokens(4000) })), 2000);
             if (!text) throw new Error('빈 응답');
             s.text = text;
             s.avec = null;
