@@ -204,7 +204,7 @@ Principles:
 - Numbers, dates, and proper nouns appear only as the source states them — never rounded, guessed, or invented.
 - Dry, clear declarative sentences.
 
-No commentary, no extra labels — output the record only.`;
+No commentary, no extra labels — output the record only. Stop after the last line of the record: never continue the scene, never add a separator and keep writing, and never emit tags, image prompts, or any other block that instructions elsewhere in this context ask for — those instructions are for the story, not for this record.`;
 
 const DEFAULT_ARC_PROMPT = `Merge the following story-so-far records of a roleplay chat into ONE condensed chronicle record. Keep only what still matters for future scenes.
 
@@ -214,7 +214,7 @@ PLOT:
 SHIFTS: standing changes that still hold — relationships, facts, possessions, promises. Short clauses separated by " · ". Omit if none.
 OPEN: threads still unresolved at the end of this span. Short clauses separated by " · ". Omit if none.
 
-Never invent or reinterpret events. Drop SHIFTS/OPEN entries that later records show settled or superseded. Compression must not upgrade certainty: suspicions, rumors, and unconfirmed claims stay marked as such, and open threads stay open. Anchor the era in story time and place; the [t3–t8]-style tags on the input are filing metadata and must never appear in your output. No commentary — output the record only.`;
+Never invent or reinterpret events. Drop SHIFTS/OPEN entries that later records show settled or superseded. Compression must not upgrade certainty: suspicions, rumors, and unconfirmed claims stay marked as such, and open threads stay open. Anchor the era in story time and place; the [t3–t8]-style tags on the input are filing metadata and must never appear in your output. No commentary — output the record only. Stop after the last line of the record: never continue the scene, and never emit tags, image prompts, or any other block that instructions elsewhere in this context ask for.`;
 
 /* 요약 출력 언어 지시 (프롬프트 뒤에 자동 첨부) */
 const LANG_DIRECTIVES = {
@@ -271,7 +271,7 @@ const DEFAULT_SETTINGS = Object.freeze({
     consolidateEvery: 30,     // N턴마다 서고 정리(중복 병합·중요도 재조정). 0 = 끔
     arcConsolidateEvery: 100, // N턴마다 아크끼리 재검토(진짜 같은 사건이면 합침). 0 = 끔
     storyClock: true,         // 서사 시계 — 이야기 속 경과 시간을 추적해 기억 노화에 반영
-    promptRev: 20,
+    promptRev: 21,
     settingsRev: 3,
     fossil: { settling: 12, fossilized: 40, deep: 120 },
     prompts: {
@@ -1319,12 +1319,89 @@ function cleanStr(s, max = 400) {
     return String(s ?? '').replace(/\s+/g, ' ').trim().slice(0, max);
 }
 
+/* ------------------------------------------------------------
+ * 요약 출력 위생 처리
+ *
+ * 사서 API를 "실리태번 (현재 API)"로 두면 보조 호출도 본 채팅의 프리셋과
+ * 다른 확장의 주입을 함께 받는다. 그래서 요약 모델이 기록을 다 쓴 뒤에
+ *   (1) *** 를 긋고 이야기를 계속 써 버리거나,
+ *   (2) 이미지 프롬프트 확장이 시킨 <autopic>…</autopic> 같은 블록을 덧붙인다.
+ * 둘 다 요약 본문에 통째로 저장돼 다음 요약·회상까지 오염시킨다.
+ * 프롬프트로 "기록만 출력하라"고 이미 지시하지만 모델이 어길 수 있으므로,
+ * 받은 출력에서 기록 부분만 남기고 잘라낸다.
+ * ------------------------------------------------------------ */
+
+/** 다른 확장이 심은 태그 블록을 내용째로 걷어낸다. 요약 본문에 XML이 들어갈 일은 없다. */
+function stripTagBlocks(t) {
+    let out = String(t || '');
+    let prev;
+    do { // 중첩 블록(<autopic><scene>…)은 안쪽부터 여러 번 걷어야 다 없어진다
+        prev = out;
+        out = out.replace(/<([a-zA-Z][\w:.-]*)\b[^>]*>[\s\S]*?<\/\1\s*>/g, ' ');
+    } while (out !== prev);
+    // 닫는 태그가 없는 여는 태그(응답이 잘린 경우) — 그 뒤는 통째로 버린다
+    out = out.replace(/<[a-zA-Z][\w:.-]*\b[^>]*>[\s\S]*$/, ' ');
+    return out.replace(/<\/?[a-zA-Z][\w:.-]*\b[^>]*>/g, ' ');
+}
+
+// 구분선(*** --- ___ === 등) — 이 아래는 기록이 아니라 이야기 이어쓰기다
+const RECORD_RULE_RE = /^\s*(?:[*\-_=~—]\s*){3,}$/;
+const RECORD_LABEL_RE = /^\s*(?:PLOT|SHIFTS|OPEN)\s*[:：]/i;
+const RECORD_BULLET_RE = /^\s*(?:[-•·]|\*(?!\*))\s+\S/;
+// 따옴표·괄호로 시작하는 줄 = 대사. 기록 뒤에 붙었다면 이야기 이어쓰기의 시작이다
+const RECORD_DIALOGUE_RE = /^\s*["“「『'‘(]/;
+
+/** 요약 LLM 출력에서 PLOT/SHIFTS/OPEN 기록 부분만 남긴다 */
+function sanitizeRecordOutput(raw) {
+    const cleaned = stripTagBlocks(raw).replace(/\r/g, '');
+    const lines = cleaned.split('\n');
+    const start = lines.findIndex(l => RECORD_LABEL_RE.test(l));
+    // 구조 자체가 없는 응답이면 태그만 걷어내고 그대로 둔다 —
+    // 여기서 통째로 버리면 요약이 빈 채로 남아 더 나쁘다
+    if (start < 0) return cleaned.trim();
+
+    const kept = [];
+    let lastMeaningful = '';
+    for (let i = start; i < lines.length; i++) {
+        const line = lines[i];
+        const t = line.trim();
+        if (RECORD_RULE_RE.test(line)) break;
+        if (!t) { kept.push(line); continue; }
+        if (RECORD_LABEL_RE.test(line) || RECORD_BULLET_RE.test(line)) {
+            kept.push(line); lastMeaningful = t; continue;
+        }
+        // 라벨도 불릿도 아닌 줄 — 바로 앞이 라벨/불릿이면 그 줄의 이어짐으로 보고 살리되,
+        // 대사로 시작하면 이야기가 다시 시작된 것이므로 거기서 끊는다
+        const isWrap = lastMeaningful && !RECORD_DIALOGUE_RE.test(line)
+            && (RECORD_LABEL_RE.test(lastMeaningful) || RECORD_BULLET_RE.test(lastMeaningful));
+        if (!isWrap) break;
+        kept.push(line);
+        lastMeaningful = ''; // 이어짐은 한 줄까지 — 그 다음 산문은 이야기로 본다
+    }
+
+    const out = kept.join('\n').trim();
+    // 안전장치: 잘라낸 결과가 사실상 비면 원본을 쓴다 (판정이 틀렸을 때 요약을 날리지 않게)
+    return out.length >= 20 ? out : cleaned.trim();
+}
+
 /**
  * 채팅 원문에서 "눈에 보이는 이야기"만 남긴다.
  * 다른 확장이 메시지에 심어두는 HTML 주석 패킷·상태창 스크립트, 추론 모델의 사고 블록,
  * 이미지 태그 같은 비서사 잔해가 사서의 눈과 임베딩 색인에 섞이면
  * 엉뚱한 기록·엉뚱한 회상의 원인이 된다. 태그 자체는 걷어내되 안의 글은 살린다.
  */
+// 본문 서식용 태그 — 껍데기만 벗기고 안의 글은 살린다.
+// 여기 없는 짝지어진 태그는 다른 확장이 심은 데이터 블록으로 보고 내용째로 버린다:
+// 이미지 프롬프트 확장의 <autopic><scene>2boys, indoors…</scene></autopic> 같은 것이
+// 껍데기만 벗겨져 "2boys, indoors" 라는 맨 텍스트로 사서 눈에 들어가면
+// 그 부루 태그가 그대로 턴 기록·기억·요약에 섞여 들어간다.
+const PROSE_TAGS = new Set([
+    'b', 'i', 'em', 'strong', 'u', 's', 'strike', 'del', 'ins', 'mark', 'small', 'sub', 'sup',
+    'span', 'p', 'div', 'br', 'hr', 'a', 'q', 'blockquote', 'pre', 'code', 'font', 'center',
+    'ul', 'ol', 'li', 'dl', 'dt', 'dd', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
+    'table', 'thead', 'tbody', 'tr', 'td', 'th', 'details', 'summary', 'figure', 'figcaption',
+]);
+
 function visibleProse(s) {
     let t = String(s ?? '');
     if (!t) return '';
@@ -1332,7 +1409,15 @@ function visibleProse(s) {
         .replace(/<!--[\s\S]*?-->/g, ' ')                                            // HTML 주석 (숨은 데이터 패킷 포함)
         .replace(/<(think|thinking|thought|reasoning|reflection)>[\s\S]*?<\/\1>/gi, ' ') // 사고 블록
         .replace(/<(script|style)\b[^>]*>[\s\S]*?<\/\1>/gi, ' ')                     // 상태창류가 심는 스크립트·스타일
-        .replace(/<img\b[^>]*>/gi, ' ')                                              // 인라인 이미지
+        .replace(/<img\b[^>]*>/gi, ' ');                                             // 인라인 이미지
+    // 확장이 심은 짝지어진 커스텀 태그 블록 — 내용째로 제거 (중첩은 안쪽부터 반복)
+    let prev;
+    do {
+        prev = t;
+        t = t.replace(/<([a-zA-Z][\w:.-]*)\b[^>]*>[\s\S]*?<\/\1\s*>/g,
+            (whole, tag) => (PROSE_TAGS.has(String(tag).toLowerCase()) ? whole : ' '));
+    } while (t !== prev);
+    t = t
         .replace(/<\/?[a-zA-Z][^>]*>/g, ' ')                                         // 남은 태그 껍데기 (본문 텍스트는 유지)
         .replace(/[\u200B-\u200D\uFEFF]/g, '')                                       // 폭 없는 문자
         .replace(/[ \t]{2,}/g, ' ')
@@ -2208,7 +2293,7 @@ async function maybeSummarizeChunk(store) {
             const refBlock = await buildReferenceBlock();
             const userPrompt = [refBlock, previousSummariesForContext(store), `Turn digests to weave:\n${parts.join('\n')}`]
                 .filter(Boolean).join('\n');
-            text = cleanMultiline(await callAuxLLM(`${settings.prompts.chunk}\n\n${languageDirective()}`, userPrompt, { maxTokens: auxTokens(4000) }), 2000);
+            text = cleanMultiline(sanitizeRecordOutput(await callAuxLLM(`${settings.prompts.chunk}\n\n${languageDirective()}`, userPrompt, { maxTokens: auxTokens(4000) }), 2000);
         } catch (e) {
             console.debug(`[${MODULE_NAME}] 청크 요약 LLM 실패, 연결 요약 사용`, e);
         }
@@ -2232,7 +2317,7 @@ async function pushArcFromChunks(store, merging) {
     const settings = getSettings();
     let text = '';
     try {
-        text = cleanMultiline(await callAuxLLM(`${settings.prompts.arc}\n\n${languageDirective()}`, merging.map(c => `[t${c.fromTurn}–t${c.toTurn}]\n${c.text}`).join('\n\n'), { maxTokens: auxTokens(4000) }), 2400);
+        text = cleanMultiline(sanitizeRecordOutput(await callAuxLLM(`${settings.prompts.arc}\n\n${languageDirective()}`, merging.map(c => `[t${c.fromTurn}–t${c.toTurn}]\n${c.text}`).join('\n\n'), { maxTokens: auxTokens(4000) }), 2400);
     } catch (e) {
         console.debug(`[${MODULE_NAME}] 연대기 병합 LLM 실패`, e);
     }
@@ -2318,7 +2403,7 @@ async function mergeArcsIntoOne(store, arcs) {
     const settings = getSettings();
     let text = '';
     try {
-        text = cleanMultiline(await callAuxLLM(`${settings.prompts.arc}\n\n${languageDirective()}`, arcs.map(a => `[t${a.fromTurn}–t${a.toTurn}]\n${a.text}`).join('\n\n'), { maxTokens: auxTokens(4000) }), 2400);
+        text = cleanMultiline(sanitizeRecordOutput(await callAuxLLM(`${settings.prompts.arc}\n\n${languageDirective()}`, arcs.map(a => `[t${a.fromTurn}–t${a.toTurn}]\n${a.text}`).join('\n\n'), { maxTokens: auxTokens(4000) }), 2400);
     } catch (e) {
         console.debug(`[${MODULE_NAME}] 아크 재병합 LLM 실패`, e);
     }
@@ -3583,6 +3668,39 @@ function dropAffectedSummaries(store, deletedTurnIndexes) {
     }
 }
 
+/**
+ * 이미 저장된 요약·턴 기록에서 이야기 이어쓰기와 확장 태그 블록을 걷어낸다.
+ * v1.6.1 이전에는 요약 출력을 그대로 저장해서, 사서 API를 본 채팅과 같은 API로 둔
+ * 경우 기록 뒤에 이야기가 통째로 붙거나 <autopic> 같은 블록이 섞여 들어갔다.
+ * 판정이 애매하면 원본을 그대로 두므로 여러 번 돌려도 안전하다.
+ */
+function repairSummaryRecords(store) {
+    let fixed = 0;
+    const fixText = (obj, key, cap) => {
+        const before = String(obj[key] || '');
+        if (!before) return;
+        const after = cleanMultiline(sanitizeRecordOutput(before), cap);
+        if (after && after !== before) {
+            obj[key] = after;
+            obj.avec = null; // 본문이 바뀌었으니 챕터 임베딩은 다음 회상 때 다시 잡는다
+            fixed++;
+        }
+    };
+    for (const c of (store.chunkSummaries || [])) fixText(c, 'text', 2000);
+    for (const a of (store.arcSummaries || [])) {
+        fixText(a, 'text', 2400);
+        for (const sc of (Array.isArray(a.sourceChunks) ? a.sourceChunks : [])) fixText(sc, 'text', 2000);
+    }
+    // 턴 기록은 구조가 없는 산문이라 태그 블록만 걷어낸다
+    for (const t of (store.turns || [])) {
+        const before = String(t.summary || '');
+        if (!before || !before.includes('<')) continue;
+        const after = cleanStr(stripTagBlocks(before), MANUAL_TEXT_MAX);
+        if (after && after !== before) { t.summary = after; fixed++; }
+    }
+    return fixed;
+}
+
 function reconcileWithChat() {
     const store = getStore();
     let changed = false;
@@ -3650,6 +3768,11 @@ function reconcileWithChat() {
     if (renumberTurns(store)) changed = true;
     // 별칭이 있는데도 다른 표기로 남아 있는 상태·기억을 정식 이름으로 접는다.
     // 접을 게 없으면 순회만 하고 끝난다 — 바뀌는 게 있을 때만 벡터를 다시 잡는다.
+    const repaired = repairSummaryRecords(store);
+    if (repaired) {
+        console.info(`[${MODULE_NAME}] 요약 복구: 이야기 이어쓰기·확장 태그가 섞인 기록 ${repaired}건 정리`);
+        changed = true;
+    }
     const foldedOnLoad = foldEntityAliases(store);
     if (foldedOnLoad.states || foldedOnLoad.memories) {
         console.info(`[${MODULE_NAME}] 이름 접기: 상태 ${foldedOnLoad.states}건 · 기억 ${foldedOnLoad.memories}건을 정식 이름으로 통합`);
@@ -5301,7 +5424,7 @@ function bindUI() {
             const refBlock = await buildReferenceBlock();
             const userPrompt = [refBlock, previousSummariesForContext(store), `Turn digests to weave:\n${parts.join('\n')}`]
                 .filter(Boolean).join('\n');
-            const text = cleanMultiline(await callAuxLLM(`${settings.prompts.chunk}\n\n${languageDirective()}`, userPrompt, { maxTokens: auxTokens(4000) }), 2000);
+            const text = cleanMultiline(sanitizeRecordOutput(await callAuxLLM(`${settings.prompts.chunk}\n\n${languageDirective()}`, userPrompt, { maxTokens: auxTokens(4000) }), 2000);
             if (!text) throw new Error('빈 응답');
             s.text = text;
             s.avec = null;
