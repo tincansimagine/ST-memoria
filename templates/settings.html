@@ -1,7 +1,7 @@
 <div id="memoria_settings" class="memoria">
     <div class="inline-drawer">
         <div class="inline-drawer-toggle inline-drawer-header">
-            <b><i class="fa-solid fa-book-bookmark"></i> Memoria — 장기기억 서고 <span class="memoria__version">v1.6.3</span></b>
+            <b><i class="fa-solid fa-book-bookmark"></i> Memoria — 장기기억 서고 <span class="memoria__version">v1.7.0</span></b>
             <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
         </div>
         <div class="inline-drawer-content">
@@ -50,12 +50,15 @@
                     <div class="memoria__section-head">
                         <div>
                             <h4>주입 미리보기</h4>
-                            <p>다음 응답 생성 시 프롬프트에 들어갈 장기기억입니다. 직접 수정한 뒤 ✏ 버튼을 누르면 <b>다음 응답 1회</b>에 한해 수정본이 주입됩니다.</p>
+                            <p>다음 응답 생성 시 프롬프트에 들어갈 장기기억입니다. 직접 고친 뒤 <b>✏</b>를 누르면 다음 응답 1회에, <b>📌</b>를 누르면 해제할 때까지 계속 주입됩니다. <b>✨</b>는 사서가 기억·세계·요약을 보고 장부를 새로 써서 초안으로 보여줍니다.</p>
                         </div>
                         <span id="memoria_packet_tokens" class="memoria__token-badge"></span>
-                        <i class="fa-solid fa-pen-to-square memoria__icon-btn" id="memoria_packet_apply" title="수정한 내용을 다음 응답 1회에 주입 (장부는 매 턴 서고에서 재생성되므로 영구 수정은 기억·상태·서약 탭에서)"></i>
+                        <i class="fa-solid fa-wand-magic-sparkles memoria__icon-btn" id="memoria_packet_rewrite" title="사서가 기억·세계·요약을 보고 장부를 새로 씁니다 (초안 — 적용 전 확인)"></i>
+                        <i class="fa-solid fa-thumbtack memoria__icon-btn" id="memoria_packet_pin" title="지금 미리보기 내용을 이 채팅에 계속 고정합니다"></i>
+                        <i class="fa-solid fa-pen-to-square memoria__icon-btn" id="memoria_packet_apply" title="수정한 내용을 다음 응답 1회에 주입"></i>
                         <i class="fa-solid fa-copy memoria__icon-btn" id="memoria_packet_copy" title="주입 내용 전체 복사"></i>
                     </div>
+                    <div id="memoria_packet_pin_banner" class="memoria__hint" style="display:none;"></div>
                     <textarea id="memoria_packet_preview" class="memoria__preview" rows="12"></textarea>
                 </div>
                 <div class="memoria__section">
@@ -220,8 +223,13 @@
                                 <i class="fa-solid fa-wand-magic-sparkles"></i>
                                 <span>지금 요약</span>
                             </div>
+                            <div class="menu_button" id="memoria_summary_rebuild" title="요약·연대기를 모두 지우고 턴 기록에서 처음부터 다시 만듭니다. 중단·실패하면 원래대로 되돌립니다.">
+                                <i class="fa-solid fa-rotate"></i>
+                                <span>전체 다시 만들기</span>
+                            </div>
                         </div>
                     </div>
+                    <span id="memoria_summary_rebuild_progress" class="memoria__progress"></span>
                     <div id="memoria_summary_list" class="memoria__summary-list"></div>
                 </div>
                 <div class="memoria__section">
@@ -294,10 +302,16 @@
                             <input type="number" id="memoria_summary_context" min="-1" max="50" step="1">
                         </div>
                         <div class="memoria__field">
-                            <label for="memoria_preserve_recent" title="자동 숨김 시 항상 표시로 남길 최근 메시지 수">최근 메시지 보존 수</label>
-                            <input type="number" id="memoria_preserve_recent" min="1" max="50" step="1">
+                            <label for="memoria_preserve_recent" title="자동 숨김을 켰을 때 숨기지 않고 원문 그대로 남길 최근 메시지 수">최근 메시지 보존 수</label>
+                            <input type="number" id="memoria_preserve_recent" min="1" max="500" step="1">
+                        </div>
+                        <div class="memoria__field">
+                            <label for="memoria_record_delay" title="응답 뒤에 내가 N번 더 답을 보낸 뒤에야 기록합니다 (0 = 바로)">기록 지연 (답장 수)</label>
+                            <input type="number" id="memoria_record_delay" min="0" max="20" step="1">
                         </div>
                     </div>
+                    <p class="memoria__hint"><b>최근 메시지 보존 수</b>는 "자동 숨김"을 켰을 때만 쓰입니다. 요약은 이 값과 상관없이 요약 주기마다 만들어지고, 옛 메시지는 숨겨져 요약이 대신하며, 최근 N개 메시지는 원문 그대로 남습니다. 이때 <b>원문으로 남아 있는 구간만 다루는 요약은 주입하지 않아</b> 같은 내용이 두 번 들어가지 않습니다.<br>
+                    <b>기록 지연</b>이 0이면 응답이 오자마자 기록합니다. 1 이상이면 그 응답 뒤에 <b>내가 N번 더 답을 보낸 뒤에야</b> 기록해서, 리롤·분석 QR·지운 메시지에 사서 호출을 쓰지 않습니다. 새 채팅의 <b>그리팅</b>은 이 값과 상관없이 첫 답을 보낸 뒤에 기록합니다.</p>
                 </div>
                 <div class="memoria__section">
                     <div class="memoria__section-head">
@@ -489,8 +503,8 @@
                             </select>
                         </div>
                         <div class="memoria__field">
-                            <label for="memoria_depth" title="채팅 내 주입 깊이 (0 = 가장 마지막) — 주입 위치가 '채팅 내'일 때만 적용">주입 깊이</label>
-                            <input type="number" id="memoria_depth" min="0" max="20" step="1">
+                            <label for="memoria_depth" title="채팅 내 주입 깊이 (0 = 마지막 메시지 바로 앞). 채팅 길이보다 큰 값이면 채팅 기록의 맨 앞에 들어갑니다.">주입 깊이</label>
+                            <input type="number" id="memoria_depth" min="0" max="10000" step="1">
                         </div>
                         <div class="memoria__field">
                             <label for="memoria_topk" title="한 턴에 회상할 기억 수">회상 개수</label>
@@ -513,6 +527,7 @@
                             <input type="number" id="memoria_arc_consolidate_every" min="0" max="500" step="10">
                         </div>
                     </div>
+                    <p class="memoria__hint"><b>주입 깊이</b>는 주입 위치가 "채팅 내"일 때만 쓰입니다. 0이면 마지막 메시지 바로 앞, 숫자가 클수록 위쪽입니다. <b>채팅 전체보다 앞</b>에 두고 싶으면 9999처럼 채팅 길이보다 큰 값을 넣으세요 — 가장 오래된 메시지 위에 들어갑니다 (최대 10000). 캐릭터 카드·시스템 프롬프트보다도 앞에 두려면 주입 위치를 "메인 프롬프트 앞"으로 바꾸세요.</p>
                 </div>
                 <div class="memoria__section">
                     <div class="memoria__section-head">
@@ -521,6 +536,7 @@
                             <p>각 역할의 시스템 프롬프트를 수정할 수 있습니다.</p>
                         </div>
                     </div>
+                    <p id="memoria_prompt_outdated" class="memoria__hint" style="display:none;"></p>
                     <details class="memoria__details">
                         <summary>사서 (턴 → 구조화 기억)</summary>
                         <textarea id="memoria_prompt_archivist" rows="10"></textarea>
