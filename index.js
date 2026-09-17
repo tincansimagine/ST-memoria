@@ -103,6 +103,7 @@ SHELVING RULES
 - Truth has a chain of custody. Only what the scene directly shows goes down as fact. What a character says, suspects, overhears, or is told secondhand is THEIR knowledge — shelve it as status with "claim":"belief" and name the holder in "owner". Rumor and suspicion never graduate to fact on their own; they graduate when the story confirms them on screen. If a belief later proves false, the fact and the mistaken belief coexist on different lines — never average them into one.
 - A memory about hearsay records the telling, not the content as truth: "X told Y that the king is dying" — not "the king is dying".
 - The player is off-limits. File what their character did and said inside the fiction — never what the real person feels, wants, or consents to.
+- The player's message is not always play. It may be out-of-character direction to the narrator: an OOC note, a bracketed or parenthesized instruction, a line such as "전개:" or "지시:", or a plan for what should happen next. Direction is intent, not event. Shelve only what the story's reply actually carried out, and never file a directed outcome the reply did not show.
 - Memories compete for attention and can fall out of view — never let something the story must still act on live there alone. A relationship shift that should hold going forward belongs in status too (the relevant entity, slot "relationship"), not just a memories[kind=relationship] entry. A promise the story must keep belongs in pledges (keep_unresolved) too, not just memories[kind=promise]. A secret that must not leak belongs in pledges (keep_secret) too, not just memories[kind=secret]. Use those memories kinds freely for color and texture — just never as the ONLY record of something with a job still to do.
 - "quote" is ONE short verbatim line of SPOKEN dialogue (about 15 words max), copied exactly from the user or assistant text in its original language. Never narration or description — prose that merely restates the summary is dead weight; the shelf wants the words a voice actually said. Never a whole passage. Copy, never compose. Use null when nothing was worth hearing twice — most memories need no quote.
 - visibility marks who may know a memory: "public" (open knowledge), "private" (only the holder — inner thoughts, personal facts), "secret" (deliberately hidden). "owner" names the holder.
@@ -217,6 +218,15 @@ OPEN: threads still unresolved at the end of this span. Short clauses separated 
 Never invent or reinterpret events. Drop SHIFTS/OPEN entries that later records show settled or superseded. Compression must not upgrade certainty: suspicions, rumors, and unconfirmed claims stay marked as such, and open threads stay open. Anchor the era in story time and place; the [t3–t8]-style tags on the input are filing metadata and must never appear in your output. No commentary — output the record only. Stop after the last line of the record: never continue the scene, and never emit tags, image prompts, or any other block that instructions elsewhere in this context ask for.`;
 
 /* 요약 출력 언어 지시 (프롬프트 뒤에 자동 첨부) */
+// 역대 기본 프롬프트의 해시 (git 이력 33개 버전에서 추출). 저장된 프롬프트가 이 중 하나면
+// 사용자가 손대지 않은 기본값이다 - 프롬프트 개정 때는 이런 것만 새 기본값으로 바꾼다.
+const PAST_DEFAULT_PROMPT_HASHES = {
+    archivist: [639936761966242, 803880390645810, 2848760173954906, 3173238436359310, 4236944735344932, 4257825500303407, 5233514286929263, 5241724082412907, 7856124521163849, 8652097948966840, 8865029287759619],
+    supervisor: [3818969157655125, 8290944938030339],
+    chunk: [1274023884496747, 4174663568090772, 7284549229336977, 7579232396777644, 8741923026190275],
+    arc: [4328717764564628, 4395701141853736, 4412824703878145, 5819810183863630, 6451680491176218],
+};
+
 const LANG_DIRECTIVES = {
     auto: 'LANGUAGE: Write the output in the same language as the chat.',
     ko: 'LANGUAGE (MANDATORY): Write ALL output in Korean (한국어). Keep quoted dialogue in its original language.',
@@ -232,6 +242,7 @@ const LANG_DIRECTIVES = {
 const DEFAULT_SETTINGS = Object.freeze({
     enabled: true,
     autoRecord: true,
+    recordDelay: 0,           // 기록 지연 — 응답 뒤에 내가 N번 더 답을 보낸 뒤에야 기록 (0 = 바로). 그리팅은 항상 첫 답 뒤
     profileId: '',            // '' = 현재 연결된 API로 조용히 생성
     injectDepth: 1,
     injectPosition: 'chat',   // 'chat' = 채팅 내 깊이, 'before' = 메인 프롬프트 앞, 'after' = 메인 프롬프트 뒤
@@ -271,7 +282,7 @@ const DEFAULT_SETTINGS = Object.freeze({
     consolidateEvery: 30,     // N턴마다 서고 정리(중복 병합·중요도 재조정). 0 = 끔
     arcConsolidateEvery: 100, // N턴마다 아크끼리 재검토(진짜 같은 사건이면 합침). 0 = 끔
     storyClock: true,         // 서사 시계 — 이야기 속 경과 시간을 추적해 기억 노화에 반영
-    promptRev: 21,
+    promptRev: 22,
     settingsRev: 3,
     fossil: { settling: 12, fossilized: 40, deep: 120 },
     prompts: {
@@ -302,9 +313,22 @@ function getSettings() {
     for (const [k, v] of Object.entries(DEFAULT_SETTINGS.embedApi)) {
         if (typeof s.embedApi[k] === 'undefined') s.embedApi[k] = v;
     }
-    // 프롬프트 개정: 구버전 기본 프롬프트를 새 기본값으로 갱신
+    // 프롬프트 개정: 손대지 않은 기본 프롬프트만 새 기본값으로 바꾼다.
+    // 예전에는 개정 때마다 전부 덮어써서, 사서 프롬프트를 직접 고친 사람은 업데이트마다 수정본을 잃었다.
+    // 직접 고친 프롬프트는 그대로 두고 "새 기본값이 나왔다"는 표시만 남긴다 (프롬프트 탭의 [기본값]으로 받을 수 있다).
     if ((s.promptRev || 1) < DEFAULT_SETTINGS.promptRev) {
-        s.prompts = structuredClone(DEFAULT_SETTINGS.prompts);
+        if (!s.promptOutdated || typeof s.promptOutdated !== 'object') s.promptOutdated = {};
+        for (const [k, def] of Object.entries(DEFAULT_SETTINGS.prompts)) {
+            const cur = String(s.prompts[k] ?? '');
+            if (cur === def) { delete s.promptOutdated[k]; continue; }
+            const untouched = !cur.trim() || (PAST_DEFAULT_PROMPT_HASHES[k] || []).includes(getStringHash(cur));
+            if (untouched) {
+                s.prompts[k] = def;
+                delete s.promptOutdated[k];
+            } else {
+                s.promptOutdated[k] = DEFAULT_SETTINGS.promptRev;
+            }
+        }
         s.promptRev = DEFAULT_SETTINGS.promptRev;
     }
     // 설정 개정: 지나치게 낮았던 구버전 기본값 상향
@@ -1559,8 +1583,10 @@ function sanitizeRecordOutput(raw) {
     }
 
     const out = kept.join('\n').trim();
-    // 안전장치: 잘라낸 결과가 사실상 비면 원본을 쓴다 (판정이 틀렸을 때 요약을 날리지 않게)
-    return out.length >= 20 ? out : cleaned.trim();
+    // 안전장치: 잘라낸 결과에 라벨 말고 내용이 없으면 원본을 쓴다 (판정이 틀렸을 때 요약을 날리지 않게).
+    // 글자 수로 재면 "PLOT: - 둘이 싸웠다." 같은 짧은 기록이 걸려 이어쓴 이야기가 그대로 남는다
+    const body = out.replace(/^[ \t]*(?:PLOT|SHIFTS|OPEN)[ \t]*[:\uFF1A][ \t]*$/gim, '').replace(/\s/g, '');
+    return body.length >= 2 ? out : cleaned.trim();
 }
 
 /**
@@ -2468,6 +2494,65 @@ function failedTurnMesIds() {
     return store.turns.filter(t => t.failed && chat[t.mesId] && !chat[t.mesId].is_user).map(t => t.mesId);
 }
 
+/* ============================================================
+ * 기록 시점 — 응답이 "확정"된 뒤에 기록한다
+ *
+ * 응답이 오자마자 기록하면 리롤할 응답, 분석 QR로 잠깐 띄웠다 지울 응답, 새 채팅을
+ * 열 때마다 뜨는 그리팅에도 사서를 부르게 된다. 기록 지연(recordDelay)을 N으로 두면
+ * 그 응답 뒤에 사용자가 N번 더 답을 보낸 뒤에야 기록한다. 그리팅은 지연이 0이어도
+ * 첫 답을 기다린다 — 그리팅은 어차피 화면에 있고, 아직 회상할 것도 없다.
+ * ============================================================ */
+
+/** 첫 사용자 메시지의 위치 (없으면 -1). 그보다 앞의 캐릭터 메시지는 그리팅이다. */
+function firstUserMesIndex() {
+    for (let i = 0; i < chat.length; i++) if (chat[i]?.is_user) return i;
+    return -1;
+}
+
+function recordDelayTurns() {
+    return Math.max(0, Math.min(20, Math.round(Number(getSettings().recordDelay) || 0)));
+}
+
+/** 이 응답을 기록하려면 그 뒤에 사용자 답이 몇 번 와야 하는가 */
+function requiredRepliesFor(mesId) {
+    const fu = firstUserMesIndex();
+    const greeting = fu < 0 || mesId < fu;
+    return greeting ? Math.max(1, recordDelayTurns()) : recordDelayTurns();
+}
+
+function isSettledForRecord(mesId) {
+    let replies = 0;
+    for (let i = mesId + 1; i < chat.length; i++) if (chat[i]?.is_user) replies++;
+    return replies >= requiredRepliesFor(mesId);
+}
+
+/**
+ * 막 확정된 응답을 기록한다. 채팅 끝에서부터 거슬러 올라가되, 기록 조건을 갓 채운
+ * 구간(필요 답장 수 + 여유 3)까지만 본다 — 긴 채팅에서 매번 전부 훑지 않게.
+ * 그보다 오래된 미기록 턴은 도구 탭 색인이 맡는다.
+ */
+function commitSettledTurns() {
+    const settings = getSettings();
+    if (!settings.enabled || !settings.autoRecord || !getCurrentChatId()) return;
+    const store = getStore();
+    const horizon = Math.max(1, recordDelayTurns()) + 3;
+    let replies = 0;
+    for (let i = chat.length - 1; i >= 0; i--) {
+        const m = chat[i];
+        if (!m) continue;
+        if (m.is_user) {
+            if (++replies > horizon) break;
+            continue;
+        }
+        if (m.is_system) continue;
+        const need = requiredRepliesFor(i);
+        if (need === 0 || replies < need) continue; // 0이면 응답이 도착할 때 이미 기록됐다
+        const t = store.turns.find(x => x.mesId === i);
+        if (t && t.mesHash === mesHashOf(m)) continue; // 기록됨(실패한 턴은 색인이 재시도)
+        queueCommit(i).then(() => updateInjection());
+    }
+}
+
 function queueCommit(mesId, opts) {
     pendingCommits++;
     commitQueue = commitQueue
@@ -2494,30 +2579,50 @@ function previousSummariesForContext(store) {
     return `Previous summaries (for continuity of names, time, place, relationships — do not restate their events):\n${picked.map(s => `[${s.tag}] ${s.text}`).join('\n')}\n`;
 }
 
-async function maybeSummarizeChunk(store) {
+/** 요약이 이미 다룬 마지막 턴 (청크·연대기·건너뛴 창 커서 중 가장 뒤) */
+function summaryCoveredTurn(store) {
+    return Math.max(
+        store.summaryCursor || 0,
+        store.chunkSummaries.reduce((acc, c) => Math.max(acc, c.toTurn), 0),
+        store.arcSummaries.filter(a => !a.carried).reduce((acc, a) => Math.max(acc, a.toTurn), 0),
+    );
+}
+
+/**
+ * 밀린 턴을 요약 주기 단위로 청크 요약한다. 반환: 새로 만든 청크 수.
+ * flushAll    — 주기를 다 못 채운 마지막 자투리까지 요약한다 ("지금 요약"·전체 다시 만들기)
+ * onProgress  — (done, total) 진행 알림
+ * shouldStop  — true를 돌려주면 다음 창부터 멈춘다
+ * strict      — 요약 LLM이 실패하면 다이제스트를 이어 붙여 넣는 대신 오류를 던진다
+ *               (전체 다시 만들기에서 멀쩡한 요약을 날것의 이어붙임으로 바꾸지 않게)
+ */
+async function maybeSummarizeChunk(store, { flushAll = false, onProgress = null, shouldStop = null, strict = false } = {}) {
     const settings = getSettings();
     const n = Math.max(3, settings.chunkTurns);
     // 미요약 범위가 크게 밀렸어도(일괄 색인·기록 실패 구간) 한 덩이(t1–tNNN)로
     // 삼키지 않고 n턴 창 단위로 나눠 요약한다. summaryCursor는 다이제스트가 없어
     // 요약을 건너뛴 창도 "지나갔다"고 기억해 통짜 재시도를 막는다.
-    let lastCovered = Math.max(
-        store.summaryCursor || 0,
-        store.chunkSummaries.reduce((acc, c) => Math.max(acc, c.toTurn), 0),
-        store.arcSummaries.filter(a => !a.carried).reduce((acc, a) => Math.max(acc, a.toTurn), 0),
-    );
-    let pushed = false;
+    let lastCovered = summaryCoveredTurn(store);
+    const pending = store.turnCounter - lastCovered;
+    const total = pending <= 0 ? 0 : (flushAll ? Math.ceil(pending / n) : Math.floor(pending / n));
+    let made = 0;
+    let done = 0;
 
-    while (store.turnCounter - lastCovered >= n) {
+    while (flushAll ? store.turnCounter > lastCovered : store.turnCounter - lastCovered >= n) {
+        if (shouldStop?.()) break;
         const fromTurn = lastCovered + 1;
         const toTurn = Math.min(lastCovered + n, store.turnCounter);
         lastCovered = toTurn;
-        store.summaryCursor = toTurn;
 
         const parts = store.turns
             .filter(t => t.turnIndex >= fromTurn && t.turnIndex <= toTurn && t.summary)
             .sort((a, b) => a.turnIndex - b.turnIndex)
             .map(t => `[t${t.turnIndex}] ${t.summary}`);
-        if (!parts.length) continue;
+        if (!parts.length) {
+            store.summaryCursor = toTurn;
+            onProgress?.(++done, total);
+            continue;
+        }
 
         let text = '';
         try {
@@ -2526,21 +2631,88 @@ async function maybeSummarizeChunk(store) {
                 .filter(Boolean).join('\n');
             text = cleanMultiline(sanitizeRecordOutput(await callAuxLLM(`${settings.prompts.chunk}\n\n${languageDirective()}`, userPrompt, { maxTokens: auxTokens(4000) })), 2000);
         } catch (e) {
+            if (strict) throw e;
             console.debug(`[${MODULE_NAME}] 청크 요약 LLM 실패, 연결 요약 사용`, e);
         }
-        if (!text) text = cleanStr(parts.join(' / '), 2000);
+        if (!text) {
+            if (strict) throw new Error(`t${fromTurn}–t${toTurn} 요약 응답이 비어 있습니다`);
+            text = cleanStr(parts.join(' / '), 2000);
+        }
 
         store.chunkSummaries.push({ id: uuidv4(), fromTurn, toTurn, text });
-        pushed = true;
+        store.summaryCursor = toTurn;
+        made++;
+        onProgress?.(++done, total);
     }
 
-    // 안전 상한: 서고 정리 주기(consolidateEvery)가 길거나 꺼져 있어도, 청크가 이 개수를
-    // 넘으면 다음 정리를 기다리지 않고 바로 재그룹핑한다 — 무한정 안 쌓이게 하는 안전장치
-    if (store.chunkSummaries.length > Math.max(3, settings.arcMergeAt)) {
+    // 안전 상한: 서고 정리 주기(consolidateEvery)가 길거나 꺼져 있어도 청크가 무한정 쌓이지 않게.
+    // 새 청크가 생겼을 때만 본다 — 사서가 "전부 따로 둔다"고 답하면 개수가 줄지 않아,
+    // 예전에는 이후 매 턴마다 재그룹핑 호출이 반복됐다. 그래서 재그룹핑으로도 상한 아래로
+    // 내려가지 않으면 가장 오래된 네 개를 연대기로 접는 옛 방식으로 마무리한다.
+    const cap = Math.max(3, settings.arcMergeAt);
+    if (made && store.chunkSummaries.length > cap) {
         try { await regroupChunksIntoArcs(store); } catch (e) { console.warn(`[${MODULE_NAME}] 안전 상한 재그룹핑 실패`, e); }
+        while (store.chunkSummaries.length > cap && !shouldStop?.()) {
+            const oldest = store.chunkSummaries.slice(0, 4);
+            store.chunkSummaries = store.chunkSummaries.slice(4);
+            await pushArcFromChunks(store, oldest);
+        }
     }
 
-    if (pushed) await applyAutoHide();
+    if (made) await applyAutoHide();
+    return made;
+}
+
+/* 전체 다시 만들기 진행 상태 — 중단 버튼이 이 값을 켠다 */
+let summaryRebuildStop = false;
+let summaryRebuildRunning = false;
+
+/**
+ * 이 채팅의 요약·연대기를 턴 기록에서 처음부터 다시 만든다 (인계받은 연대기는 그대로 둔다).
+ * 중단하거나 실패하면 원래 요약을 그대로 둔다 — 반쯤 다시 만든 상태로 남기지 않는다.
+ * 기록 큐에 줄을 세워, 도중에 새 턴 기록이 요약을 끼워 넣지 못하게 한다.
+ * 반환: 만든 청크 수, 중단되면 null. 실패하면 오류를 던진다.
+ */
+async function rebuildAllSummaries(onProgress) {
+    if (summaryRebuildRunning) throw new Error('이미 다시 만드는 중입니다');
+    summaryRebuildRunning = true;
+    summaryRebuildStop = false;
+    let outcome;
+    const job = async () => {
+        const store = getStore();
+        const chatId = getCurrentChatId();
+        // 초안에서 다 만든 뒤 마지막에 한 번에 바꿔 끼운다 — 도중에 채팅을 옮기면 실리태번이
+        // 그 순간의 메타데이터를 저장하는데, 원본을 비워 둔 채였다면 반쯤 만든 요약이 저장된다
+        const draft = Object.assign({}, store, {
+            chunkSummaries: [],
+            arcSummaries: store.arcSummaries.filter(a => a.carried),
+            summaryCursor: 0,
+            arcReviewCursor: 0,
+        });
+        const stop = () => summaryRebuildStop || getCurrentChatId() !== chatId;
+        try {
+            const made = await maybeSummarizeChunk(draft, { flushAll: true, strict: true, onProgress, shouldStop: stop });
+            if (stop()) { outcome = { made: null }; return; }
+            store.chunkSummaries = draft.chunkSummaries;
+            store.arcSummaries = draft.arcSummaries;
+            store.summaryCursor = draft.summaryCursor;
+            store.arcReviewCursor = draft.arcReviewCursor;
+            persistStore();
+            await applyAutoHide();
+            outcome = { made };
+        } catch (e) {
+            outcome = { error: e };
+        }
+    };
+    pendingCommits++;
+    commitQueue = commitQueue.then(job).finally(() => { pendingCommits = Math.max(0, pendingCommits - 1); });
+    try {
+        await commitQueue;
+    } finally {
+        summaryRebuildRunning = false;
+    }
+    if (outcome?.error) throw outcome.error;
+    return outcome?.made ?? null;
 }
 
 /** 청크 여러 개를 하나의 아크 요약으로 압축해 밀어넣는 공통 로직 */
@@ -3425,9 +3597,19 @@ async function buildPacketSections(query, supervisorPlan) {
     // 시간순: 인계(이전 채팅)가 항상 맨 앞, 그 뒤로는 이 채팅의 아크·청크를 fromTurn 기준으로 섞어 배치
     // (아크를 통째로 먼저 나열하면, 나중에 독립으로 남은 옛 청크가 더 최근 아크보다 뒤에 나와
     // 시간순이 뒤집히는 문제가 생긴다 — 청크·아크 구분보다 실제 시점이 우선이다)
+    // 자동 숨김을 쓰면 최근 메시지(보존 구간)는 원문 그대로 컨텍스트에 있다 — 그 구간만 다루는
+    // 요약은 원문과 겹치므로 싣지 않는다. 숨겨진 옛 구간의 요약만 원문을 대신한다.
+    let preservedFromTurn = Infinity;
+    if (settings.autoHide) {
+        const keepFrom = chat.length - Math.max(1, settings.preserveRecent);
+        for (const t of store.turns) {
+            if (t.mesId >= keepFrom && t.turnIndex < preservedFromTurn) preservedFromTurn = t.turnIndex;
+        }
+    }
+    const notOnScreen = (x) => x.fromTurn < preservedFromTurn;
     const localSummaries = [
-        ...store.arcSummaries.filter(s => !s.carried).map(s => ({ ...s, level: 'arc' })),
-        ...store.chunkSummaries.slice(-3).map(s => ({ ...s, level: 'chunk' })),
+        ...store.arcSummaries.filter(s => !s.carried && notOnScreen(s)).map(s => ({ ...s, level: 'arc' })),
+        ...store.chunkSummaries.filter(notOnScreen).slice(-3).map(s => ({ ...s, level: 'chunk' })),
     ].sort((a, b) => a.fromTurn - b.fromTurn);
     const summaries = [
         ...store.arcSummaries.filter(s => s.carried).map(s => ({ ...s, level: 'arc' })),
@@ -3645,6 +3827,55 @@ function renderPacket(parts, { withExcerpts = true, excerptLimit = Infinity, rec
     return lines.join('\n');
 }
 
+const PACKET_REWRITE_PROMPT = `You are Memoria's archivist. Below is the long-term archive of an ongoing roleplay, as it is normally injected into the story model's prompt. Rewrite it into ONE clean, well-organized briefing that the story model will read before its next reply.
+
+- Use ONLY what the archive says. Never invent, never guess, never settle anything the archive leaves open.
+- Merge duplicates. When entries disagree, the newer one wins — state the current situation plainly.
+- Keep these sections in this order, as "## " headings, and drop any that would be empty: Scene Now, Pledges, Canon, Cast, Status Board, Key Past Moments, Hidden Knowledge, Story So Far.
+- Pledges, secrets, and who-knows-what boundaries must survive intact — never drop or soften them. Anything under Hidden Knowledge stays there, marked as subtext only.
+- Story So Far is a chronological bullet timeline, one event per bullet, earliest first.
+- Keep quoted dialogue verbatim and names exactly as written.
+- Be compact: clearly shorter than the input, yet lose nothing a future scene would need.
+- Output the briefing only. No preamble, no commentary, no code fences, no tags.`;
+
+/**
+ * 사서가 지금의 서고(회상·세계·요약)를 보고 장부를 새로 쓴다 — 초안을 돌려줄 뿐 주입하지 않는다.
+ * 장부 맨 앞의 사용 규칙(출처 우선순위·지식 경계)은 모델에게 맡기지 않고 그대로 다시 붙인다.
+ */
+async function rewritePacketWithLibrarian() {
+    if (!getCurrentChatId()) throw new Error('열린 채팅이 없습니다');
+    let query = '';
+    for (let i = chat.length - 1; i >= 0; i--) {
+        if (chat[i]?.is_user && chat[i].mes) { query = chat[i].mes; break; }
+    }
+    const parts = await buildPacketSections(visibleProse(query), null);
+    // 새로 쓸 때는 연대기·청크를 빠짐없이 보여준다 (평소 주입은 최근 청크 3개까지만)
+    const store = getStore();
+    parts.summaries = [
+        ...store.arcSummaries.filter(x => x.carried).map(x => ({ ...x, level: 'arc' })),
+        ...[...store.arcSummaries.filter(x => !x.carried).map(x => ({ ...x, level: 'arc' })),
+            ...store.chunkSummaries.map(x => ({ ...x, level: 'chunk' }))].sort((a, b) => a.fromTurn - b.fromTurn),
+    ];
+    const full = renderPacket(parts, {});
+    const lines = full.split('\n').filter(l => l !== PACKET_HEADER && l !== PACKET_FOOTER);
+    const firstSection = lines.findIndex(l => l.startsWith('## '));
+    if (firstSection < 0) throw new Error('새로 쓸 기록이 아직 없습니다');
+    const rules = lines.slice(0, firstSection);
+    const body = lines.slice(firstSection).filter(l => !l.startsWith('(End of archive.')).join('\n');
+
+    const reply = await callAuxLLM(`${PACKET_REWRITE_PROMPT}\n\n${languageDirective()}`, `Archive:\n${body}`, { maxTokens: auxTokens(6000) });
+    const rewritten = String(reply || '')
+        .replace(/<(think|thinking|thought|reasoning|reflection)>[\s\S]*?<\/\1>/gi, '')
+        .replace(/^```[a-z]*\s*/i, '').replace(/\s*```\s*$/, '')
+        .replace(/<\/?memoria_ledger>/gi, '')
+        .trim();
+    if (!rewritten || !/^##\s/m.test(rewritten)) throw new Error('사서 응답이 장부 형식이 아닙니다');
+    return [PACKET_HEADER, ...rules, rewritten, PACKET_FOOTER].join('\n');
+}
+
+// 사서가 새로 쓴 장부 초안 — 사용자가 ✏(1회)나 📌(고정)로 적용하거나 🔄로 버리기 전까지 미리보기에 둔다
+let packetDraft = null;
+
 let lastPacketText = '';
 // 주입 미리보기에서 사용자가 수정한 1회용 장부 — 다음 응답 생성에 그대로 주입 후 폐기.
 // 장부는 매 턴 서고에서 재생성되므로 영구 수정은 기억·상태·서약 편집으로만 가능하다.
@@ -3745,6 +3976,18 @@ async function updateInjection({ runSupervisorPass = false } = {}) {
         lastPacketText = packetOverrideOnce;
         setExtensionPrompt(INJECT_KEY, packetOverrideOnce, injectionType(), settings.injectDepth, false, extension_prompt_roles.SYSTEM);
         lastPacketTokens = packetOverrideOnce ? await getTokenCountAsync(packetOverrideOnce) : 0;
+        lastBuildKey = '';
+        refreshPacketPreview();
+        return;
+    }
+
+    // 영구 고정: 사용자가 고정한 장부를 해제할 때까지 매 턴 그대로 주입한다.
+    // 기록은 계속 쌓이지만 주입에는 반영되지 않는다 — 미리보기에 그렇게 표시한다.
+    const pin = getStore().packetPin;
+    if (pin?.text) {
+        lastPacketText = pin.text;
+        setExtensionPrompt(INJECT_KEY, pin.text, injectionType(), settings.injectDepth, false, extension_prompt_roles.SYSTEM);
+        lastPacketTokens = await getTokenCountAsync(pin.text);
         lastBuildKey = '';
         refreshPacketPreview();
         return;
@@ -4797,7 +5040,28 @@ function refreshPacketPreview() {
     const el = $('#memoria_packet_preview');
     if (!el.length) return;
     if (el.is(':focus')) return; // 사용자가 수정 중인 내용을 자동 갱신이 덮어쓰지 않게
+    const pin = getCurrentChatId() ? getStore().packetPin : null;
+    const $banner = $('#memoria_packet_pin_banner');
+    $('#memoria_packet_pin')
+        .toggleClass('fa-thumbtack', !pin?.text)
+        .toggleClass('fa-thumbtack-slash', !!pin?.text)
+        .attr('title', pin?.text ? '고정 해제 — 자동 장부로 돌아갑니다' : '지금 미리보기 내용을 이 채팅에 계속 고정합니다');
+    if (packetDraft != null) {
+        el.val(packetDraft);
+        $banner.show().html('✨ <b>사서가 새로 쓴 초안</b>입니다 — 아직 주입되지 않았어요. 고칠 곳이 있으면 고친 뒤 <b>✏</b>(다음 응답 1회) 또는 <b>📌</b>(해제할 때까지 계속)로 적용하세요. <span class="memoria-packet-discard" style="text-decoration:underline; cursor:pointer;">초안 버리기</span>');
+        $('#memoria_packet_tokens').text('초안');
+        return;
+    }
+    if (pin?.text) {
+        $banner.show().html(`📌 <b>고정한 장부</b>를 주입하고 있습니다 (t${pin.turn || 0} 시점). 그 뒤로 쌓인 기억·상태·요약은 주입에 반영되지 않아요 — 기록은 계속 쌓입니다. <span class="memoria-packet-unpin" style="text-decoration:underline; cursor:pointer;">고정 해제</span>`);
+    } else {
+        $banner.hide().empty();
+    }
     el.val(lastPacketText || '(주입할 내용이 없습니다 — 기억이 쌓이면 자동 생성됩니다)');
+    if (pin?.text && packetOverrideOnce == null) {
+        $('#memoria_packet_tokens').text(`📌 고정됨 · ≈ ${lastPacketTokens} 토큰`);
+        return;
+    }
     if (packetOverrideOnce != null) {
         $('#memoria_packet_tokens').text(`✏ 수정본 대기 중 — 다음 응답 1회에 주입됩니다 (≈ ${lastPacketTokens} 토큰)`);
         return;
@@ -5142,6 +5406,7 @@ function renderSettingsPanel() {
     $('#memoria_summary_context').val(s.summaryContextCount);
     $('#memoria_preserve_recent').val(s.preserveRecent);
     $('#memoria_depth').val(s.injectDepth);
+    $('#memoria_record_delay').val(s.recordDelay ?? 0);
     $('#memoria_inject_position').val(s.injectPosition || 'chat');
     $('#memoria_budget').val(s.tokenBudget);
     $('#memoria_topk').val(s.topK);
@@ -5185,8 +5450,16 @@ function renderSettingsPanel() {
     $('#memoria_embed_local_block').toggle(s.embedApi.mode === 'local');
 }
 
+const PROMPT_LABELS = { archivist: '사서', supervisor: '장면 연출', chunk: '요약', arc: '연대기' };
+
 function renderPromptsPanel() {
     const s = getSettings();
+    const outdated = Object.keys(s.promptOutdated || {}).filter(k => s.prompts[k] !== DEFAULT_SETTINGS.prompts[k]);
+    $('#memoria_prompt_outdated')
+        .toggle(outdated.length > 0)
+        .html(outdated.length
+            ? `🔔 새 기본 프롬프트가 나왔습니다: <b>${outdated.map(k => PROMPT_LABELS[k] || k).join(', ')}</b>. 직접 고친 프롬프트라 자동으로 바꾸지 않았어요. 새 기본값을 받으려면 해당 칸의 [기본값]을 누르세요 (지금 내용은 사라지니 필요하면 먼저 복사해 두세요).`
+            : '');
     $('#memoria_prompt_archivist').val(s.prompts.archivist);
     $('#memoria_prompt_supervisor').val(s.prompts.supervisor);
     $('#memoria_prompt_chunk').val(s.prompts.chunk);
@@ -5236,9 +5509,67 @@ function bindUI() {
     });
 
     $('#memoria_refresh_packet').on('click', async function () {
-        packetOverrideOnce = null; // 갱신은 수정본 폐기를 겸한다
+        packetOverrideOnce = null; // 갱신은 수정본·초안 폐기를 겸한다
+        packetDraft = null;
         await updateInjection();
-        toastr.success('주입 내용을 다시 생성했습니다.', 'Memoria');
+        if (getCurrentChatId() && getStore().packetPin?.text) toastr.info('장부가 고정돼 있어 고정한 내용을 그대로 주입합니다. (📌로 해제)', 'Memoria');
+        else toastr.success('주입 내용을 다시 생성했습니다.', 'Memoria');
+    });
+
+    const unpinPacket = async () => {
+        const store = getStore();
+        if (!store.packetPin) return;
+        delete store.packetPin;
+        persistStore();
+        await updateInjection();
+        toastr.success('고정을 해제했습니다. 다시 매 턴 서고에서 장부를 만듭니다.', 'Memoria');
+    };
+    $('#memoria_packet_pin').on('click', async function () {
+        if (!getCurrentChatId()) { toastr.warning('열린 채팅이 없습니다.', 'Memoria'); return; }
+        const store = getStore();
+        if (store.packetPin?.text && packetDraft == null) { await unpinPacket(); return; }
+        const text = String($('#memoria_packet_preview').val() || '').trim();
+        if (!text || text.startsWith('(주입할 내용이 없습니다')) { toastr.warning('고정할 내용이 비어 있습니다.', 'Memoria'); return; }
+        const ctx = getContext();
+        const ok = await ctx.callGenericPopup(
+            '지금 미리보기 내용을 이 채팅에 계속 고정합니다.\n\n' +
+            '· 해제할 때까지 매 턴 이 내용이 그대로 주입됩니다\n' +
+            '· 그동안 새로 쌓이는 기억·상태·요약은 주입에 반영되지 않습니다 (기록은 계속 쌓입니다)\n' +
+            '· 📌을 다시 누르면 해제되고 자동 장부로 돌아갑니다\n\n고정할까요?',
+            ctx.POPUP_TYPE.CONFIRM, '', { okButton: '고정' });
+        if (!ok) return;
+        store.packetPin = { text, turn: store.turnCounter, at: Date.now() };
+        packetDraft = null;
+        packetOverrideOnce = null;
+        persistStore();
+        $('#memoria_packet_preview').blur();
+        await updateInjection();
+        toastr.success('장부를 고정했습니다.', 'Memoria');
+    });
+    $('#memoria_settings').on('click', '.memoria-packet-unpin', unpinPacket);
+    $('#memoria_settings').on('click', '.memoria-packet-discard', function () {
+        packetDraft = null;
+        refreshPacketPreview();
+    });
+    $('#memoria_packet_rewrite').on('click', async function () {
+        if (!getCurrentChatId()) { toastr.warning('열린 채팅이 없습니다.', 'Memoria'); return; }
+        const $icon = $(this);
+        if ($icon.hasClass('memoria--busy')) return;
+        $icon.addClass('memoria--busy fa-beat-fade');
+        toastr.info('사서가 기억·세계·요약을 보고 장부를 새로 쓰는 중…', 'Memoria');
+        try {
+            packetDraft = await rewritePacketWithLibrarian();
+            $('#memoria_packet_preview').blur();
+            refreshPacketPreview();
+            const tokens = await getTokenCountAsync(packetDraft);
+            const over = tokens > getSettings().tokenBudget ? ` 주입 예산(${getSettings().tokenBudget})보다 커서 적용하면 예산을 넘습니다.` : '';
+            toastr.success(`초안을 미리보기에 넣었습니다 (≈ ${tokens} 토큰).${over} 확인 후 ✏ 또는 📌로 적용하세요.`, 'Memoria', { timeOut: 9000 });
+        } catch (e) {
+            console.error(`[${MODULE_NAME}] 장부 새로 쓰기 실패:`, e);
+            toastr.error(`장부를 새로 쓰지 못했습니다. ${e.message || ''}`, 'Memoria');
+        } finally {
+            $icon.removeClass('memoria--busy fa-beat-fade');
+        }
     });
 
     $('#memoria_packet_apply').on('click', async function () {
@@ -5249,9 +5580,10 @@ function bindUI() {
             return;
         }
         packetOverrideOnce = edited;
+        packetDraft = null;
         $('#memoria_packet_preview').blur();
         await updateInjection();
-        toastr.success('수정본이 다음 응답 1회에 주입됩니다. (영구 수정은 기억·상태·서약 탭에서)', 'Memoria');
+        toastr.success('수정본이 다음 응답 1회에 주입됩니다. (계속 쓰려면 📌로 고정)', 'Memoria');
     });
 
     // ── 서고에 질문
@@ -5725,15 +6057,52 @@ function bindUI() {
     });
     $('#memoria_summarize_now').on('click', async function () {
         const store = getStore();
-        const lastCovered = store.chunkSummaries.reduce((acc, c) => Math.max(acc, c.toTurn), 0);
-        if (store.turnCounter <= lastCovered) return toastr.info('요약할 새 턴이 없습니다.', 'Memoria');
+        if (store.turnCounter <= summaryCoveredTurn(store)) return toastr.info('요약할 새 턴이 없습니다.', 'Memoria');
         toastr.info('요약을 생성합니다…', 'Memoria');
-        const settings = getSettings();
-        const saved = settings.chunkTurns;
-        settings.chunkTurns = 1; // 강제로 지금까지를 요약
-        try { await maybeSummarizeChunk(store); } finally { settings.chunkTurns = saved; }
+        // 예전에는 요약 주기를 잠깐 1로 바꿨지만 내부 하한(3턴)에 걸려, 밀린 턴이 3개 미만이면
+        // 아무것도 만들지 않고 "생성되었습니다"만 떴다. 이제 주기를 다 못 채운 자투리까지 요약한다.
+        const made = await maybeSummarizeChunk(store, { flushAll: true });
         persistStore(); renderSummariesPanel(); updateInjection();
-        toastr.success('요약이 생성되었습니다.', 'Memoria');
+        if (made) toastr.success(`요약 ${made}개를 만들었습니다.`, 'Memoria');
+        else toastr.info('새로 요약할 턴 기록이 없습니다. (기록이 비어 있는 구간은 건너뜁니다)', 'Memoria');
+    });
+
+    $('#memoria_summary_rebuild').on('click', async function () {
+        if (!getCurrentChatId()) return toastr.warning('열린 채팅이 없습니다.', 'Memoria');
+        if (summaryRebuildRunning) {
+            summaryRebuildStop = true;
+            $('#memoria_summary_rebuild_progress').text('중단하는 중… (진행 중인 요약 하나가 끝나면 원래대로 되돌립니다)');
+            return;
+        }
+        const store = getStore();
+        const withDigest = store.turns.filter(t => t.summary).length;
+        if (!withDigest) return toastr.warning('턴 기록이 없어 요약을 만들 수 없습니다. 도구 탭에서 먼저 색인하세요.', 'Memoria');
+        const n = Math.max(3, getSettings().chunkTurns);
+        const calls = Math.ceil(store.turnCounter / n);
+        const ctx = getContext();
+        const ok = await ctx.callGenericPopup(
+            `이 채팅의 요약·연대기를 모두 지우고, 턴 기록(${store.turnCounter}턴)에서 처음부터 다시 만듭니다.\n\n` +
+            `· 사서 호출 약 ${calls}번 (+ 연대기 정리 몇 번)\n` +
+            `· 도중에 중단하거나 실패하면 원래 요약으로 되돌립니다\n` +
+            `· 다른 채팅에서 인계받은 연대기는 그대로 둡니다\n\n계속할까요?`,
+            ctx.POPUP_TYPE.CONFIRM, '', { okButton: '다시 만들기' });
+        if (!ok) return;
+        const $btn = $(this);
+        const $prog = $('#memoria_summary_rebuild_progress');
+        $btn.find('span').text('중단');
+        $prog.text('준비 중…');
+        try {
+            const made = await rebuildAllSummaries((done, total) => $prog.text(`요약 ${done} / ${total}`));
+            if (made == null) toastr.info('중단했습니다. 원래 요약으로 되돌렸습니다.', 'Memoria');
+            else toastr.success(`요약을 다시 만들었습니다 — 청크 ${made}개, 연대기 ${getStore().arcSummaries.filter(a => !a.carried).length}개`, 'Memoria');
+        } catch (e) {
+            console.error(`[${MODULE_NAME}] 요약 다시 만들기 실패:`, e);
+            toastr.error(`요약 다시 만들기에 실패해 원래 요약으로 되돌렸습니다. ${e.message || ''}`, 'Memoria', { timeOut: 12000 });
+        } finally {
+            $btn.find('span').text('전체 다시 만들기');
+            $prog.text('');
+            renderSummariesPanel(); updateInjection();
+        }
     });
 
     // ── 설정
@@ -5887,7 +6256,7 @@ function bindUI() {
             saveSettingsDebounced();
         });
     };
-    numBind('#memoria_depth', 'injectDepth', 0, 20);
+    numBind('#memoria_depth', 'injectDepth', 0, 10000);
     $('#memoria_inject_position').on('change', function () {
         getSettings().injectPosition = String($(this).val());
         saveSettingsDebounced();
@@ -5899,7 +6268,8 @@ function bindUI() {
     numBind('#memoria_max_memories', 'maxMemories', 50, 2000);
     numBind('#memoria_response_tokens', 'responseTokens', 256, 65536);
     numBind('#memoria_reasoning_headroom', 'reasoningHeadroom', 0, 32768);
-    numBind('#memoria_preserve_recent', 'preserveRecent', 1, 50);
+    numBind('#memoria_preserve_recent', 'preserveRecent', 1, 500);
+    numBind('#memoria_record_delay', 'recordDelay', 0, 20);
     numBind('#memoria_consolidate_every', 'consolidateEvery', 0, 200);
     numBind('#memoria_arc_consolidate_every', 'arcConsolidateEvery', 0, 500);
 
@@ -6050,6 +6420,7 @@ function bindUI() {
     $('#memoria_settings').on('click', '.memoria-prompt-reset', function () {
         const key = $(this).data('key');
         getSettings().prompts[key] = DEFAULT_SETTINGS.prompts[key];
+        if (getSettings().promptOutdated) delete getSettings().promptOutdated[key];
         saveSettingsDebounced();
         renderPromptsPanel();
         toastr.success('기본 프롬프트로 복원했습니다.', 'Memoria');
@@ -6213,18 +6584,25 @@ function registerCommands() {
  * ============================================================ */
 
 function bindEvents() {
-    eventSource.on(event_types.MESSAGE_RECEIVED, async (mesId) => {
+    eventSource.on(event_types.MESSAGE_RECEIVED, async (mesId, type) => {
         packetOverrideOnce = null; // 1회용 수정본은 응답이 도착하면 폐기
         const settings = getSettings();
         if (!settings.enabled || !settings.autoRecord) return;
-        const mes = chat[mesId];
+        const id = Number(mesId);
+        const mes = chat[id];
         if (!mes || mes.is_user || mes.is_system) return;
         auditRecallEcho(mes); // 직전 주입 기억의 반영 여부 채점 (기록보다 먼저, 원본 감사표 기준)
-        queueCommit(mesId).then(() => updateInjection());
+        if (type !== 'first_message' && requiredRepliesFor(id) === 0) {
+            queueCommit(id).then(() => updateInjection());
+        } else {
+            // 지연 기록 — 이 응답은 아직 확정 전이다. 그사이 확정된 옛 응답이 있으면 그것만 기록한다
+            commitSettledTurns();
+        }
     });
 
     eventSource.on(event_types.MESSAGE_SENT, async () => {
         if (!getSettings().enabled) return;
+        commitSettledTurns(); // 사용자가 답을 보냈다 = 그 앞 응답이 확정됐다
         await updateInjection();
     });
 
@@ -6247,7 +6625,9 @@ function bindEvents() {
         const mes = chat[id];
         if (mes && !mes.is_user && !mes.is_system && getSettings().autoRecord) {
             invalidateTurnByMesId(id);
-            queueCommit(id).then(() => updateInjection());
+            // 아직 확정 전인 응답(기록 지연·그리팅)은 고쳐도 지금 기록하지 않는다 — 확정되면 그때 기록된다
+            if (isSettledForRecord(id)) queueCommit(id).then(() => updateInjection());
+            else updateInjection();
         } else {
             reconcileWithChat();
             updateInjection();
@@ -6262,6 +6642,7 @@ function bindEvents() {
 
     eventSource.on(event_types.CHAT_CHANGED, () => {
         packetOverrideOnce = null; // 수정본은 그 채팅의 그 순간에만 유효
+        packetDraft = null;
         vecCache.clear();
         queryEmbedCache.clear();
         dossierVecCache.clear();
