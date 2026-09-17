@@ -1262,26 +1262,70 @@ function parseJsonLoose(text) {
         const lastClose = t.lastIndexOf(strayClose[strayClose.length - 1]);
         t = t.slice(lastClose + strayClose[strayClose.length - 1].length).trim();
     }
-    t = t.replace(/^```(?:json)?/i, '').replace(/```$/m, '').trim();
-    const start = t.indexOf('{');
-    if (start < 0) return null;
-    // 뒤에서부터 닫는 중괄호를 줄여가며 파싱 시도 (잘린 응답 복구)
-    for (let end = t.length; end > start; end--) {
-        if (t[end - 1] !== '}') continue;
-        try {
-            return JSON.parse(t.slice(start, end));
-        } catch { /* keep shrinking */ }
+    // 코드 펜스가 중간에 있으면 그 안을 먼저 본다 (앞에 설명을 붙이는 모델)
+    const fence = t.match(/```(?:json)?\s*([\s\S]*?)```/i);
+    if (fence && fence[1].includes('{')) t = fence[1].trim();
+    else t = t.replace(/^```(?:json)?/i, '').replace(/```$/m, '').trim();
+    // 스타일·스크립트의 중괄호를 JSON 시작으로 오인하지 않게
+    t = t.replace(/<(style|script)\b[^>]*>[\s\S]*?<\/\1>/gi, ' ');
+
+    // 여는 중괄호 후보를 앞에서부터 차례로 시도한다. 첫 { 가 JSON이 아닌 경우
+    // (상태창 CSS, 설명문 속 예시 등) 첫 후보만 보던 예전 방식은 응답 전체를 버렸다.
+    // 각 후보마다 "뒤에서 줄이기 → 강제 닫기"를 끝까지 해 본 뒤에야 다음 후보로 넘어간다 —
+    // 잘린 응답에서 바깥 객체를 복구하기 전에 안쪽 조각 객체를 답으로 집는 일이 없게.
+    const starts = [];
+    for (let i = t.indexOf('{'); i >= 0 && starts.length < 12; i = t.indexOf('{', i + 1)) starts.push(i);
+    const isObj = (v) => v && typeof v === 'object' && !Array.isArray(v);
+    for (const start of starts) {
+        for (let end = t.length; end > start; end--) {
+            if (t[end - 1] !== '}') continue;
+            try {
+                const v = JSON.parse(t.slice(start, end));
+                if (isObj(v)) return v;
+            } catch { /* keep shrinking */ }
+        }
+        const repaired = repairTruncatedJson(t.slice(start));
+        if (isObj(repaired)) return repaired;
+        // JSON처럼 생긴 후보({ 뒤에 바로 "키")가 끝내 안 읽히면 더 안쪽 후보로 내려가지 않는다 —
+        // 안쪽 조각 객체를 답으로 집으면 기록이 빈 채로 "성공" 처리돼 재시도조차 안 된다
+        if (/^\{\s*"/.test(t.slice(start, start + 24))) break;
     }
-    // 마지막 수단: 열린 구조 강제 닫기
-    let candidate = t.slice(start);
-    candidate = candidate.replace(/,\s*$/, '');
-    const opens = (candidate.match(/\{/g) || []).length - (candidate.match(/\}/g) || []).length;
-    const openArr = (candidate.match(/\[/g) || []).length - (candidate.match(/\]/g) || []).length;
-    try {
-        return JSON.parse(candidate + ']'.repeat(Math.max(0, openArr)) + '}'.repeat(Math.max(0, opens)));
-    } catch {
-        return null;
+    return null;
+}
+
+/**
+ * 끝이 잘린 JSON을 괄호 순서대로 닫아 읽는다. 끝에서부터 쉼표 자리를 하나씩 물러나며
+ * (마지막 항목이 반쯤 쓰인 경우) 여는 괄호 스택을 거꾸로 닫아 본다.
+ */
+function repairTruncatedJson(s) {
+    const scan = (str) => {
+        const stack = [];
+        let inStr = false;
+        let esc = false;
+        for (const c of str) {
+            if (inStr) {
+                if (esc) esc = false;
+                else if (c === '\\') esc = true;
+                else if (c === '"') inStr = false;
+                continue;
+            }
+            if (c === '"') inStr = true;
+            else if (c === '{') stack.push('}');
+            else if (c === '[') stack.push(']');
+            else if (c === '}' || c === ']') stack.pop();
+        }
+        return { stack, inStr };
+    };
+    const cuts = [s.length];
+    for (let i = s.length - 1; i > 0 && cuts.length < 25; i--) if (s[i] === ',') cuts.push(i);
+    for (const cut of cuts) {
+        let head = s.slice(0, cut).replace(/[\s,:]+$/, '');
+        const { stack, inStr } = scan(head);
+        if (!stack.length && !inStr) continue; // 닫을 게 없으면 앞의 줄이기 단계에서 이미 시도됨
+        if (inStr) head += '"';
+        try { return JSON.parse(head + stack.reverse().join('')); } catch { /* 한 칸 더 물러난다 */ }
     }
+    return null;
 }
 
 /* ============================================================
@@ -1320,28 +1364,159 @@ function cleanStr(s, max = 400) {
 }
 
 /* ------------------------------------------------------------
- * 요약 출력 위생 처리
+ * 태그 처리 엔진 — 채팅 원문에서 이야기만 남기고, 요약 출력에서 기록만 남긴다
  *
- * 사서 API를 "실리태번 (현재 API)"로 두면 보조 호출도 본 채팅의 프리셋과
- * 다른 확장의 주입을 함께 받는다. 그래서 요약 모델이 기록을 다 쓴 뒤에
- *   (1) *** 를 긋고 이야기를 계속 써 버리거나,
- *   (2) 이미지 프롬프트 확장이 시킨 <autopic>…</autopic> 같은 블록을 덧붙인다.
- * 둘 다 요약 본문에 통째로 저장돼 다음 요약·회상까지 오염시킨다.
- * 프롬프트로 "기록만 출력하라"고 이미 지시하지만 모델이 어길 수 있으므로,
- * 받은 출력에서 기록 부분만 남기고 잘라낸다.
+ * 메시지에는 이야기 말고도 많은 것이 섞여 온다.
+ *   · 프리셋이 시킨 구조 블록 — 데우스 엑스 마키나는 <scene_plan>(연출 계획), <tracker>,
+ *     <status>, <threads>, <psychological_states>, <momentum>, <cyoa> 를 붙이고,
+ *     정작 이야기는 <prose>…</prose> 안에 넣는다
+ *   · 다른 확장이 심은 데이터 — 이미지 프롬프트 확장의 <autopic><scene>2boys, indoors…</scene></autopic>
+ *   · 본문 서식 — <b>, <font color>, <span style> 같은 것
+ *
+ * 한 가지 규칙("모르는 태그는 버린다" / "모르는 태그는 벗긴다")으로는 셋을 다 맞출 수 없다.
+ * 버리면 <prose> 안의 이야기가 통째로 사라지고, 벗기면 연출 계획·부루 태그가 이야기인 척 섞여 든다.
+ * 그래서 태그를 스택으로 짝지어 안쪽부터 풀면서 종류별로 다르게 다룬다.
  * ------------------------------------------------------------ */
 
-/** 다른 확장이 심은 태그 블록을 내용째로 걷어낸다. 요약 본문에 XML이 들어갈 일은 없다. */
+// 본문 서식 — 껍데기만 벗기고 글은 살린다
+const PROSE_TAGS = new Set([
+    'b', 'i', 'em', 'strong', 'u', 's', 'strike', 'del', 'ins', 'mark', 'small', 'big', 'sub', 'sup',
+    'span', 'p', 'div', 'br', 'hr', 'a', 'q', 'cite', 'abbr', 'blockquote', 'pre', 'code', 'font', 'center',
+    'ul', 'ol', 'li', 'dl', 'dt', 'dd', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'section', 'article',
+    'table', 'thead', 'tbody', 'tfoot', 'tr', 'td', 'th', 'caption',
+    'details', 'summary', 'figure', 'figcaption', 'ruby', 'rt', 'rp', 'kbd', 'var', 'time',
+]);
+// 벗길 때 줄을 바꿔야 문단이 붙지 않는 태그
+const BLOCK_BREAK_TAGS = new Set([
+    'p', 'div', 'br', 'hr', 'li', 'tr', 'blockquote', 'pre', 'section', 'article', 'details', 'summary',
+    'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'ul', 'ol', 'table', 'figure', 'figcaption', 'dt', 'dd',
+]);
+// 닫는 짝이 없는 태그
+const VOID_TAGS = new Set(['br', 'hr', 'img', 'input', 'meta', 'link', 'wbr', 'source', 'col', 'area', 'embed', 'track', 'param']);
+// 이야기 본문을 감싸는 태그 — 이런 블록이 있으면 그 안만 이야기다
+const STORY_WRAPPER_TAGS = new Set(['prose', 'story', 'narrative', 'narration', 'roleplay', 'response', 'reply', 'content', 'novel']);
+// 속마음 — 이야기의 일부로 살리되, 사서가 비공개 인상으로 다루도록 표시를 붙인다
+const INNER_VOICE_TAGS = new Set(['true_thoughts', 'inner_thoughts', 'inner_monologue', 'private_thoughts']);
+// 이야기가 아닌 게 확실한 블록 — 내용째로 버린다
+const META_BLOCK_TAGS = new Set([
+    // 연출·계획·추론
+    'scene_plan', 'scene_reasoning', 'plan', 'planning', 'analysis', 'director_state', 'writing_thoughts',
+    'think', 'thinking', 'thought', 'thoughts', 'reasoning', 'reflection', 'ooc',
+    // 상태창·추적기·선택지
+    'status', 'status_window', 'statusbar', 'status_bar', 'tracker', 'threads', 'story_threads',
+    'psychological_states', 'momentum', 'momentum_route', 'conflict', 'cyoa', 'choices', 'options',
+    'sheet', 'stats', 'infobox', 'info_box', 'hud',
+    // 이미지 생성 프롬프트
+    'autopic', 'apchar', 'uc', 'image_prompt', 'img_prompt', 'sd_prompt', 'nai_prompt', 'imagine', 'pic',
+    // 실행·스타일
+    'style', 'script', 'svg', 'canvas', 'iframe', 'audio', 'video', 'template', 'noscript', 'object',
+]);
+// 채팅 모드에서 이야기 래퍼를 표시하는 경계 문자 (본문에 나올 일이 없는 제어 문자)
+const STORY_OPEN = '\u0001';
+const STORY_CLOSE = '\u0002';
+const STORY_SEGMENT_RE = /\u0001([^\u0001\u0002]*)\u0002/g;
+
+// 기록 라벨 — 요약 출력에서 기록을 품은 블록을 알아보는 데 쓴다
+const RECORD_LABEL_ANY_RE = /(?:^|\n)\s*(?:PLOT|SHIFTS|OPEN)\s*[:：]/i;
+
+/** 블록 안쪽이 문장이 아니라 데이터(부루 태그 나열·키:값 목록·CSS)처럼 보이는가 */
+function looksLikeDataBlock(inner) {
+    const raw = String(inner || '').replace(/[\u0001\u0002]/g, ' ');
+    const t = raw.replace(/\s+/g, ' ').trim();
+    if (!t) return true;
+    // CSS·JSON
+    if (/[{}]/.test(t) && /:/.test(t) && /;|,/.test(t) && !/[.!?。！？…]\s/.test(t)) return true;
+    // 문장이 하나라도 있으면 이야기로 본다 (영어 문장부호, 한국어 종결, 따옴표로 닫힌 대사)
+    if (/[.!?。！？…](?=\s|$|["'”’」』)])/.test(t)) return false;
+    if (/[다요죠네까니](?=\s|$|["'”’」』)])/.test(t)) return false;
+    // 쉼표로 이어진 짧은 토큰 나열 — 부루 태그
+    const parts = t.split(/[,，、]/).map(x => x.trim()).filter(Boolean);
+    if (parts.length >= 3 && parts.reduce((a, x) => a + x.length, 0) / parts.length <= 24) return true;
+    // 줄마다 "이름: 값" / "이름 | 값"
+    const lines = raw.split('\n').map(x => x.trim()).filter(Boolean);
+    if (lines.length >= 2 && lines.every(l => /^[-*•·]?\s*[^:：|]{1,30}\s*[:：|]/.test(l))) return true;
+    return false;
+}
+
+function innerVoiceLine(attrs, inner) {
+    const who = (String(attrs).match(/\b(?:character|char|name|who)\s*=\s*["“']([^"”']+)["”']/i) || [])[1];
+    const body = String(inner).replace(/[\u0001\u0002]/g, ' ').replace(/\s+/g, ' ').trim();
+    return body ? `\n(inner thoughts${who ? ` — ${who.trim()}` : ''}: ${body})\n` : ' ';
+}
+
+/** 닫힌 블록 하나를 모드에 맞게 바꾼다 */
+function renderTagElement(tag, attrs, inner, mode) {
+    const brk = BLOCK_BREAK_TAGS.has(tag) ? '\n' : ' ';
+    if (PROSE_TAGS.has(tag)) return brk + inner + brk;
+    if (STORY_WRAPPER_TAGS.has(tag)) {
+        // 래퍼 안에 래퍼가 또 있으면 바깥 것이 이야기 전체다 — 안쪽 경계는 지운다
+        return mode === 'chat' ? `${STORY_OPEN}${inner.replace(/[\u0001\u0002]/g, '')}${STORY_CLOSE}` : `\n${inner}\n`;
+    }
+    if (mode === 'record') {
+        // 요약 출력에 태그가 들어갈 일은 없다 — 기록을 품은 블록만 벗기고 나머지는 버린다
+        return RECORD_LABEL_ANY_RE.test(inner) ? `\n${inner}\n` : ' ';
+    }
+    if (META_BLOCK_TAGS.has(tag)) return '\n';
+    if (INNER_VOICE_TAGS.has(tag)) return innerVoiceLine(attrs, inner);
+    return looksLikeDataBlock(inner) ? ' ' : brk + inner + brk;
+}
+
+/** 닫히지 않은 블록 — 응답이 잘렸거나 모델이 닫는 태그를 빠뜨린 경우 */
+function renderUnclosedTag(tag, attrs, inner, mode) {
+    if (STORY_WRAPPER_TAGS.has(tag)) return renderTagElement(tag, attrs, inner, mode);
+    if (INNER_VOICE_TAGS.has(tag) && mode === 'chat') return innerVoiceLine(attrs, inner);
+    if (mode === 'chat' && META_BLOCK_TAGS.has(tag)) {
+        // 안에서 이야기 래퍼가 닫혀 있었다면 그 부분만 건진다
+        const segs = [...inner.matchAll(STORY_SEGMENT_RE)].map(m => STORY_OPEN + m[1] + STORY_CLOSE);
+        if (segs.length) return segs.join('\n');
+        // 데이터처럼 보이면 버리고, 문장이 섞여 있으면 살린다 — 이야기를 날리는 것보다
+        // 상태창 몇 줄이 새는 편이 낫다
+        return looksLikeDataBlock(inner) ? '\n' : `\n${inner}\n`;
+    }
+    if (mode === 'record' && !PROSE_TAGS.has(tag) && !RECORD_LABEL_ANY_RE.test(inner)) return ' ';
+    return ` ${inner} `;
+}
+
+/** 태그를 스택으로 짝지어 안쪽부터 푼다. mode: 'chat'(채팅 원문) | 'record'(요약 출력) */
+function transformTags(text, mode) {
+    const src = String(text || '');
+    if (!src.includes('<')) return src;
+    const tagRe = /<\/?([a-zA-Z][\w:.-]*)\b([^<>]*)>/g;
+    const stack = [{ tag: null, attrs: '', parts: [] }];
+    let last = 0;
+    let m;
+    while ((m = tagRe.exec(src))) {
+        stack[stack.length - 1].parts.push(src.slice(last, m.index));
+        last = tagRe.lastIndex;
+        const tag = m[1].toLowerCase();
+        const attrs = m[2] || '';
+        if (m[0][1] === '/') {
+            let idx = -1;
+            for (let i = stack.length - 1; i > 0; i--) if (stack[i].tag === tag) { idx = i; break; }
+            if (idx < 0) { stack[stack.length - 1].parts.push(' '); continue; } // 짝 없는 닫는 태그
+            while (stack.length - 1 > idx) { // 사이에 안 닫힌 태그들
+                const f = stack.pop();
+                stack[stack.length - 1].parts.push(renderUnclosedTag(f.tag, f.attrs, f.parts.join(''), mode));
+            }
+            const f = stack.pop();
+            stack[stack.length - 1].parts.push(renderTagElement(f.tag, f.attrs, f.parts.join(''), mode));
+        } else if (VOID_TAGS.has(tag) || /\/\s*$/.test(attrs)) {
+            stack[stack.length - 1].parts.push(BLOCK_BREAK_TAGS.has(tag) ? '\n' : ' ');
+        } else {
+            stack.push({ tag, attrs, parts: [] });
+        }
+    }
+    stack[stack.length - 1].parts.push(src.slice(last));
+    while (stack.length > 1) {
+        const f = stack.pop();
+        stack[stack.length - 1].parts.push(renderUnclosedTag(f.tag, f.attrs, f.parts.join(''), mode));
+    }
+    return stack[0].parts.join('');
+}
+
+/** 요약 LLM 출력의 태그 정리 — 기록을 품은 블록과 서식만 살리고 나머지는 버린다 */
 function stripTagBlocks(t) {
-    let out = String(t || '');
-    let prev;
-    do { // 중첩 블록(<autopic><scene>…)은 안쪽부터 여러 번 걷어야 다 없어진다
-        prev = out;
-        out = out.replace(/<([a-zA-Z][\w:.-]*)\b[^>]*>[\s\S]*?<\/\1\s*>/g, ' ');
-    } while (out !== prev);
-    // 닫는 태그가 없는 여는 태그(응답이 잘린 경우) — 그 뒤는 통째로 버린다
-    out = out.replace(/<[a-zA-Z][\w:.-]*\b[^>]*>[\s\S]*$/, ' ');
-    return out.replace(/<\/?[a-zA-Z][\w:.-]*\b[^>]*>/g, ' ');
+    return transformTags(String(t || '').replace(/<!--[\s\S]*?-->/g, ' '), 'record');
 }
 
 // 구분선(*** --- ___ === 등) — 이 아래는 기록이 아니라 이야기 이어쓰기다
@@ -1351,7 +1526,11 @@ const RECORD_BULLET_RE = /^\s*(?:[-•·]|\*(?!\*))\s+\S/;
 // 따옴표·괄호로 시작하는 줄 = 대사. 기록 뒤에 붙었다면 이야기 이어쓰기의 시작이다
 const RECORD_DIALOGUE_RE = /^\s*["“「『'‘(]/;
 
-/** 요약 LLM 출력에서 PLOT/SHIFTS/OPEN 기록 부분만 남긴다 */
+/**
+ * 요약 LLM 출력에서 PLOT/SHIFTS/OPEN 기록 부분만 남긴다.
+ * 사서 API를 본 채팅과 같은 API로 두면 요약 모델이 기록 뒤에 *** 를 긋고 이야기를
+ * 계속 쓰거나, 다른 확장이 시킨 태그 블록을 덧붙이는 일이 있다.
+ */
 function sanitizeRecordOutput(raw) {
     const cleaned = stripTagBlocks(raw).replace(/\r/g, '');
     const lines = cleaned.split('\n');
@@ -1386,40 +1565,83 @@ function sanitizeRecordOutput(raw) {
 
 /**
  * 채팅 원문에서 "눈에 보이는 이야기"만 남긴다.
- * 다른 확장이 메시지에 심어두는 HTML 주석 패킷·상태창 스크립트, 추론 모델의 사고 블록,
- * 이미지 태그 같은 비서사 잔해가 사서의 눈과 임베딩 색인에 섞이면
- * 엉뚱한 기록·엉뚱한 회상의 원인이 된다. 태그 자체는 걷어내되 안의 글은 살린다.
+ * 사서의 눈·임베딩 색인·턴 동일성 판별(mesHashOf)이 모두 이 결과를 쓴다.
+ *
+ * ⚠ 이 함수의 출력이 바뀌면 이미 저장된 턴의 해시가 전부 달라진다. reconcileWithChat은
+ * 해시가 안 맞는 턴을 "삭제된 턴"으로 보므로, 출력을 바꿀 때는 반드시 옛 버전을
+ * visibleProseV* 로 얼려 두고 MES_HASH_LEGACY 에 추가해야 한다 (v1.6.2에서 이걸 놓쳐
+ * 커스텀 태그가 든 턴의 기록이 채팅을 열 때 지워졌다).
  */
-// 본문 서식용 태그 — 껍데기만 벗기고 안의 글은 살린다.
-// 여기 없는 짝지어진 태그는 다른 확장이 심은 데이터 블록으로 보고 내용째로 버린다:
-// 이미지 프롬프트 확장의 <autopic><scene>2boys, indoors…</scene></autopic> 같은 것이
-// 껍데기만 벗겨져 "2boys, indoors" 라는 맨 텍스트로 사서 눈에 들어가면
-// 그 부루 태그가 그대로 턴 기록·기억·요약에 섞여 들어간다.
-const PROSE_TAGS = new Set([
-    'b', 'i', 'em', 'strong', 'u', 's', 'strike', 'del', 'ins', 'mark', 'small', 'sub', 'sup',
-    'span', 'p', 'div', 'br', 'hr', 'a', 'q', 'blockquote', 'pre', 'code', 'font', 'center',
-    'ul', 'ol', 'li', 'dl', 'dt', 'dd', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
-    'table', 'thead', 'tbody', 'tr', 'td', 'th', 'details', 'summary', 'figure', 'figcaption',
-]);
-
 function visibleProse(s) {
     let t = String(s ?? '');
     if (!t) return '';
     t = t
         .replace(/<!--[\s\S]*?-->/g, ' ')                                            // HTML 주석 (숨은 데이터 패킷 포함)
         .replace(/<(think|thinking|thought|reasoning|reflection)>[\s\S]*?<\/\1>/gi, ' ') // 사고 블록
-        .replace(/<(script|style)\b[^>]*>[\s\S]*?<\/\1>/gi, ' ')                     // 상태창류가 심는 스크립트·스타일
-        .replace(/<img\b[^>]*>/gi, ' ');                                             // 인라인 이미지
-    // 확장이 심은 짝지어진 커스텀 태그 블록 — 내용째로 제거 (중첩은 안쪽부터 반복)
+        .replace(/<(script|style)\b[^>]*>[\s\S]*?<\/\1>/gi, ' ');                    // 상태창류가 심는 스크립트·스타일
+    t = transformTags(t, 'chat');
+    // 이야기 래퍼가 있었다면 그 안만 이야기다 — 연출 계획·상태창은 래퍼 밖에 있다
+    if (t.includes(STORY_OPEN)) {
+        const story = [...t.matchAll(STORY_SEGMENT_RE)].map(x => x[1]).filter(x => x.trim()).join('\n\n');
+        t = story.replace(/\s/g, '').length >= 20 ? story : t.replace(/[\u0001\u0002]/g, ' ');
+    }
+    return t
+        .replace(/[\u0001\u0002]/g, ' ')
+        .replace(/[​-‍﻿]/g, '')                                       // 폭 없는 문자
+        .replace(/[ \t]+\n/g, '\n')
+        .replace(/\n[ \t]+/g, '\n')
+        .replace(/[ \t]{2,}/g, ' ')
+        .replace(/\n{3,}/g, '\n\n')
+        .trim();
+}
+
+/* ------------------------------------------------------------
+ * 옛 visibleProse — 턴 해시 이전(migration) 전용. 절대 고치지 말 것.
+ * 저장된 턴의 해시가 어느 버전으로 계산됐든 같은 메시지로 알아볼 수 있어야 한다.
+ * ------------------------------------------------------------ */
+
+/** v1.4.1 ~ v1.6.0 */
+function visibleProseV1(s) {
+    let t = String(s ?? '');
+    if (!t) return '';
+    t = t
+        .replace(/<!--[\s\S]*?-->/g, ' ')
+        .replace(/<(think|thinking|thought|reasoning|reflection)>[\s\S]*?<\/\1>/gi, ' ')
+        .replace(/<(script|style)\b[^>]*>[\s\S]*?<\/\1>/gi, ' ')
+        .replace(/<img\b[^>]*>/gi, ' ')
+        .replace(/<\/?[a-zA-Z][^>]*>/g, ' ')
+        .replace(/[​-‍﻿]/g, '')
+        .replace(/[ \t]{2,}/g, ' ')
+        .replace(/\n{3,}/g, '\n\n')
+        .trim();
+    return t;
+}
+
+const PROSE_TAGS_V2 = new Set([
+    'b', 'i', 'em', 'strong', 'u', 's', 'strike', 'del', 'ins', 'mark', 'small', 'sub', 'sup',
+    'span', 'p', 'div', 'br', 'hr', 'a', 'q', 'blockquote', 'pre', 'code', 'font', 'center',
+    'ul', 'ol', 'li', 'dl', 'dt', 'dd', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
+    'table', 'thead', 'tbody', 'tr', 'td', 'th', 'details', 'summary', 'figure', 'figcaption',
+]);
+
+/** v1.6.1 ~ v1.6.2 */
+function visibleProseV2(s) {
+    let t = String(s ?? '');
+    if (!t) return '';
+    t = t
+        .replace(/<!--[\s\S]*?-->/g, ' ')
+        .replace(/<(think|thinking|thought|reasoning|reflection)>[\s\S]*?<\/\1>/gi, ' ')
+        .replace(/<(script|style)\b[^>]*>[\s\S]*?<\/\1>/gi, ' ')
+        .replace(/<img\b[^>]*>/gi, ' ');
     let prev;
     do {
         prev = t;
         t = t.replace(/<([a-zA-Z][\w:.-]*)\b[^>]*>[\s\S]*?<\/\1\s*>/g,
-            (whole, tag) => (PROSE_TAGS.has(String(tag).toLowerCase()) ? whole : ' '));
+            (whole, tag) => (PROSE_TAGS_V2.has(String(tag).toLowerCase()) ? whole : ' '));
     } while (t !== prev);
     t = t
-        .replace(/<\/?[a-zA-Z][^>]*>/g, ' ')                                         // 남은 태그 껍데기 (본문 텍스트는 유지)
-        .replace(/[\u200B-\u200D\uFEFF]/g, '')                                       // 폭 없는 문자
+        .replace(/<\/?[a-zA-Z][^>]*>/g, ' ')
+        .replace(/[​-‍﻿]/g, '')
         .replace(/[ \t]{2,}/g, ' ')
         .replace(/\n{3,}/g, '\n\n')
         .trim();
@@ -1622,9 +1844,18 @@ function mesHashOf(mes) {
     return getStringHash(visibleProse(mes?.mes || '')) >>> 0;
 }
 
-/** 구버전(v1.4.0 이하) raw mes 해시 — reconcile에서 한 번만 새 해시로 옮긴다 */
-function mesHashLegacyRaw(mes) {
-    return getStringHash(String(mes?.mes || '')) >>> 0;
+/**
+ * 옛 버전으로 계산했을 해시들 — 저장된 턴이 어느 버전에서 기록됐든 같은 메시지로 알아본다.
+ * reconcile은 여기서 맞는 게 있으면 새 해시로 옮기고, 없을 때만 삭제된 턴으로 본다.
+ * visibleProse의 출력을 바꿀 때는 옛 구현을 visibleProseV* 로 얼려 두고 여기에 추가할 것.
+ */
+function mesHashLegacySet(mes) {
+    const raw = String(mes?.mes || '');
+    return new Set([
+        getStringHash(raw) >>> 0,                  // v1.4.0 이하 — 원문 그대로
+        getStringHash(visibleProseV1(raw)) >>> 0,  // v1.4.1 ~ v1.6.0
+        getStringHash(visibleProseV2(raw)) >>> 0,  // v1.6.1 ~ v1.6.2
+    ]);
 }
 
 function findPrecedingUserMessage(mesId) {
@@ -3708,25 +3939,33 @@ function reconcileWithChat() {
     const usedMesIds = new Set();
     const deletedTurnIndexes = [];
 
-    // 채팅 전체의 (내용 해시 → 메시지 번호들) 지도 — 앞쪽 삭제로 번호가 밀려도 내용으로 턴을 다시 찾는다
+    // 채팅 전체의 (내용 해시 → 메시지 번호들) 지도 — 앞쪽 삭제로 번호가 밀려도 내용으로 턴을 다시 찾는다.
+    // v1.6.0 이하 해시도 함께 적어 둔다: 버전을 올린 직후 앞쪽 삭제까지 겹쳐도 옛 턴을 찾을 수 있게.
+    // (v1.6.1~1.6.2 해시는 태그가 많은 메시지끼리 서로 같아지기 쉬워 — 본문이 통째로 지워졌으므로 —
+    //  자리 옮기기에는 쓰지 않고, 같은 자리 확인에만 쓴다)
     const hashIndex = new Map();
+    const addIndex = (h, i) => {
+        if (!hashIndex.has(h)) hashIndex.set(h, []);
+        const list = hashIndex.get(h);
+        if (!list.includes(i)) list.push(i);
+    };
     for (let i = 0; i < chat.length; i++) {
         const c = chat[i];
         if (!c || c.is_user) continue;
-        const h = mesHashOf(c);
-        if (!hashIndex.has(h)) hashIndex.set(h, []);
-        hashIndex.get(h).push(i);
+        addIndex(mesHashOf(c), i);
+        addIndex(getStringHash(visibleProseV1(c.mes || '')) >>> 0, i);
     }
 
     // mesId 오름차순 — 재생성으로 끝 턴이 지워질 때, 해시 재배치가 앞쪽 턴 mesId를 빼앗지 않게
     const sorted = [...store.turns].sort((a, b) => (a.mesId - b.mesId) || (a.turnIndex - b.turnIndex));
+    const orphans = [];
 
     for (const t of sorted) {
         const mes = chat[t.mesId];
         if (mes && !mes.is_user && !usedMesIds.has(t.mesId)) {
             const h = mesHashOf(mes);
-            if (h === t.mesHash || mesHashLegacyRaw(mes) === t.mesHash) {
-                if (h !== t.mesHash) { t.mesHash = h; changed = true; }
+            if (h === t.mesHash || mesHashLegacySet(mes).has(t.mesHash)) {
+                if (h !== t.mesHash) { t.mesHash = h; changed = true; } // 옛 버전 해시 → 새 해시로 이전
                 validTurns.push(t);
                 usedMesIds.add(t.mesId);
                 continue;
@@ -3739,15 +3978,39 @@ function reconcileWithChat() {
         if (pool.length) {
             const relocated = pool.reduce((best, i) => Math.abs(i - t.mesId) < Math.abs(best - t.mesId) ? i : best);
             t.mesId = relocated;
+            t.mesHash = mesHashOf(chat[relocated]);
             usedMesIds.add(relocated);
             for (const m of store.memories) if (m.turnIndex === t.turnIndex) m.mesId = relocated;
             validTurns.push(t);
             changed = true;
         } else {
-            removeDerivedForTurn(store, t.turnIndex);
-            deletedTurnIndexes.push(t.turnIndex);
-            changed = true;
+            orphans.push(t);
         }
+    }
+
+    // 안전장치 — 여러 턴이 한꺼번에 "사라졌다"고 나왔는데 그 자리의 메시지가 멀쩡히 남아 있고
+    // 다른 턴이 그 자리를 차지하지도 않았다면, 메시지가 지워진 게 아니라 해시 계산 방식이 바뀐 것이다.
+    // (v1.6.2에서 이 판정이 없어 커스텀 태그가 든 턴의 기록이 채팅을 열 때 지워졌다)
+    // 실제로 지운 경우엔 메시지가 없어지거나, 앞쪽 삭제로 밀린 다른 턴이 그 자리를 차지한다.
+    const inPlace = orphans.filter(t => {
+        const m = chat[t.mesId];
+        return m && !m.is_user && !usedMesIds.has(t.mesId);
+    });
+    if (inPlace.length >= 3 && inPlace.length >= orphans.length * 0.8) {
+        for (const t of inPlace) {
+            t.mesHash = mesHashOf(chat[t.mesId]);
+            usedMesIds.add(t.mesId);
+            validTurns.push(t);
+        }
+        console.warn(`[${MODULE_NAME}] 턴 ${inPlace.length}개의 해시가 맞지 않지만 메시지는 그대로 있어 기록을 유지했습니다 (해시 방식 변경으로 판단)`);
+        changed = true;
+    }
+    const keptInPlace = new Set(validTurns);
+    for (const t of orphans) {
+        if (keptInPlace.has(t)) continue;
+        removeDerivedForTurn(store, t.turnIndex);
+        deletedTurnIndexes.push(t.turnIndex);
+        changed = true;
     }
     store.turns = validTurns;
     if (deletedTurnIndexes.length) {
