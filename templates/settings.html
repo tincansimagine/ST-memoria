@@ -1,7 +1,7 @@
 <div id="memoria_settings" class="memoria">
     <div class="inline-drawer">
         <div class="inline-drawer-toggle inline-drawer-header">
-            <b><i class="fa-solid fa-book-bookmark"></i> Memoria — 장기기억 서고 <span class="memoria__version">v1.7.0</span></b>
+            <b><i class="fa-solid fa-book-bookmark"></i> Memoria — 장기기억 서고 <span class="memoria__version">v1.7.1</span></b>
             <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
         </div>
         <div class="inline-drawer-content">
@@ -306,12 +306,12 @@
                             <input type="number" id="memoria_preserve_recent" min="1" max="500" step="1">
                         </div>
                         <div class="memoria__field">
-                            <label for="memoria_record_delay" title="응답 뒤에 내가 N번 더 답을 보낸 뒤에야 기록합니다 (0 = 바로)">기록 지연 (답장 수)</label>
+                            <label for="memoria_record_delay" title="응답 뒤로 이야기가 N턴 더 진행된 뒤에야 기록합니다 (0 = 바로)">기록 지연 (턴 수)</label>
                             <input type="number" id="memoria_record_delay" min="0" max="20" step="1">
                         </div>
                     </div>
                     <p class="memoria__hint"><b>최근 메시지 보존 수</b>는 "자동 숨김"을 켰을 때만 쓰입니다. 요약은 이 값과 상관없이 요약 주기마다 만들어지고, 옛 메시지는 숨겨져 요약이 대신하며, 최근 N개 메시지는 원문 그대로 남습니다. 이때 <b>원문으로 남아 있는 구간만 다루는 요약은 주입하지 않아</b> 같은 내용이 두 번 들어가지 않습니다.<br>
-                    <b>기록 지연</b>이 0이면 응답이 오자마자 기록합니다. 1 이상이면 그 응답 뒤에 <b>내가 N번 더 답을 보낸 뒤에야</b> 기록해서, 리롤·분석 QR·지운 메시지에 사서 호출을 쓰지 않습니다. 새 채팅의 <b>그리팅</b>은 이 값과 상관없이 첫 답을 보낸 뒤에 기록합니다.</p>
+                    <b>기록 지연</b>이 0이면 응답이 오자마자 기록합니다. 1 이상이면 그 응답 뒤로 <b>이야기가 N턴 더 진행된 뒤에야</b> 기록해서, 리롤·분석 QR·지운 메시지에 사서 호출을 쓰지 않습니다. 한 턴은 내 답장 또는 새 응답 중 많은 쪽으로 세므로, <b>인풋 없이 전개지시·풀사칭으로만 진행해도</b> 정상 동작합니다. 새 채팅의 <b>그리팅</b>은 이 값과 상관없이 이야기가 한 턴 진행된 뒤에 기록합니다.</p>
                 </div>
                 <div class="memoria__section">
                     <div class="memoria__section-head">

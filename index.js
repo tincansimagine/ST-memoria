@@ -2513,22 +2513,38 @@ function recordDelayTurns() {
     return Math.max(0, Math.min(20, Math.round(Number(getSettings().recordDelay) || 0)));
 }
 
-/** 이 응답을 기록하려면 그 뒤에 사용자 답이 몇 번 와야 하는가 */
-function requiredRepliesFor(mesId) {
+/** 이 응답을 기록하려면 그 뒤로 이야기가 몇 걸음 더 나아가야 하는가 */
+function requiredStepsFor(mesId) {
     const fu = firstUserMesIndex();
     const greeting = fu < 0 || mesId < fu;
     return greeting ? Math.max(1, recordDelayTurns()) : recordDelayTurns();
 }
 
-function isSettledForRecord(mesId) {
+/**
+ * 응답 뒤로 이야기가 몇 걸음 나아갔는지 — 사용자 메시지 수와 새 응답 수 중 많은 쪽.
+ * 인풋 없이 전개지시·풀사칭으로만 진행하면 사용자 메시지가 아예 없어서, 답장 수만 세면
+ * 영원히 확정되지 않아 기록 지연을 켠 순간 자동 기록이 멈춘다. 그 경우엔 새로 온 응답이
+ * 곧 "다음 걸음"이다. 보통 채팅에서는 한 교환마다 양쪽이 하나씩 늘어 결과가 같다.
+ */
+function storyStepsAfter(mesId) {
+    let users = 0;
     let replies = 0;
-    for (let i = mesId + 1; i < chat.length; i++) if (chat[i]?.is_user) replies++;
-    return replies >= requiredRepliesFor(mesId);
+    for (let i = mesId + 1; i < chat.length; i++) {
+        const m = chat[i];
+        if (!m) continue;
+        if (m.is_user) users++;
+        else replies++;
+    }
+    return Math.max(users, replies);
+}
+
+function isSettledForRecord(mesId) {
+    return storyStepsAfter(mesId) >= requiredStepsFor(mesId);
 }
 
 /**
  * 막 확정된 응답을 기록한다. 채팅 끝에서부터 거슬러 올라가되, 기록 조건을 갓 채운
- * 구간(필요 답장 수 + 여유 3)까지만 본다 — 긴 채팅에서 매번 전부 훑지 않게.
+ * 구간(필요 걸음 수 + 여유 3)까지만 본다 — 긴 채팅에서 매번 전부 훑지 않게.
  * 그보다 오래된 미기록 턴은 도구 탭 색인이 맡는다.
  */
 function commitSettledTurns() {
@@ -2536,20 +2552,24 @@ function commitSettledTurns() {
     if (!settings.enabled || !settings.autoRecord || !getCurrentChatId()) return;
     const store = getStore();
     const horizon = Math.max(1, recordDelayTurns()) + 3;
+    let users = 0;
     let replies = 0;
     for (let i = chat.length - 1; i >= 0; i--) {
         const m = chat[i];
         if (!m) continue;
-        if (m.is_user) {
-            if (++replies > horizon) break;
-            continue;
+        const steps = Math.max(users, replies); // 이 메시지보다 뒤에 있는 것만 센다
+        if (!m.is_user && !m.is_system) {
+            const need = requiredStepsFor(i);
+            // 지연 0이면 응답이 도착할 때 이미 기록됐다
+            if (need > 0 && steps >= need) {
+                const t = store.turns.find(x => x.mesId === i);
+                // 기록됨(실패한 턴은 색인이 재시도)
+                if (!t || t.mesHash !== mesHashOf(m)) queueCommit(i).then(() => updateInjection());
+            }
         }
-        if (m.is_system) continue;
-        const need = requiredRepliesFor(i);
-        if (need === 0 || replies < need) continue; // 0이면 응답이 도착할 때 이미 기록됐다
-        const t = store.turns.find(x => x.mesId === i);
-        if (t && t.mesHash === mesHashOf(m)) continue; // 기록됨(실패한 턴은 색인이 재시도)
-        queueCommit(i).then(() => updateInjection());
+        if (m.is_user) users++;
+        else replies++;
+        if (Math.max(users, replies) > horizon) break;
     }
 }
 
@@ -6592,7 +6612,7 @@ function bindEvents() {
         const mes = chat[id];
         if (!mes || mes.is_user || mes.is_system) return;
         auditRecallEcho(mes); // 직전 주입 기억의 반영 여부 채점 (기록보다 먼저, 원본 감사표 기준)
-        if (type !== 'first_message' && requiredRepliesFor(id) === 0) {
+        if (type !== 'first_message' && requiredStepsFor(id) === 0) {
             queueCommit(id).then(() => updateInjection());
         } else {
             // 지연 기록 — 이 응답은 아직 확정 전이다. 그사이 확정된 옛 응답이 있으면 그것만 기록한다
