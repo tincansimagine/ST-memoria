@@ -5,6 +5,23 @@ const genericCues = new Set(['manual', 'carried', 'episode_raw', 'event', 'relat
 const knowledgeKey = m => JSON.stringify([m.visibility || 'public', normalize(m.owner)]);
 export const NARRATOR_PERSPECTIVE = '__narrator__';
 
+export function isSharedPerspective(value) {
+    return ['', '__public__', NARRATOR_PERSPECTIVE].includes(value);
+}
+
+export function hasChatPerspective(store) {
+    if (store.perspectiveScope === 'chat') return true;
+    if (store.perspectiveScope === 'default') return false;
+    // A named viewpoint belongs to its story, including choices made before scopes existed.
+    return typeof store.perspective === 'string' && !isSharedPerspective(store.perspective);
+}
+
+export function resolvePerspective(store, shared) {
+    return hasChatPerspective(store) || !isSharedPerspective(shared)
+        ? (typeof store.perspective === 'string' ? store.perspective : '')
+        : shared;
+}
+
 export function sameKnowledgeScope(a, b) {
     return (a.visibility || 'public') === (b.visibility || 'public')
         && normalize(a.owner) === normalize(b.owner);
@@ -98,6 +115,8 @@ export function validateArchive(value) {
         }
     }
     if (copy.perspective != null && typeof copy.perspective !== 'string') throw new Error('기억 시점의 형식이 올바르지 않습니다.');
+    if (copy.perspectiveScope != null && !['default', 'chat'].includes(copy.perspectiveScope)) throw new Error('기억·서술 방식의 적용 범위가 올바르지 않습니다.');
+    if (copy.perspectiveScope === 'chat' && typeof copy.perspective !== 'string') throw new Error('이 채팅에 적용할 기억·서술 방식이 없습니다.');
     if (copy.packetPin != null && typeof copy.packetPin.text !== 'string') throw new Error('고정 장부의 형식이 올바르지 않습니다.');
     return copy;
 }
@@ -141,8 +160,9 @@ export function archiveChanges(before, after) {
         }
         for (const [id, item] of next) if (!old.has(id)) changes.push({ shelf, id, type: 'added', before: '', after: describe(shelf, item) });
     }
-    for (const [key, label] of [['perspective', '기억·서술 방식'], ['packetPin', '고정 장부']]) {
+    for (const [key, label] of [['perspective', '기억·서술 방식'], ['perspectiveScope', '방식 적용 범위'], ['packetPin', '고정 장부']]) {
         const value = store => key === 'packetPin' ? store[key]?.text || '(없음)'
+            : key === 'perspectiveScope' ? (hasChatPerspective(store) ? '이 채팅만 따로 설정' : '공통 기본값 사용')
             : store[key] === NARRATOR_PERSPECTIVE ? '소설·풀사칭 (모든 인물 참고)'
             : store[key] === '__public__' ? '공개 기억만' : store[key] || '자동';
         if (value(before) !== value(after)) changes.push({ shelf: 'archive', id: key, type: 'changed', before: `${label}: ${value(before)}`, after: `${label}: ${value(after)}` });

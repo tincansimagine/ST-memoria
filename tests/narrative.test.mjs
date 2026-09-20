@@ -6,6 +6,7 @@ import { runtime, memory } from './runtime.mjs';
 async function story() {
     const app = await runtime();
     const store = app.getStore();
+    store.perspectiveScope = 'chat';
     store.turnCounter = 20;
     store.memories = [
         memory('public', { summary: '두 사람은 등대에서 만났다.', pinned: true }),
@@ -64,6 +65,7 @@ test('novel mode still honors the private-memory switch and explicit public-only
 test('assistant-only continuation searches the latest scene, while a new user contribution takes priority', async () => {
     const app = await runtime();
     const store = app.getStore();
+    store.perspectiveScope = 'chat';
     store.turnCounter = 20;
     store.perspective = NARRATOR_PERSPECTIVE;
     store.memories = [
