@@ -1,0 +1,11 @@
+{
+  "name": "st-memoria",
+  "version": "1.8.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test tests/*.test.mjs",
+    "preview": "node tests/preview-server.mjs"
+  },
+  "devDependencies": { "jquery": "3.7.1" }
+}

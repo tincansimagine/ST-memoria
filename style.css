@@ -3,6 +3,29 @@
    테마 색(BodyColor)을 옅게 섞어 어떤 테마에서도 대비가 유지되도록 함
    ============================================================ */
 
+/* 회상 경로와 복구 검토 — 기존 서고의 색상과 간격을 따른다. */
+.memoria__packet-shares { display: flex; flex-wrap: wrap; gap: 5px; margin: 8px 0; }
+.memoria__recall-row, .memoria__checkpoint { display: flex; align-items: flex-start; gap: 8px; padding: 10px 0; border-bottom: 1px solid var(--mm-border); }
+.memoria__recall-row > div, .memoria__checkpoint > div { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.memoria__recall-row small, .memoria__checkpoint small { display: block; color: var(--mm-muted); margin-top: 4px; }
+.memoria__recall-row.is-excluded { opacity: 0.7; }
+.memoria__recall-row .menu_button, .memoria__checkpoint .menu_button { flex-shrink: 0; }
+.memoria__diagnostic-warning { padding: 8px; border-left: 3px solid var(--mm-accent); background: var(--mm-soft); }
+.memoria__perspective { display: grid; gap: 6px; margin: 10px 0; }
+.memoria__perspective select { width: 100%; min-width: 0; }
+.memoria__source-button { border: 0; background: none; color: inherit; padding: 0 3px; cursor: pointer; }
+.memoria-review { text-align: left; overflow-wrap: anywhere; }
+.memoria-review__list { max-height: 55vh; overflow-y: auto; }
+.memoria-review__row { margin: 8px 0; padding: 10px; border: 1px solid var(--SmartThemeBorderColor, #666); border-radius: 6px; white-space: pre-wrap; }
+.memoria-review__before { opacity: 0.7; margin: 6px 0; }
+.memoria-source-text { white-space: pre-wrap; overflow-wrap: anywhere; font-family: inherit; max-height: 55vh; overflow-y: auto; }
+@media (max-width: 480px) {
+    .memoria__recall-row { flex-wrap: wrap; }
+    .memoria__recall-row > div { flex-basis: calc(100% - 65px); }
+    .memoria__checkpoint { flex-wrap: wrap; }
+    .memoria__checkpoint > div { flex-basis: 100%; }
+}
+
 #memoria_settings.memoria {
     --mm-bg: color-mix(in srgb, var(--SmartThemeBlurTintColor, #1a1a1a) 90%, transparent);
     --mm-panel: var(--SmartThemeBlurTintColor, #1a1a1a);

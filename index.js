@@ -38,6 +38,7 @@ import { SlashCommandParser } from "../../../slash-commands/SlashCommandParser.j
 import { SlashCommand } from "../../../slash-commands/SlashCommand.js";
 import { ARGUMENT_TYPE, SlashCommandArgument } from "../../../slash-commands/SlashCommandArgument.js";
 import { MacrosParser } from "../../../../scripts/macros.js";
+import { findAssociations, sameKnowledgeScope, archiveSnapshot, validateArchive, addCheckpoint, archiveChanges, packetSections } from './archive-engine.mjs';
 
 const MODULE_NAME = 'memoria';
 const INJECT_KEY = 'memoria_ledger';
@@ -248,6 +249,7 @@ const DEFAULT_SETTINGS = Object.freeze({
     injectPosition: 'chat',   // 'chat' = 채팅 내 깊이, 'before' = 메인 프롬프트 앞, 'after' = 메인 프롬프트 뒤
     tokenBudget: 8000,
     topK: 10,
+    associativeRecall: true,
     minScore: 0.12,
     minCosine: 0.08,
     mmrLambda: 0.74,
@@ -504,6 +506,8 @@ function getStore() {
 }
 
 function persistStore() {
+    lastBuildKey = ''; // 같은 턴에서 편집·정리한 결과도 즉시 주입에 반영
+    injectionEpoch++;
     if (!getCurrentChatId()) return;
     saveMetadataDebounced();
     scheduleLocalSync();
@@ -1910,7 +1914,9 @@ function rollbackOrDrop(list, turnIndex) {
 }
 
 function removeDerivedForTurn(store, turnIndex) {
-    store.memories = store.memories.filter(m => m.turnIndex !== turnIndex || m.pinned || m.manual);
+    const turnId = store.turns.find(t => t.turnIndex === turnIndex)?.id;
+    store.memories = store.memories.filter(m => m.pinned || m.manual
+        || (m.turnIndex !== turnIndex && !(m.sources || []).some(s => s.turnId === turnId)));
     store.worldRules = rollbackOrDrop(store.worldRules, turnIndex);
     store.entityStates = rollbackOrDrop(store.entityStates, turnIndex);
     // 스와이프 롤백은 "그 턴에 처음 생긴" 서약만 지운다 — 옛 서약이 이 턴에 재발행돼
@@ -2713,6 +2719,7 @@ async function rebuildAllSummaries(onProgress) {
         try {
             const made = await maybeSummarizeChunk(draft, { flushAll: true, strict: true, onProgress, shouldStop: stop });
             if (stop()) { outcome = { made: null }; return; }
+            addCheckpoint(store, '요약 전체 다시 만들기 전', uuidv4());
             store.chunkSummaries = draft.chunkSummaries;
             store.arcSummaries = draft.arcSummaries;
             store.summaryCursor = draft.summaryCursor;
@@ -2926,13 +2933,22 @@ async function maybeConsolidateArcs(store) {
 /** 통합 대상: 고정·수동·최근 기억은 건드리지 않는다 */
 function consolidationCandidates(store) {
     const currentTurn = store.turnCounter;
-    return store.memories
-        .filter(m => !m.pinned && !m.manual && !m.disabled && (currentTurn - m.turnIndex) >= 4)
-        .slice(0, 120);
+    const scopes = [];
+    for (const m of store.memories.filter(m => !m.pinned && !m.manual && !m.disabled && (currentTurn - m.turnIndex) >= 4)) {
+        const group = scopes.find(rows => sameKnowledgeScope(rows[0], m));
+        if (group) group.push(m);
+        else scopes.push([m]);
+    }
+    // 모델 입력 자체도 등급·소유자별로 분리한다. 비밀을 본 모델이 공개 요약에 섞어 쓰지 않게 한다.
+    return (scopes.sort((a, b) => b.length - a.length)[0] || []).slice(0, 120);
 }
 
 /** 서고 정리 실행. 반환: {merged, dropped, reweighted} 또는 null(실패/대상 없음) */
-async function runConsolidation(store) {
+async function runConsolidation(store, { review = false } = {}) {
+    const liveStore = store;
+    const chatId = getCurrentChatId();
+    const baseline = archiveSnapshot(store);
+    store = JSON.parse(baseline); // 모델 결과는 독립 초안에만 적용
     const candidates = consolidationCandidates(store);
     if (candidates.length < 12) return null;
 
@@ -2957,13 +2973,17 @@ async function runConsolidation(store) {
 
     const stats = { merged: 0, dropped: 0, reweighted: 0 };
     const removeIds = new Set();
+    const mergedKeepIds = new Set();
 
     for (const mg of (Array.isArray(plan.merge) ? plan.merge : []).slice(0, 20)) {
         const keep = idMap.get(String(mg?.keep || '').trim());
-        const absorb = (Array.isArray(mg?.absorb) ? mg.absorb : [])
+        const absorb = [...new Set(Array.isArray(mg?.absorb) ? mg.absorb : [])]
             .map(t => idMap.get(String(t || '').trim()))
-            .filter(m => m && m !== keep && !removeIds.has(m.id));
+            .filter(m => m && m !== keep && !removeIds.has(m.id) && sameKnowledgeScope(keep || {}, m));
         if (!keep || removeIds.has(keep.id) || !absorb.length) continue;
+        // 일부만 허용된 병합의 요약에는 제외된 비밀이 섞일 수 있으므로 병합 전체를 거부한다.
+        if (absorb.length !== new Set((mg.absorb || []).map(String)).size) continue;
+        mergedKeepIds.add(keep.id);
         const newSummary = cleanStr(mg?.summary, 300);
         if (newSummary) keep.summary = newSummary;
         // 병합: 흡수되는 기억의 개체·태그·힌트를 합치고, 중요도는 최댓값 유지
@@ -2972,7 +2992,8 @@ async function runConsolidation(store) {
             keep.tags = [...new Set([...(keep.tags || []), ...(a.tags || [])])].slice(0, 8);
             keep.hints = [...new Set([...(keep.hints || []), ...(a.hints || [])])].slice(0, 6);
             keep.importance = Math.max(keep.importance, a.importance);
-            if (!keep.excerpt && a.excerpt) keep.excerpt = a.excerpt;
+            const origins = m => m.sources || store.turns.filter(t => t.mesId === m.mesId).map(t => ({ turnId: t.id, mesHash: t.mesHash }));
+            keep.sources = [...new Map([...origins(keep), ...origins(a)].map(s => [s.turnId, s])).values()];
             removeIds.add(a.id);
         }
         keep.vec = encodeVec(embedText(memoryIndexText(keep)));
@@ -2984,7 +3005,7 @@ async function runConsolidation(store) {
 
     for (const tag of (Array.isArray(plan.drop) ? plan.drop : []).slice(0, 30)) {
         const m = idMap.get(String(tag || '').trim());
-        if (m && !removeIds.has(m.id)) { removeIds.add(m.id); stats.dropped++; }
+        if (m && !removeIds.has(m.id) && !mergedKeepIds.has(m.id)) { removeIds.add(m.id); stats.dropped++; }
     }
 
     for (const rw of (Array.isArray(plan.reweight) ? plan.reweight : []).slice(0, 40)) {
@@ -2997,9 +3018,18 @@ async function runConsolidation(store) {
     }
 
     if (removeIds.size) store.memories = store.memories.filter(m => !removeIds.has(m.id));
-    if (getSettings().embedApi.mode === 'api') {
-        await attachApiEmbeddings(store.memories.filter(m => !m.avec));
+    const changes = archiveChanges(liveStore, store);
+    if (!changes.length) return stats;
+    if (review && !await reviewArchiveChanges(changes, '서고 정리 검토')) return null;
+    const unchanged = () => getCurrentChatId() === chatId && getStore() === liveStore && archiveSnapshot(liveStore) === baseline;
+    if (!unchanged()) throw new Error('검토 중 채팅이나 서고가 바뀌었습니다. 최신 기록으로 다시 정리해 주세요.');
+    if (getSettings().embedApi.mode === 'api') await attachApiEmbeddings(store.memories.filter(m => !m.avec));
+    if (!unchanged()) {
+        throw new Error('검토 중 채팅이나 서고가 바뀌었습니다. 최신 기록으로 다시 정리해 주세요.');
     }
+    addCheckpoint(liveStore, review ? '검토한 서고 정리 전' : '자동 서고 정리 전', uuidv4());
+    liveStore.memories = store.memories;
+    persistStore();
     return stats;
 }
 
@@ -3094,16 +3124,15 @@ function fossilWeight(age, settings) {
 function authorizedEntities() {
     const names = new Set();
     if (getSettings().authorizeCharPrivate) {
-        if (selected_group) {
-            try {
-                const ctx = getContext();
-                (ctx.groups?.find(g => g.id === selected_group)?.members || []).forEach(avatar => {
-                    const c = characters.find(ch => ch.avatar === avatar);
-                    if (c?.name) names.add(c.name.toLowerCase());
-                });
-            } catch { /* ignore */ }
-        } else if (name2) {
-            names.add(String(name2).toLowerCase());
+        const store = getStore();
+        const perspective = store.perspective || '';
+        // 그룹의 자동 모드는 공개 기억만. 다음 발화자를 확정할 수 없는 시점에는 비밀을 합치지 않는다.
+        const owner = perspective === '__public__' ? '' : perspective || (!selected_group ? name2 : '');
+        if (owner) {
+            names.add(String(owner).toLowerCase());
+            const card = store.characters.find(c => entityKey(c.name) === entityKey(owner)
+                || (c.aliases || []).some(a => entityKey(a) === entityKey(owner)));
+            if (card) for (const n of [card.name, ...(card.aliases || [])]) names.add(String(n).toLowerCase());
         }
     }
     return names;
@@ -3126,6 +3155,8 @@ async function retrieveMemories(queryText, recentUserTexts, sceneText = '') {
     const candidates = [];
     const pinned = [];
     const triggered = [];
+    const trace = new Map();
+    const eligible = [];
 
     const queryVec = embedText(queryText);
     const auxTexts = (recentUserTexts || []).slice(0, settings.multiQueryRecent);
@@ -3181,10 +3212,11 @@ async function retrieveMemories(queryText, recentUserTexts, sceneText = '') {
             hiddenProtected++;
             continue;
         }
-        if (m.pinned) { pinned.push(m); continue; }
+        eligible.push(m);
+        if (m.pinned) { pinned.push(m); trace.set(m.id, { reason: '고정 기억', mode: 'pinned' }); continue; }
         if (m.trigger) {
             try {
-                if (new RegExp(m.trigger, 'i').test(queryLower)) { triggered.push(m); continue; }
+                if (new RegExp(m.trigger, 'i').test(queryLower)) { triggered.push(m); trace.set(m.id, { reason: '입력의 트리거 일치', mode: 'trigger' }); continue; }
             } catch { /* 잘못된 정규식은 무시 */ }
         }
 
@@ -3253,9 +3285,25 @@ async function retrieveMemories(queryText, recentUserTexts, sceneText = '') {
             + (entityHit ? 0.08 : 0) + (hintHit ? 0.07 : 0) + (presenceHit ? 0.05 : 0);
         if (score < settings.minScore) continue;
         candidates.push({ m, score, vec });
+        trace.set(m.id, { reason: [entityHit && '인물 일치', hintHit && '검색 힌트', presenceHit && '현재 장면의 인물', lex >= 0.035 && '어휘 일치', cos >= settings.minCosine && '문맥 유사도'].filter(Boolean).join(' · ') || '관련성 점수', score, mode: 'direct' });
     }
 
     candidates.sort((a, b) => b.score - a.score);
+    if (settings.associativeRecall) {
+        const seeds = candidates.filter(c => c.score >= Math.max(0.18, (candidates[0]?.score || 0) * 0.75)).slice(0, 3);
+        const links = findAssociations(eligible, seeds, {
+            canonicalName: n => entityKey(canonEntityName(store, n)),
+        });
+        for (const link of links) {
+            if (triggered.some(m => m.id === link.m.id)) continue;
+            const existing = candidates.find(c => c.m.id === link.m.id);
+            if (existing && existing.score >= link.score) continue;
+            if (existing) existing.score = link.score;
+            else candidates.push({ m: link.m, score: link.score, vec: decodeVec(link.m.vec) });
+            trace.set(link.m.id, { reason: `연결 단서: ${link.cues.join(', ')}`, mode: 'association', via: link.via, score: link.score });
+        }
+        candidates.sort((a, b) => b.score - a.score);
+    }
     const pool = candidates.slice(0, 80);
 
     // MMR 다양화 + 종류/턴별 상한
@@ -3289,7 +3337,7 @@ async function retrieveMemories(queryText, recentUserTexts, sceneText = '') {
         turnCount[picked.m.turnIndex] = (turnCount[picked.m.turnIndex] || 0) + 1;
     }
 
-    return { selected: selected.map(s => s.m), hiddenProtected, pinned, triggered };
+    return { selected: selected.map(s => s.m), hiddenProtected, pinned, triggered, trace };
 }
 
 /* ============================================================
@@ -3540,7 +3588,8 @@ async function buildPacketSections(query, supervisorPlan) {
         if (chat[i] && !chat[i].is_user && !chat[i].is_system && chat[i].mes) { lastAssistantText = visibleProse(chat[i].mes); break; }
     }
 
-    const { selected, hiddenProtected, pinned, triggered } = await retrieveMemories(query, recentUserTexts.slice(1), lastAssistantText);
+    const { selected, hiddenProtected, pinned, triggered, trace = new Map() } = await retrieveMemories(query, recentUserTexts.slice(1), lastAssistantText);
+    const recallCandidates = [...pinned, ...triggered, ...selected];
 
     const publicRecall = [];
     const protectedRecall = [];
@@ -3649,16 +3698,10 @@ async function buildPacketSections(query, supervisorPlan) {
     // 단, 인용문이 있는 기억은 전환점에 없는 정보(원문 대사)를 담고 있으므로 남긴다.
     const milestoneTexts = milestones.map(m => `${m.title || ''} ${m.summary || ''}`);
     const publicRecallDeduped = publicRecall.filter(m =>
-        (m.excerpt && m.excerpt.length <= 160)
+        m.pinned || (m.excerpt && m.excerpt.length <= 160)
         || !milestoneTexts.some(t => textOverlap(m.summary, t) >= 0.6));
 
-    // 회상 감사표 갱신 — 이번 주입에 실린 기억이 다음 응답에 반영되는지 채점한다
-    recallAudit = {
-        ids: [...publicRecallDeduped, ...protectedRecall].map(m => m.id),
-        at: Date.now(),
-    };
-
-    return { publicRecall: publicRecallDeduped, protectedRecall, hiddenProtected, locks, rules, scene, states, characters, milestones, items, summaries, supervisorPlan, turnNow: store.turnCounter, storyAges, storyTotalDays, sources: await pickDossierExcerpts(query, recentUserTexts.slice(1)) };
+    return { publicRecall: publicRecallDeduped, protectedRecall, hiddenProtected, locks, rules, scene, states, characters, milestones, items, summaries, supervisorPlan, turnNow: store.turnCounter, storyAges, storyTotalDays, sources: await pickDossierExcerpts(query, recentUserTexts.slice(1)), recallCandidates, trace };
 }
 
 /** 두 텍스트의 겹침 비율 (0~1) — 짧은 쪽 기준. 단어 일치와 두 글자 조각(bigram) 일치 중
@@ -3902,6 +3945,8 @@ let lastPacketText = '';
 let packetOverrideOnce = null;
 let lastPacketTokens = 0;
 let lastPacketTrim = 0; // 예산 때문에 내려간 축소 사다리 단수 (0 = 전체 수록)
+let lastPacketDiagnostics = null;
+let injectionEpoch = 0;
 
 /** 토큰 예산에 맞춰 단계적으로 주입 내용을 줄인다. 서약과 캐논은 마지막까지 유지. */
 async function buildPacketWithinBudget(query, supervisorPlan) {
@@ -3912,7 +3957,22 @@ async function buildPacketWithinBudget(query, supervisorPlan) {
         && !parts.rules.length && !parts.states.length && !parts.characters.length && !parts.scene?.any
         && !parts.milestones.length && !parts.items.length && !parts.summaries.length
         && !(parts.sources || []).length && !parts.supervisorPlan;
-    if (empty) { lastPacketTokens = 0; return ''; }
+    const finish = (text, tokens, trim, opts = {}, fallback = false) => {
+        const included = text && !fallback ? [
+            ...parts.publicRecall.slice(0, opts.recallLimit ?? Infinity),
+            ...parts.protectedRecall.slice(0, opts.protectedLimit ?? Infinity),
+        ] : [];
+        const ids = new Set(included.map(m => m.id));
+        const eligibleIds = new Set([...parts.publicRecall, ...parts.protectedRecall].map(m => m.id));
+        return { text, tokens, trim, ids: [...ids], diagnostics: {
+            sections: packetSections(text), hidden: parts.hiddenProtected, fallback,
+            rows: (parts.recallCandidates || []).map(m => ({ id: m.id, summary: m.summary, turn: m.turnIndex,
+                ...parts.trace.get(m.id), included: ids.has(m.id),
+                excluded: ids.has(m.id) ? '' : eligibleIds.has(m.id) ? '토큰 예산' : '최근 원문 또는 전환점과 중복',
+            })),
+        } };
+    };
+    if (empty) return finish('', 0, 0);
 
     // 예산 부족 시 자료실 대목부터 줄인다 (배경 참고는 우선순위 최하)
     const ladder = [
@@ -3935,12 +3995,20 @@ async function buildPacketWithinBudget(query, supervisorPlan) {
         if (density > 0 && text.length * density > settings.tokenBudget * 1.15 && i < ladder.length - 1) continue;
         const tokens = await getTokenCountAsync(text);
         if (text.length) density = tokens / text.length;
-        if (tokens <= settings.tokenBudget) { lastPacketTrim = i; lastPacketTokens = tokens; return text; }
+        if (tokens <= settings.tokenBudget) return finish(text, tokens, i, ladder[i]);
     }
-    lastPacketTrim = ladder.length;
-    const text = renderPacket(parts, ladder[ladder.length - 1]);
-    lastPacketTokens = text ? await getTokenCountAsync(text) : 0;
-    return text;
+    // 최소 장부도 넘치면 우선순위 높은 서약부터 온전한 항목만 담는다. 잘린 문장은 보내지 않는다.
+    const header = `${PACKET_HEADER}\nArchive constraints only. Visible chat takes precedence. Private knowledge stays unspoken.\n`;
+    let text = '';
+    let tokens = 0;
+    let body = '';
+    for (const lock of parts.locks) {
+        const nextBody = `${body}- [${normLockKind(lock.kind)}] ${lock.summary}\n`;
+        const candidate = `${header}${nextBody}${PACKET_FOOTER}`;
+        const count = await getTokenCountAsync(candidate);
+        if (count <= settings.tokenBudget) { body = nextBody; text = candidate; tokens = count; }
+    }
+    return finish(text, tokens, ladder.length, {}, true);
 }
 
 // 감독 대기 상한: 이 시간을 넘기면 연출 없이 생성을 진행한다.
@@ -3983,19 +4051,31 @@ let lastBuildKey = '';
 let lastBuildAt = 0;
 
 async function updateInjection({ runSupervisorPass = false } = {}) {
+    const epoch = ++injectionEpoch;
+    const chatId = getCurrentChatId();
+    const current = () => epoch === injectionEpoch && getCurrentChatId() === chatId;
     const settings = getSettings();
     if (!settings.enabled || !getCurrentChatId()) {
         setExtensionPrompt(INJECT_KEY, '', injectionType(), settings.injectDepth, false, extension_prompt_roles.SYSTEM);
         lastPacketText = '';
+        lastPacketTokens = 0;
+        lastPacketDiagnostics = null;
+        recallAudit = null;
         lastBuildKey = '';
+        refreshPacketPreview();
         return;
     }
 
     // 1회용 수정본이 대기 중이면 재생성 없이 그대로 주입 (다음 응답이 도착하면 폐기)
     if (packetOverrideOnce != null) {
-        lastPacketText = packetOverrideOnce;
-        setExtensionPrompt(INJECT_KEY, packetOverrideOnce, injectionType(), settings.injectDepth, false, extension_prompt_roles.SYSTEM);
-        lastPacketTokens = packetOverrideOnce ? await getTokenCountAsync(packetOverrideOnce) : 0;
+        const text = packetOverrideOnce;
+        const tokens = text ? await getTokenCountAsync(text) : 0;
+        if (!current()) return;
+        lastPacketText = text;
+        setExtensionPrompt(INJECT_KEY, text, injectionType(), settings.injectDepth, false, extension_prompt_roles.SYSTEM);
+        lastPacketTokens = tokens;
+        lastPacketDiagnostics = null;
+        recallAudit = null;
         lastBuildKey = '';
         refreshPacketPreview();
         return;
@@ -4005,9 +4085,13 @@ async function updateInjection({ runSupervisorPass = false } = {}) {
     // 기록은 계속 쌓이지만 주입에는 반영되지 않는다 — 미리보기에 그렇게 표시한다.
     const pin = getStore().packetPin;
     if (pin?.text) {
+        const tokens = await getTokenCountAsync(pin.text);
+        if (!current()) return;
         lastPacketText = pin.text;
         setExtensionPrompt(INJECT_KEY, pin.text, injectionType(), settings.injectDepth, false, extension_prompt_roles.SYSTEM);
-        lastPacketTokens = await getTokenCountAsync(pin.text);
+        lastPacketTokens = tokens;
+        lastPacketDiagnostics = null;
+        recallAudit = null;
         lastBuildKey = '';
         refreshPacketPreview();
         return;
@@ -4023,16 +4107,22 @@ async function updateInjection({ runSupervisorPass = false } = {}) {
     // 전송(MESSAGE_SENT)과 생성 시작(GENERATION_STARTED)이 같은 상태로 연달아 부르는 경우,
     // 두 번째 호출은 장부를 다시 짓지 않는다 (연출 패스는 매번 새로 지어야 하므로 제외).
     // 창은 짧게(5초) — 그 사이 설정을 바꿔도 다음 턴이면 자연히 반영된다.
-    const buildKey = `${getCurrentChatId()}|${chat.length}|${getStringHash(query)}|${settings.tokenBudget}`;
+    const buildKey = `${chatId}|${chat.length}|${getStringHash(query)}|${settings.tokenBudget}|${getStore().perspective || ''}|${settings.associativeRecall}|${settings.authorizeCharPrivate}`;
     if (!runSupervisorPass && buildKey === lastBuildKey && Date.now() - lastBuildAt < 5000 && lastPacketText !== '') {
         setExtensionPrompt(INJECT_KEY, lastPacketText, injectionType(), settings.injectDepth, false, extension_prompt_roles.SYSTEM);
         return;
     }
 
     const plan = runSupervisorPass ? await runSupervisor(query) : null;
-    const packet = await buildPacketWithinBudget(query, plan); // lastPacketTokens도 여기서 갱신
-    lastPacketText = packet;
-    setExtensionPrompt(INJECT_KEY, packet, injectionType(), settings.injectDepth, false, extension_prompt_roles.SYSTEM);
+    if (!current()) return;
+    const packet = await buildPacketWithinBudget(query, plan);
+    if (!current()) return;
+    lastPacketText = packet.text;
+    lastPacketTokens = packet.tokens;
+    lastPacketTrim = packet.trim;
+    lastPacketDiagnostics = packet.diagnostics;
+    recallAudit = { ids: packet.ids, at: Date.now() }; // 실제 실린 기억만 학습; 질문·연출용 초안은 제외
+    setExtensionPrompt(INJECT_KEY, packet.text, injectionType(), settings.injectDepth, false, extension_prompt_roles.SYSTEM);
     lastBuildKey = buildKey;
     lastBuildAt = Date.now();
     refreshPacketPreview();
@@ -4604,6 +4694,7 @@ async function proposeEditorTurn(instruction) {
 /** 사람이 확인한 편집안을 실제로 store에 반영한다. 반환: {applied, skipped} */
 async function applyEditorOps(ops) {
     const store = getStore();
+    addCheckpoint(store, '사서 정정 적용 전', uuidv4());
     const now = store.turnCounter;
     let applied = 0;
     const skipped = [];
@@ -4899,10 +4990,25 @@ function exportMemory() {
 
 async function importMemory(file) {
     try {
+        if (!getCurrentChatId()) throw new Error('먼저 채팅을 열어 주세요.');
+        const chatId = getCurrentChatId();
+        const store = getStore();
+        const baseline = archiveSnapshot(store);
         const payload = JSON.parse(await getFileText(file));
         if (payload?.type !== 'memoria-export' || !payload.store) throw new Error('형식이 다릅니다');
-        chat_metadata[MODULE_NAME] = payload.store;
-        chat_metadata[MODULE_NAME].version = STORE_VERSION;
+        const restored = validateArchive(payload.store);
+        const changes = archiveChanges(store, restored);
+        if (!await reviewArchiveChanges(changes, '파일로 서고 복원', '현재 서고 전체를 파일의 기록으로 교체합니다.')) return;
+        if (getCurrentChatId() !== chatId || getStore() !== store || archiveSnapshot(store) !== baseline || pendingCommits || llmBusy) {
+            throw new Error('채팅이나 서고가 바뀌었거나 기록 중입니다. 작업이 끝난 뒤 다시 가져와 주세요.');
+        }
+        addCheckpoint(store, '파일 복원 전', uuidv4());
+        restored.checkpoints = store.checkpoints;
+        chat_metadata[MODULE_NAME] = restored;
+        localSyncedChat = null;
+        packetOverrideOnce = packetDraft = null;
+        recallAudit = null;
+        reconcileWithChat();
         persistStore();
         renderAllPanels();
         await updateInjection();
@@ -4920,10 +5026,14 @@ async function importMemory(file) {
  */
 async function importCarryOver(file) {
     try {
+        if (!getCurrentChatId()) throw new Error('먼저 채팅을 열어 주세요.');
+        const chatId = getCurrentChatId();
         const payload = JSON.parse(await getFileText(file));
         if (payload?.type !== 'memoria-export' || !payload.store) throw new Error('Memoria 내보내기 파일이 아닙니다');
-        const src = payload.store;
+        const src = validateArchive(payload.store);
+        if (getCurrentChatId() !== chatId || pendingCommits || llmBusy) throw new Error('기록이 끝난 뒤 같은 채팅에서 다시 가져와 주세요.');
         const store = getStore();
+        addCheckpoint(store, '다른 채팅 인계 전', uuidv4());
         let carriedSummaries = 0;
         let carriedMemories = 0;
         let carriedRules = 0;
@@ -4941,7 +5051,7 @@ async function importCarryOver(file) {
             if (!m?.summary || !(m.pinned || m.manual)) continue; // 고정/수동 기억만 인계
             store.memories.push({
                 ...m,
-                id: uuidv4(), turnIndex: 0, mesId: -1, manual: true,
+                id: uuidv4(), turnIndex: 0, mesId: -1, manual: true, sources: [],
                 kind: normKind(m.kind), visibility: normVisibility(m.visibility),
                 tags: [...new Set([...(m.tags || []), 'carried'])],
                 vec: m.vec || encodeVec(embedText(m.summary)),
@@ -4996,8 +5106,15 @@ async function importCarryOver(file) {
 }
 
 async function resetMemory() {
+    if (pendingCommits || llmBusy) throw new Error('진행 중인 기록이 끝난 뒤 초기화해 주세요.');
+    const chatId = getCurrentChatId();
+    const previous = getStore();
+    addCheckpoint(previous, '서고 초기화 전', uuidv4());
     delete chat_metadata[MODULE_NAME];
-    getStore();
+    getStore().checkpoints = previous.checkpoints;
+    lastBuildKey = '';
+    injectionEpoch++;
+    packetOverrideOnce = packetDraft = recallAudit = null;
     // 디바운스 저장을 기다리는 동안 새로고침·앱 전환이 일어나면 초기화 전 데이터가
     // 파일에서 되살아난다("초기화했는데 세계 탭에 옛 데이터가 다시 로드") — 즉시 저장으로 확정
     try {
@@ -5006,6 +5123,7 @@ async function resetMemory() {
         console.error(`[${MODULE_NAME}] 초기화 즉시 저장 실패, 디바운스 저장으로 대체:`, e);
         persistStore();
     }
+    if (getCurrentChatId() !== chatId) return;
     // 요약이 사라졌으니 자동 숨김으로 가려 둔 메시지도 되살린다 —
     // 숨긴 채로 두면 재색인이 전부 건너뛰어 "색인할 새 메시지가 없습니다"가 된다
     if (chat.length) {
@@ -5025,6 +5143,114 @@ async function resetMemory() {
 /* ============================================================
  * UI
  * ============================================================ */
+
+const SHELF_LABELS = { turns: '턴 기록', memories: '기억', worldRules: '캐논', entityStates: '상태', locks: '서약', chunkSummaries: '요약', arcSummaries: '연대기', characters: '인물', milestones: '연표', items: '물건', dossier: '자료실', archive: '서고 설정' };
+
+async function reviewArchiveChanges(changes, title, note = '확인한 변경만 적용합니다. 적용 직전의 서고는 복구 지점에 보관합니다.') {
+    const content = $('<div class="memoria-review"></div>');
+    content.append($('<h3></h3>').text(title), $('<p></p>').text(note));
+    const counts = ['added', 'changed', 'removed'].map(type => changes.filter(c => c.type === type).length);
+    content.append($('<p></p>').text(`추가 ${counts[0]} · 변경 ${counts[1]} · 삭제 ${counts[2]}`));
+    const list = $('<div class="memoria-review__list"></div>').appendTo(content);
+    for (const change of changes) {
+        const row = $('<article class="memoria-review__row"></article>').appendTo(list);
+        row.append($('<strong></strong>').text(`${SHELF_LABELS[change.shelf]} · ${{ added: '추가', changed: '변경', removed: '삭제' }[change.type]}`));
+        if (change.before) row.append($('<div class="memoria-review__before"></div>').text(`이전: ${change.before}`));
+        if (change.after) row.append($('<div></div>').text(`이후: ${change.after}`));
+        if (change.importanceBefore !== change.importanceAfter) row.append($('<small></small>').text(`중요도 ${fmtPct(change.importanceBefore || 0)} → ${fmtPct(change.importanceAfter || 0)}`));
+    }
+    if (!changes.length) list.append($('<p></p>').text('목록 내용의 차이가 없습니다. 서고의 설정과 기록 시점은 교체될 수 있습니다.'));
+    const ctx = getContext();
+    const result = await ctx.callGenericPopup(content, ctx.POPUP_TYPE.CONFIRM, '', { okButton: '변경 적용', cancelButton: '취소', wide: true });
+    return result === true || result === ctx.POPUP_RESULT.AFFIRMATIVE;
+}
+
+function renderCheckpoints() {
+    const list = $('#memoria_checkpoint_list').empty();
+    const points = getCurrentChatId() ? getStore().checkpoints || [] : [];
+    if (!points.length) { list.append($('<p class="memoria__hint"></p>').text('아직 복구 지점이 없습니다. 정리·정정·복원 전 자동으로 만들어집니다.')); return; }
+    for (const point of points) {
+        const row = $('<div class="memoria__checkpoint"></div>').appendTo(list);
+        const label = $('<div></div>').appendTo(row);
+        label.append($('<strong></strong>').text(point.label));
+        label.append($('<small></small>').text(`${new Date(point.at).toLocaleString()} · t${point.turn} · ${Math.ceil(point.bytes / 1024)} KB`));
+        row.append($('<button type="button" class="menu_button memoria-checkpoint-restore">검토·복구</button>').attr('data-id', point.id));
+    }
+}
+
+async function restoreCheckpoint(id) {
+    if (!getCurrentChatId()) throw new Error('먼저 채팅을 열어 주세요.');
+    if (pendingCommits || llmBusy) throw new Error('기록이 끝난 뒤 복구해 주세요.');
+    const store = getStore();
+    const chatId = getCurrentChatId();
+    const baseline = archiveSnapshot(store);
+    const point = (store.checkpoints || []).find(p => p.id === id);
+    if (!point) return;
+    const restored = validateArchive(JSON.parse(point.data));
+    if (!await reviewArchiveChanges(archiveChanges(store, restored), `${point.label} 복구`, '서고를 이 시점으로 되돌립니다. 이후 기록도 교체됩니다. 대화 원문은 변경하지 않으며, 현재 대화와 맞지 않는 기록은 동기화 과정에서 제외됩니다.')) return;
+    if (getCurrentChatId() !== chatId || getStore() !== store || archiveSnapshot(store) !== baseline || pendingCommits || llmBusy) {
+        throw new Error('검토 중 채팅이나 기록이 바뀌었습니다. 다시 검토해 주세요.');
+    }
+    addCheckpoint(store, '복구 실행 전', uuidv4());
+    restored.checkpoints = store.checkpoints;
+    chat_metadata[MODULE_NAME] = restored;
+    packetOverrideOnce = packetDraft = recallAudit = null;
+    localSyncedChat = null;
+    reconcileWithChat();
+    persistStore();
+    renderAllPanels();
+    await updateInjection();
+    toastr.success('서고를 복구했습니다. 복구 직전의 상태도 복구 지점에 남겼습니다.', 'Memoria');
+}
+
+async function showMemorySource(id) {
+    const store = getStore();
+    const m = store.memories.find(row => row.id === id);
+    if (!m) return;
+    const content = $('<div class="memoria-review"></div>');
+    content.append($('<h3></h3>').text('기억의 출처'), $('<p></p>').text(m.summary));
+    const primary = store.turns.find(t => t.mesId === m.mesId && t.turnIndex === m.turnIndex);
+    const sources = m.sources || (primary ? [{ turnId: primary.id, mesHash: primary.mesHash }] : []);
+    let found = 0;
+    for (const source of sources) {
+        const turn = store.turns.find(t => t.id === source.turnId);
+        const message = turn && chat[turn.mesId];
+        if (!message || message.is_user || source.mesHash !== mesHashOf(message)) continue;
+        found++;
+        content.append($('<h4></h4>').text(`메시지 #${turn.mesId} · ${message.name || '응답'}`));
+        content.append($('<pre class="memoria-source-text"></pre>').text(visibleProse(message.mes)));
+    }
+    if (!found) content.append($('<p></p>').text(m.manual || (m.tags || []).includes('carried')
+        ? '수동 또는 인계된 기억입니다. 이 채팅에서 원문을 확인할 수 없습니다.'
+        : '원문이 편집·삭제되었거나 기록과 일치하지 않습니다. 도구의 「채팅과 기록 맞추기」를 실행해 주세요.'));
+    const ctx = getContext();
+    await ctx.callGenericPopup(content, ctx.POPUP_TYPE.TEXT, '', { wide: true });
+}
+
+function renderRecallDiagnostics() {
+    const view = $('#memoria_recall_diagnostics').empty();
+    const diag = lastPacketDiagnostics;
+    if (!diag) { view.append($('<p class="memoria__hint"></p>').text(lastPacketText ? '직접 수정하거나 고정한 장부입니다. 자동 회상 경로는 적용되지 않습니다.' : '주입을 갱신하면 회상 경로가 표시됩니다.')); return; }
+    if (diag.fallback) view.append($('<p class="memoria__diagnostic-warning"></p>').text('예산이 최소 장부보다 작습니다. 담을 수 있는 서약만 보냈으며 일부 제약도 빠질 수 있습니다. 주입 예산을 늘려 주세요.'));
+    view.append($('<p class="memoria__hint"></p>').text(`실제 주입 ${diag.rows.filter(r => r.included).length}개 · 중복/예산 제외 ${diag.rows.filter(r => !r.included).length}개 · 시점 밖 비공개 ${diag.hidden}개`));
+    const labels = { Canon: '캐논', Cast: '인물', 'Notable Items': '물건', 'Turning Points': '전환점', 'Story So Far': '요약', Pledges: '서약', 'Recalled Moments': '회상', 'Hidden Knowledge': '비공개', 'Source Excerpts': '자료실', 'Scene Now': '현재 장면', 'Status Board': '상태', Direction: '연출' };
+    const total = diag.sections.reduce((n, s) => n + s.chars, 0) || 1;
+    const sections = $('<div class="memoria__packet-shares" aria-label="장부 구성 비중 (글자 수 기준)"></div>').appendTo(view);
+    for (const s of diag.sections) sections.append($('<span class="memoria__chip"></span>').text(`${labels[s.name] || s.name} ${Math.round(s.chars / total * 100)}%`));
+    view.append($('<small class="memoria__hint"></small>').text('구성 비중은 글자 수 기준입니다. 총 토큰 수는 실측합니다.'));
+    for (const row of diag.rows) {
+        const item = $('<div class="memoria__recall-row"></div>').toggleClass('is-excluded', !row.included).appendTo(view);
+        item.append($('<span class="memoria__badge"></span>').text(row.included ? '주입' : '제외'));
+        const detail = $('<div></div>').appendTo(item);
+        detail.append($('<div></div>').text(row.summary));
+        detail.append($('<small></small>').text(`t${row.turn} · ${row.reason || '관련 기억'}${row.excluded ? ` → ${row.excluded}` : ''}`));
+        if (row.via) {
+            const via = getStore().memories.find(m => m.id === row.via);
+            if (via) detail.append($('<small></small>').text(`연결된 기억: ${via.summary}`));
+        }
+        item.append($('<button type="button" class="menu_button memoria-source">출처</button>').attr('data-id', row.id));
+    }
+}
 
 function fmtPct(x) { return `${Math.round(x * 100)}%`; }
 
@@ -5057,6 +5283,7 @@ function updateStatusUI(activity) {
 }
 
 function refreshPacketPreview() {
+    renderRecallDiagnostics();
     const el = $('#memoria_packet_preview');
     if (!el.length) return;
     if (el.is(':focus')) return; // 사용자가 수정 중인 내용을 자동 갱신이 덮어쓰지 않게
@@ -5134,7 +5361,8 @@ function renderMemoriesPanel() {
                     <i class="fa-solid ${visIcon} memoria__mem-vis" title="${visNorm}${m.owner ? ` (소유: ${escapeHtml(m.owner)})` : ''}"></i>
                     <span class="memoria__mem-imp" title="중요도">${fmtPct(m.importance)}</span>
                     <span class="memoria__mem-actions">
-                        <i class="fa-solid fa-thumbtack memoria-mem-pin" title="${m.pinned ? '고정 해제' : '항상 주입(고정)'}"></i>
+                        <button type="button" class="memoria-source memoria__source-button" data-id="${escapeHtml(m.id)}" title="대화 원문 확인" aria-label="대화 원문 확인"><i class="fa-solid fa-book-open"></i></button>
+                        <i class="fa-solid fa-thumbtack memoria-mem-pin" title="${m.pinned ? '고정 해제' : '예산 안에서 우선 주입(고정)'}"></i>
                         <i class="fa-solid ${m.disabled ? 'fa-eye-slash' : 'fa-eye'} memoria-mem-toggle" title="${m.disabled ? '활성화' : '비활성화'}"></i>
                         <i class="fa-solid fa-pen memoria-mem-edit" title="편집"></i>
                         <i class="fa-solid fa-trash memoria-mem-delete" title="삭제"></i>
@@ -5410,6 +5638,16 @@ function renderSummariesPanel() {
 
 function renderSettingsPanel() {
     const s = getSettings();
+    const store = getStore();
+    $('#memoria_associative_recall').prop('checked', s.associativeRecall);
+    const perspective = $('#memoria_perspective').empty();
+    perspective.append($('<option value=""></option>').text(selected_group ? '자동 · 그룹은 공개 기억만' : `자동 · ${name2 || '현재 캐릭터'}`));
+    perspective.append($('<option value="__public__"></option>').text('공개 기억만'));
+    const names = new Set(store.characters.filter(c => !c.disabled).map(c => c.name));
+    if (name2 && !selected_group) names.add(name2);
+    if (store.perspective && store.perspective !== '__public__') names.add(store.perspective);
+    for (const name of names) perspective.append($('<option></option>').val(name).text(name));
+    perspective.val(store.perspective || '').prop('disabled', !getCurrentChatId());
     $('#memoria_enabled').prop('checked', s.enabled);
     $('#memoria_auto_record').prop('checked', s.autoRecord);
     $('#memoria_supervisor').prop('checked', s.supervisorEnabled);
@@ -5494,6 +5732,7 @@ function renderAllPanels() {
     renderSummariesPanel();
     renderSettingsPanel();
     renderPromptsPanel();
+    renderCheckpoints();
 }
 
 /* ============================================================
@@ -5505,6 +5744,35 @@ function findMemory(id) {
 }
 
 function bindUI() {
+    $('#memoria_settings').on('click', '.memoria-source', async function () {
+        try { await showMemorySource(String($(this).attr('data-id'))); }
+        catch (e) { toastr.error(e.message, 'Memoria'); }
+    });
+    $('#memoria_checkpoint_create').on('click', function () {
+        try {
+            if (!getCurrentChatId()) throw new Error('먼저 채팅을 열어 주세요.');
+            if (pendingCommits || llmBusy) throw new Error('기록이 끝난 뒤 저장해 주세요.');
+            addCheckpoint(getStore(), '직접 저장한 서고', uuidv4());
+            persistStore(); renderCheckpoints();
+            toastr.success('복구 지점을 저장했습니다.', 'Memoria');
+        } catch (e) { toastr.error(e.message, 'Memoria'); }
+    });
+    $('#memoria_settings').on('click', '.memoria-checkpoint-restore', async function () {
+        try { await restoreCheckpoint(String($(this).attr('data-id'))); }
+        catch (e) { toastr.error(e.message, 'Memoria'); }
+    });
+    $('#memoria_perspective').on('change', async function () {
+        if (!getCurrentChatId()) return;
+        getStore().perspective = String($(this).val() || '');
+        packetOverrideOnce = null;
+        persistStore();
+        await updateInjection();
+    });
+    $('#memoria_associative_recall').on('change', async function () {
+        getSettings().associativeRecall = $(this).prop('checked');
+        saveSettingsDebounced();
+        await updateInjection();
+    });
     // 탭 전환
     $('#memoria_settings').on('click', '.memoria__tab', function () {
         const tab = $(this).data('tab');
@@ -5529,6 +5797,7 @@ function bindUI() {
     });
 
     $('#memoria_refresh_packet').on('click', async function () {
+        lastBuildKey = '';
         packetOverrideOnce = null; // 갱신은 수정본·초안 폐기를 겸한다
         packetDraft = null;
         await updateInjection();
@@ -6401,6 +6670,7 @@ function bindUI() {
     // ── 서고 정리 (수동)
     $('#memoria_consolidate_now').on('click', async function () {
         if (!getCurrentChatId()) { toastr.warning('열린 채팅이 없습니다.', 'Memoria'); return; }
+        if ($(this).hasClass('disabled') || pendingCommits || llmBusy) { toastr.info('진행 중인 작업이 끝난 뒤 정리해 주세요.', 'Memoria'); return; }
         const store = getStore();
         if (consolidationCandidates(store).length < 12) {
             toastr.info('정리할 만큼 기억이 쌓이지 않았습니다. (최소 12개)', 'Memoria');
@@ -6409,13 +6679,13 @@ function bindUI() {
         const $btn = $(this);
         const $prog = $('#memoria_consolidate_progress');
         $btn.addClass('disabled');
-        $prog.text('정리 중…');
+        $prog.text('정리안을 만드는 중…');
         try {
-            const stats = await runConsolidation(store);
+            const stats = await runConsolidation(store, { review: true });
+            if (!stats) { toastr.info('변경을 적용하지 않았습니다.', 'Memoria'); return; }
             store.lastConsolidateTurn = store.turnCounter;
-            persistStore(); renderMemoriesPanel(); updateStatusUI(); updateInjection();
-            if (stats) toastr.success(`서고 정리 완료 — 병합 ${stats.merged} · 정리 ${stats.dropped} · 중요도 재조정 ${stats.reweighted}`, 'Memoria');
-            else toastr.info('정리할 만큼 기억이 쌓이지 않았습니다. (최소 12개)', 'Memoria');
+            persistStore(); renderMemoriesPanel(); renderCheckpoints(); updateStatusUI(); updateInjection();
+            toastr.success(`서고 정리 완료 — 병합 ${stats.merged} · 정리 ${stats.dropped} · 중요도 재조정 ${stats.reweighted}`, 'Memoria');
         } catch (e) {
             console.error(`[${MODULE_NAME}] 서고 정리 실패:`, e);
             toastr.error(`서고 정리에 실패했습니다. ${e.message || ''}`, 'Memoria', { timeOut: 12000 });
@@ -6476,10 +6746,15 @@ function bindUI() {
     });
     $('#memoria_reset').on('click', async function () {
         const ctx = getContext();
-        const ok = await ctx.callGenericPopup('이 채팅의 모든 기억(기억·인물·캐논·상태·서약·요약)을 삭제합니다.\n숨겨 둔 메시지도 모두 표시로 되돌립니다 (재색인 가능하도록).\n되돌릴 수 없습니다. 계속할까요?', ctx.POPUP_TYPE.CONFIRM, '', { okButton: '전부 삭제' });
+        const chatId = getCurrentChatId();
+        if (!chatId) return toastr.warning('먼저 채팅을 열어 주세요.', 'Memoria');
+        const ok = await ctx.callGenericPopup('이 채팅의 모든 기억(기억·인물·캐논·상태·서약·요약)을 비웁니다.\n숨겨 둔 메시지도 모두 표시로 되돌립니다 (재색인 가능하도록).\n초기화 직전의 서고는 복구 지점에 보관합니다. 계속할까요?', ctx.POPUP_TYPE.CONFIRM, '', { okButton: '전부 비우기' });
         if (ok !== ctx.POPUP_RESULT.AFFIRMATIVE && ok !== true) return;
-        await resetMemory();
-        toastr.success('이 채팅의 기억을 초기화했습니다. 도구 탭에서 다시 색인할 수 있습니다.', 'Memoria');
+        if (getCurrentChatId() !== chatId) return;
+        try {
+            await resetMemory();
+            toastr.success('이 채팅의 기억을 초기화했습니다. 도구 탭에서 복구하거나 다시 색인할 수 있습니다.', 'Memoria');
+        } catch (e) { toastr.error(e.message, 'Memoria'); }
     });
 }
 
@@ -6661,6 +6936,11 @@ function bindEvents() {
     });
 
     eventSource.on(event_types.CHAT_CHANGED, () => {
+        injectionEpoch++;
+        lastPacketText = '';
+        lastPacketTokens = 0;
+        lastPacketDiagnostics = recallAudit = null;
+        lastBuildKey = '';
         packetOverrideOnce = null; // 수정본은 그 채팅의 그 순간에만 유효
         packetDraft = null;
         vecCache.clear();
