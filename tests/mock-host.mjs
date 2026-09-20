@@ -39,6 +39,8 @@ const turns = subjects.map((s, i) => ({ id: `turn${i}`, mesId: i * 2 + 1, turnIn
 const memories = subjects.map((s, i) => ({ id: `memory${i}`, kind: i % 2 ? 'promise' : 'event', summary: `아리아와 여행자는 ${s}을 기억한다.`, mesId: i * 2 + 1, turnIndex: i + 1,
     entities: [name2], tags: i < 2 ? ['은빛반지', '재회'] : [`여행${i}`], hints: [], visibility: 'public', owner: null, importance: 0.6, pinned: false }));
 memories.push({ id: 'private-memory', kind: 'secret', summary: '아리아만 편지의 발신인이 보라라는 사실을 안다.', mesId: 11, turnIndex: 6, entities: [name2], tags: ['편지'], visibility: 'secret', owner: name2, pinned: true, importance: 0.8 });
+memories.push({ id: 'player-memory', kind: 'impression', summary: '여행자는 돌아갈 고향을 그리워하면서도 아리아에게 말하지 않았다.', mesId: 11, turnIndex: 6, entities: [name1], tags: ['고향'], visibility: 'private', owner: name1, pinned: true, importance: 0.8 });
+memories.push({ id: 'bora-memory', kind: 'secret', summary: '보라만 등대 창고의 열쇠가 어디에 있는지 안다.', mesId: 13, turnIndex: 7, entities: ['보라'], tags: ['열쇠'], visibility: 'secret', owner: '보라', pinned: true, importance: 0.8 });
 export const chat_metadata = { memoria: { version: 1, lexiconRev: 5, turnCounter: 18, turns, memories,
     characters: [{ id: 'aria', name: name2, aliases: ['Aria'], role: '등대지기', traits: [], relationships: [], firstTurn: 1, updatedTurn: 18 }, { id: 'bora', name: '보라', aliases: [], traits: [], relationships: [], firstTurn: 6, updatedTurn: 6 }],
     worldRules: [{ id: 'rule', scope: 'world', key: 'lighthouse', value: '등대는 여행자들의 귀환을 알린다.', turnIndex: 1 }],
