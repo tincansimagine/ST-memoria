@@ -13,10 +13,10 @@ const html = `<!doctype html><html lang="ko"><meta charset="utf-8"><meta name="v
 [data-theme="light"] .fixture-note{color:#666}
 [data-theme="light"] :is(input,textarea,select,button,.fixture-dialog){background:#fff;border-color:#c5c5c5}
 [data-theme="light"] .menu_button{border-color:#c5c5c5}
-</style><main><h1>Memoria · 화면 검증</h1><p class="fixture-note">가상 대화와 모의 API를 사용하는 로컬 검증 화면입니다. <a href="/?theme=light">밝은 테마</a> · <a href="/">어두운 테마</a></p><div id="extensions_settings2"></div></main><div id="toast" hidden role="status"></div>
+</style><link rel="stylesheet" href="/tests/preview-popup.css"><main><h1>Memoria · 화면 검증</h1><p class="fixture-note">가상 대화와 모의 API를 사용하는 로컬 검증 화면입니다. <a href="/?theme=light">밝은 테마</a> · <a href="/">어두운 테마</a></p><div id="extensions_settings2"></div></main><div id="toast" hidden role="status"></div>
 <script src="/jquery.js"></script><script>window.toastr=Object.fromEntries(['success','info','warning','error'].map(k=>[k,(msg)=>{const el=document.getElementById('toast');el.hidden=false;el.textContent=msg}]));</script><script type="module" src="/index.js"></script></html>`;
 const allowed = new Map([['/jquery.js', 'node_modules/jquery/dist/jquery.min.js'], ['/style.css', 'style.css'], ['/archive-engine.mjs', 'archive-engine.mjs'], ['/templates/settings.html', 'templates/settings.html'], ['/manifest.json', 'manifest.json'], ['/tests/mock-host.mjs', 'tests/mock-host.mjs']]);
-for (const file of ['library-engine.mjs', 'library-ui.mjs', 'templates/library.html', 'tests/library-fixture.mjs']) allowed.set(`/${file}`, file);
+for (const file of ['library-engine.mjs', 'library-ui.mjs', 'templates/library.html', 'tests/library-fixture.mjs', 'tests/preview-popup.css']) allowed.set(`/${file}`, file);
 createServer(async (req, res) => {
     try {
         const url = new URL(req.url, 'http://localhost');

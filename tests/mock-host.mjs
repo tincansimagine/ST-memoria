@@ -62,14 +62,17 @@ export function getContext() {
         callGenericPopup: async (content, type, value, opts = {}) => new Promise(resolve => {
             const dialog = document.createElement('dialog');
             dialog.className = 'fixture-dialog';
-            if (typeof content === 'string') { const text = document.createElement('p'); text.textContent = content; dialog.append(text); }
-            else $(dialog).append(content);
+            if (opts.allowVerticalScrolling) dialog.classList.add('vertical_scrolling_dialogue_popup');
+            const body = document.createElement('div'); body.className = 'popup-body';
+            const pane = document.createElement('div'); pane.className = 'popup-content';
+            if (typeof content === 'string') { const text = document.createElement('p'); text.textContent = content; pane.append(text); }
+            else $(pane).append(content);
             const actions = document.createElement('footer');
             const ok = document.createElement('button'); ok.textContent = opts.okButton || '닫기';
             ok.onclick = () => { dialog.close(); dialog.remove(); resolve(1); };
             actions.append(ok);
             if (type === 1) { const cancel = document.createElement('button'); cancel.textContent = '취소'; cancel.onclick = () => { dialog.close(); dialog.remove(); resolve(0); }; actions.append(cancel); }
-            dialog.append(actions); document.body.append(dialog);
+            body.append(pane, actions); dialog.append(body); document.body.append(dialog);
             dialog.addEventListener('cancel', () => { dialog.remove(); resolve(0); });
             dialog.showModal();
         }),

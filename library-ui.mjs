@@ -201,7 +201,8 @@ export async function showArchiveLibrary({ getContext, getRequestHeaders, downlo
         action('backup').addEventListener('click', () => backup(snapshot.entries.filter(e => selected.has(e.key))));
         render();
         const context = getContext();
-        await context.callGenericPopup($root, context.POPUP_TYPE.TEXT, '', { wide: true, okButton: '닫기' });
+        // SillyTavern clips popup content by default; the body must opt into vertical scrolling.
+        await context.callGenericPopup($root, context.POPUP_TYPE.TEXT, '', { wide: true, allowVerticalScrolling: true, okButton: '닫기' });
     } finally {
         disposed = true; controller?.abort(); opened = false;
     }
