@@ -1,7 +1,7 @@
 <div id="memoria_settings" class="memoria">
     <div class="inline-drawer">
         <div class="inline-drawer-toggle inline-drawer-header">
-            <b><i class="fa-solid fa-book-bookmark"></i> Memoria — 장기기억 서고 <span class="memoria__version">v1.7.1</span></b>
+            <b><i class="fa-solid fa-book-bookmark"></i> Memoria — 장기기억 서고 <span class="memoria__version">v1.8.0</span></b>
             <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
         </div>
         <div class="inline-drawer-content">
@@ -60,6 +60,10 @@
                     </div>
                     <div id="memoria_packet_pin_banner" class="memoria__hint" style="display:none;"></div>
                     <textarea id="memoria_packet_preview" class="memoria__preview" rows="12"></textarea>
+                    <details class="memoria__details">
+                        <summary>회상 경로 · 무엇이 주입됐나요?</summary>
+                        <div id="memoria_recall_diagnostics" aria-live="polite"></div>
+                    </details>
                 </div>
                 <div class="memoria__section">
                     <div class="memoria__section-head">
@@ -98,7 +102,7 @@
                     <div class="memoria__section-head">
                         <div>
                             <h4>기억 브라우저</h4>
-                            <p>고정(📌)한 기억은 매 턴 반드시 주입됩니다.</p>
+                            <p>고정(📌)한 기억은 토큰 예산 안에서 우선 주입됩니다. 책 아이콘으로 대화 원문을 확인할 수 있습니다.</p>
                         </div>
                         <div class="memoria__compact-actions">
                             <div class="menu_button" id="memoria_memory_add">
@@ -273,6 +277,15 @@
                     <label class="memoria__toggle-row" for="memoria_authorize_private">
                         <input type="checkbox" id="memoria_authorize_private">
                         <span><strong>캐릭터 비공개 기억 허용</strong><small>현재 캐릭터가 소유한 비공개/비밀 기억을 서브텍스트 용도로만 주입에 포함합니다.</small></span>
+                    </label>
+                    <div class="memoria__perspective">
+                        <label for="memoria_perspective">이 채팅의 기억 시점</label>
+                        <select id="memoria_perspective"><option value="">자동</option><option value="__public__">공개 기억만</option></select>
+                        <small class="memoria__hint">자동은 1:1에서 상대 캐릭터, 그룹에서는 공개 기억만 사용합니다. 인물을 선택하면 그 인물의 비공개 기억만 서브텍스트로 허용합니다. 요약·원문 전체를 검열하는 기능은 아닙니다. 고정 장부에는 적용되지 않습니다.</small>
+                    </div>
+                    <label class="memoria__toggle-row" for="memoria_associative_recall">
+                        <input type="checkbox" id="memoria_associative_recall">
+                        <span><strong>연결 회상</strong><small>직접 찾은 기억의 드문 공통 단서로 관련 기억을 최대 2개 더 후보에 올립니다. 전체 회상 수와 토큰 예산은 유지하며, 비밀 경계는 넘지 않습니다. 추가 API 호출은 없습니다.</small></span>
                     </label>
                     <label class="memoria__toggle-row" for="memoria_auto_hide">
                         <input type="checkbox" id="memoria_auto_hide">
@@ -611,13 +624,20 @@
                     <div class="memoria__section-head">
                         <div>
                             <h4>서고 정리</h4>
-                            <p>사서가 서고를 훑어 중복 기억을 병합하고, 소음을 정리하고, 잘못 매겨진 중요도를 재조정합니다. 고정·수동 기억은 건드리지 않습니다. (설정에서 자동 주기 조절 가능)</p>
+                            <p>중복 병합·소음 제거·중요도 변경을 먼저 비교하고 적용합니다. 고정·수동 기억과 서로 다른 비밀 등급·소유자는 병합하지 않습니다. 자동 정리는 검토 없이 실행되며, 변경 전 복구 지점을 남깁니다.</p>
                         </div>
                     </div>
                     <div class="memoria__button-row">
-                        <div class="menu_button" id="memoria_consolidate_now"><i class="fa-solid fa-broom"></i><span>지금 정리</span></div>
+                        <div class="menu_button" id="memoria_consolidate_now"><i class="fa-solid fa-broom"></i><span>정리안 검토</span></div>
                         <span id="memoria_consolidate_progress" class="memoria__progress"></span>
                     </div>
+                </div>
+                <div class="memoria__section">
+                    <div class="memoria__section-head">
+                        <div><h4>서고 복구 지점</h4><p>기억 정리·사서 정정·요약 전체 다시 만들기·파일 복원·인계·초기화 직전의 기록을 보관합니다. 최근 3개, 합계 6MB까지 유지하며 대화 원문은 변경하지 않습니다. 오래 보관할 기록은 JSON으로 내보내세요.</p></div>
+                    </div>
+                    <button type="button" class="menu_button" id="memoria_checkpoint_create"><i class="fa-solid fa-bookmark"></i><span>지금 상태 보관</span></button>
+                    <div id="memoria_checkpoint_list" aria-live="polite"></div>
                 </div>
                 <div class="memoria__section">
                     <div class="memoria__section-head">
