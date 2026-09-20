@@ -1,53 +1,51 @@
 <section class="memoria-library" aria-label="메모리아 전체 서고">
     <header class="ml-heading">
-        <span class="ml-eyebrow">MEMORIA · 채팅별 기록 보관함</span>
+        <span class="ml-eyebrow">MEMORIA LIBRARY</span>
         <h2>전체 서고</h2>
-        <p>어떤 봇과 무슨 이야기를 남겼는지.<br>흩어진 기억과 요약을 찾고, 함께 보관하세요.</p>
+        <p>봇별로 찾고, 채팅별로 보관하세요.</p>
     </header>
-
     <div class="ml-stats" aria-label="발견한 기록">
-        <div><strong data-stat="owners">—</strong><span>기록 있는 봇·그룹</span></div>
-        <div><strong data-stat="chats">—</strong><span>기록 있는 채팅</span></div>
+        <div><strong data-stat="owners">—</strong><span>봇·그룹</span></div>
+        <div><strong data-stat="chats">—</strong><span>기록 채팅</span></div>
         <div><strong data-stat="summaries">—</strong><span>요약</span></div>
         <div><strong data-stat="memories">—</strong><span>기억</span></div>
     </div>
-
     <section class="ml-scan" aria-label="저장된 채팅 검사">
         <div class="ml-scan-heading">
-            <div><strong data-ui="scan-title">처음이라면 전체 검사부터</strong><p data-ui="scan-detail">지금 계정의 봇과 그룹 채팅에서 메모리아 기록을 찾습니다.</p></div>
-            <button type="button" data-action="scan" class="ml-primary">전체 검사</button>
+            <div><strong data-ui="scan-title">처음이라면 전체 검사부터</strong><p data-ui="scan-detail">예전에 사용한 봇과 채팅도 찾아드려요.</p></div>
+            <button type="button" data-action="scan">전체 검사</button>
             <button type="button" data-action="stop" hidden>중단</button>
         </div>
         <progress data-ui="progress" aria-label="서고 검사 진행률" hidden></progress>
-        <p class="ml-footnote">저장된 채팅을 읽기만 합니다. AI 호출·요금 없이 검사하며, 채팅이 많으면 시간이 걸릴 수 있어요.</p>
+        <p class="ml-footnote">기록을 읽기만 합니다 · AI 호출·요금 없음</p>
     </section>
-
     <details data-ui="errors" class="ml-help" hidden><summary data-ui="errors-title">확인하지 못한 항목</summary><ul data-ui="errors-list"></ul></details>
     <div data-ui="results" hidden>
+        <div data-ui="owner-detail" class="ml-owner-detail" hidden>
+            <button type="button" data-action="back" class="ml-back">← 봇 목록</button>
+            <div data-ui="owner-heading" class="ml-detail-heading"></div>
+            <button type="button" data-action="owner-backup">이 봇 전체 백업</button>
+        </div>
         <div class="ml-filters">
-            <label class="ml-search"><span>봇·채팅 찾기</span><input type="search" data-ui="search" placeholder="봇 이름 또는 채팅 이름" autocomplete="off"></label>
-            <label><span>표시할 채팅</span><select data-ui="filter"><option value="recorded">기록 있음</option><option value="summaries">요약 있음</option><option value="empty">빈 서고</option><option value="all">모든 채팅</option><option value="errors">확인 필요</option></select></label>
+            <label class="ml-search"><span data-ui="search-label">봇·채팅 찾기</span><input type="search" data-ui="search" placeholder="봇 이름 또는 채팅 이름" autocomplete="off"></label>
+            <label><span>표시할 기록</span><select data-ui="filter"><option value="recorded">기록 있음</option><option value="summaries">요약 있음</option><option value="empty">빈 서고</option><option value="all">모든 채팅</option><option value="errors">확인 필요</option></select></label>
             <label><span>정렬</span><select data-ui="sort"><option value="recent">최근 대화순</option><option value="name">이름순</option><option value="summaries">요약 많은 순</option><option value="memories">기억 많은 순</option></select></label>
         </div>
-        <div class="ml-selection">
-            <span data-ui="matches"></span>
-            <button type="button" data-action="select">검색 결과 모두 선택</button>
-            <button type="button" data-action="clear">선택 해제</button>
-        </div>
+        <div class="ml-selection"><span data-ui="matches"></span><button type="button" data-action="select">검색 결과 선택</button></div>
         <div class="ml-backup-bar">
-            <div><strong data-ui="selection">채팅을 선택해 주세요</strong><small>봇·채팅별 JSON을 ZIP 하나로 받습니다.</small></div>
-            <button type="button" data-action="backup" class="ml-primary" disabled>선택한 서고 ZIP 백업</button>
-            <p data-ui="message" class="ml-message" role="status" aria-live="polite" hidden></p>
+            <strong data-ui="selection">선택 없음</strong>
+            <button type="button" data-action="clear" class="ml-clear" disabled>해제</button>
+            <button type="button" data-action="backup" class="ml-primary" disabled>선택 백업</button>
+            <button type="button" data-action="backup-stop" hidden>중단</button>
         </div>
+        <p data-ui="message" class="ml-message" role="status" aria-live="polite" hidden></p>
         <div data-ui="list" class="ml-list"></div>
-        <nav class="ml-pagination" aria-label="채팅 목록 페이지">
+        <nav class="ml-pagination" aria-label="서고 목록 페이지">
             <button type="button" data-action="prev" aria-label="이전 페이지">이전</button>
-            <span data-ui="page"></span>
+            <label><span class="ml-sr-only">목록 페이지</span><select data-ui="page" aria-label="목록 페이지"></select></label>
             <button type="button" data-action="next" aria-label="다음 페이지">다음</button>
         </nav>
     </div>
-
-    <div data-ui="empty" class="ml-empty"><span class="ml-empty-symbol" aria-hidden="true">▤</span><strong>기억이 남은 채팅, 여기서 한눈에</strong><p>전체 검사를 누르면 예전에 사용했던 채팅도 찾을 수 있어요.<br>아직 열어 보지 않은 채팅도 함께 확인합니다.</p></div>
-    <details class="ml-help"><summary>백업 파일은 어떻게 쓰나요?</summary><p>ZIP을 풀면 봇·채팅 이름이 붙은 JSON 파일과 복원 안내가 나옵니다. 해당 채팅을 열고 <b>메모리아 → 도구 → 백업·복원 → 가져오기</b>에서 JSON을 선택하세요. ZIP 자체를 가져오는 방식은 아닙니다.</p><p>메모리아 기억·요약·도감·복구 지점 등을 보관합니다. 대화 원문과 봇 카드는 실리태번에서 별도로 백업해 주세요.</p></details>
-    <p class="ml-footnote ml-storage-note">기억과 요약은 각 채팅의 저장 데이터에 있습니다. 정상적인 확장 업데이트는 이 데이터를 지우지 않습니다. 이 목록은 검사 시점의 현황이며, 백업할 때는 최신 기록을 다시 읽습니다.</p>
+    <div data-ui="empty" class="ml-empty"><span class="ml-empty-symbol" aria-hidden="true">▤</span><strong>기억이 남은 봇, 여기서 한눈에</strong><p>전체 검사 후 봇을 선택하면<br>그 봇의 채팅과 요약을 볼 수 있어요.</p></div>
+    <details class="ml-help"><summary>백업과 복원 안내</summary><p>여러 채팅은 ZIP 하나로 받습니다. ZIP을 풀고 해당 채팅의 <b>메모리아 → 도구 → 백업·복원 → 가져오기</b>에서 JSON 파일을 선택하세요.</p><p>백업할 때 최신 기록을 다시 읽습니다. 메모리아 기억·요약·도감·복구 지점을 보관하며, 대화 원문과 봇 카드는 포함하지 않습니다.</p><p>기억과 요약은 각 채팅의 저장 데이터에 있습니다. 정상적인 확장 업데이트는 이 데이터를 지우지 않습니다.</p></details>
 </section>

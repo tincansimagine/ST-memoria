@@ -1,10 +1,11 @@
 // Browser fixture only. All content is fictional; no model requests or user data.
-import { libraryCharacters, libraryGroups } from './library-fixture.mjs';
+import { libraryCharacters, libraryGroups, largeLibraryCharacters, largeLibrarySnapshot } from './library-fixture.mjs';
+const largeLibrary = new URLSearchParams(location.search).get('library') === 'large';
 export const chat = [];
 export const name1 = '여행자';
 export const name2 = '아리아';
 export const selected_group = null;
-export const characters = libraryCharacters;
+export const characters = largeLibrary ? largeLibraryCharacters : libraryCharacters;
 export const extension_settings = {};
 export const power_user = {};
 export const oai_settings = {};
@@ -54,9 +55,11 @@ export const chat_metadata = { memoria: { version: 1, lexiconRev: 5, turnCounter
     arcSummaries: [], milestones: [], items: [], dossier: [] } };
 
 const fixtureStorage = new Map();
+if (largeLibrary) fixtureStorage.set('memoria.libraryIndex.v1', JSON.stringify(largeLibrarySnapshot()));
 export function getContext() {
     return {
-        characters, groups: libraryGroups, characterId: 0,
+        characters, groups: libraryGroups, characterId: largeLibrary ? -1 : 0,
+        getThumbnailUrl: (type, file) => `/thumbnail?type=${type}&file=${encodeURIComponent(file)}`,
         accountStorage: { getItem: key => fixtureStorage.get(key), setItem: (key, value) => fixtureStorage.set(key, value), removeItem: key => fixtureStorage.delete(key) },
         POPUP_TYPE: { CONFIRM: 1, TEXT: 2 }, POPUP_RESULT: { AFFIRMATIVE: 1 }, saveMetadata: async () => {},
         callGenericPopup: async (content, type, value, opts = {}) => new Promise(resolve => {

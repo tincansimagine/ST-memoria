@@ -1,7 +1,9 @@
 import { createLibraryPost, scanLibrary, filterLibrary, libraryTotals, ownerKey, libraryKey, readLibraryExport, backupFilename, buildLibraryBackup } from './library-engine.mjs';
+import { groupLibrary, libraryPage, selectionState, chatLabel, ownerAvatarSources } from './library-view.mjs';
 
 const CACHE_KEY = 'memoria.libraryIndex.v1';
-const PAGE_SIZE = 20;
+const OWNER_PAGE_SIZE = 8;
+const CHAT_PAGE_SIZE = 10;
 let opened = false;
 const number = value => Number(value || 0).toLocaleString('ko-KR');
 const dateLabel = value => {
@@ -36,9 +38,12 @@ export async function showArchiveLibrary({ getContext, getRequestHeaders, downlo
         const post = createLibraryPost(getRequestHeaders);
         const storage = getContext().accountStorage;
         let snapshot = readLibraryCache(storage), cached = !!snapshot, busy = '', page = 0;
-        let selected = new Set();
+        const selected = new Set();
+        let activeOwner = null, overviewState = null, selectionControls = [];
         let backupErrors = [];
-        const filtered = () => filterLibrary(snapshot?.entries || [], { query: ui('search').value, filter: ui('filter').value, sort: ui('sort').value });
+        const options = () => ({ query: ui('search').value, filter: ui('filter').value, sort: ui('sort').value });
+        const ownerEntries = () => (snapshot?.entries || []).filter(e => ownerKey(e) === activeOwner?.key);
+        const filtered = () => filterLibrary(activeOwner ? ownerEntries() : snapshot?.entries || [], options());
         const message = text => { ui('message').textContent = text; ui('message').hidden = !text; };
         const element = (tag, className, text) => {
             const node = document.createElement(tag);
@@ -46,6 +51,45 @@ export async function showArchiveLibrary({ getContext, getRequestHeaders, downlo
             if (text !== undefined) node.textContent = text;
             return node;
         };
+
+        function avatar(owner) {
+            const box = element('span', 'ml-portrait'); box.setAttribute('aria-hidden', 'true');
+            const fallback = element('span', 'ml-portrait-fallback', owner.kind === 'group' ? '◈' : [...owner.ownerName][0] || 'M');
+            box.append(fallback);
+            const sources = ownerAvatarSources(owner, getContext());
+            const photos = element('span', sources.length > 1 ? 'ml-photos is-collage' : 'ml-photos');
+            for (const source of sources) {
+                const img = element('img'); img.alt = ''; img.loading = 'lazy'; img.decoding = 'async';
+                img.addEventListener('load', () => { fallback.hidden = true; }, { once: true });
+                img.addEventListener('error', () => {
+                    img.remove(); photos.classList.toggle('is-collage', photos.childElementCount > 1);
+                    if (!photos.childElementCount) fallback.hidden = false;
+                }, { once: true });
+                img.src = source; photos.append(img);
+            }
+            box.append(photos); return box;
+        }
+
+        function checkbox(entries, label, row) {
+            const wrap = element('label', 'ml-check-wrap');
+            const check = element('input', 'ml-check'); check.type = 'checkbox'; check.setAttribute('aria-label', label);
+            wrap.append(check);
+            selectionControls.push({ check, entries, row });
+            check.addEventListener('change', () => {
+                for (const key of selectionState(entries, selected).keys) {
+                    if (check.checked) selected.add(key); else selected.delete(key);
+                }
+                renderSelection();
+            });
+            return wrap;
+        }
+
+        function enterOwner(owner) {
+            overviewState = { ...options(), page };
+            activeOwner = owner; page = 0;
+            renderList(); ui('owner-detail').scrollIntoView({ block: 'start' });
+            action('back').focus({ preventScroll: true });
+        }
 
         function renderErrors() {
             const errors = [...(snapshot?.errors || []), ...backupErrors];
@@ -55,68 +99,92 @@ export async function showArchiveLibrary({ getContext, getRequestHeaders, downlo
         }
 
         function renderSelection() {
-            ui('selection').textContent = selected.size ? `채팅 ${number(selected.size)}개 선택` : '채팅을 선택해 주세요';
-            action('backup').textContent = selected.size ? `선택 ${number(selected.size)}개 ZIP 백업` : '선택한 서고 ZIP 백업';
+            ui('selection').textContent = selected.size ? `총 ${number(selected.size)}개 선택` : '선택 없음';
+            action('backup').textContent = selected.size ? `${number(selected.size)}개 백업` : '선택 백업';
             action('backup').disabled = !!busy || !selected.size;
             action('select').disabled = !!busy || !filtered().some(e => e.hasStore);
             action('clear').disabled = !!busy || !selected.size;
+            action('backup-stop').hidden = busy !== 'backup';
+            for (const { check, entries, row } of selectionControls) {
+                const state = selectionState(entries, selected);
+                check.checked = state.checked; check.indeterminate = state.mixed;
+                check.setAttribute('aria-checked', state.mixed ? 'mixed' : String(state.checked));
+                check.disabled = !!busy || !state.keys.length;
+                row.classList.toggle('is-selected', state.count > 0);
+            }
+            if (activeOwner) {
+                const count = ownerEntries().filter(e => e.hasStore).length;
+                action('owner-backup').disabled = !!busy || !count;
+                action('owner-backup').textContent = `이 ${activeOwner.kind === 'group' ? '그룹' : '봇'} 전체 백업 · ${number(count)}개`;
+            }
         }
 
         function renderList() {
             const rows = filtered();
-            const pages = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
-            page = Math.min(page, pages - 1);
-            ui('matches').textContent = `${number(rows.length)}개 채팅`;
-            ui('page').textContent = `${page + 1} / ${pages}`;
+            const owners = activeOwner ? [] : groupLibrary(snapshot?.entries || [], options());
+            const result = libraryPage(activeOwner ? rows : owners, page, activeOwner ? CHAT_PAGE_SIZE : OWNER_PAGE_SIZE);
+            page = result.page;
+            root.classList.toggle('is-detail', !!activeOwner);
+            ui('owner-detail').hidden = !activeOwner;
+            ui('search-label').textContent = activeOwner ? `이 ${activeOwner.kind === 'group' ? '그룹' : '봇'}의 채팅 찾기` : '봇·채팅 찾기';
+            ui('search').placeholder = activeOwner ? '채팅 이름으로 검색' : '봇 이름 또는 채팅 이름';
+            ui('matches').textContent = activeOwner ? `조건에 맞는 채팅 ${number(rows.length)}개` : `봇·그룹 ${number(owners.length)}개 · 채팅 ${number(rows.length)}개`;
+            action('select').title = '현재 검색·표시 조건에 맞는 채팅을 모든 페이지에서 선택합니다.';
+            ui('page').replaceChildren(...Array.from({ length: result.pages }, (_, i) => {
+                const option = element('option', '', `${i + 1} / ${result.pages}`); option.value = String(i); return option;
+            }));
+            ui('page').value = String(page);
             action('prev').disabled = page === 0;
-            action('next').disabled = page >= pages - 1;
+            action('next').disabled = page >= result.pages - 1;
             const list = ui('list');
-            list.replaceChildren();
+            list.replaceChildren(); selectionControls = [];
+            if (activeOwner) {
+                const all = ownerEntries();
+                const title = element('div', 'ml-detail-title');
+                title.append(element('h3', '', activeOwner.ownerName), element('p', '', `전체 채팅 ${number(all.length)}개 · 요약 ${number(all.reduce((n, e) => n + e.counts.summaries, 0))}개`));
+                ui('owner-heading').replaceChildren(avatar(activeOwner), title);
+            }
             if (!rows.length) {
                 const box = element('div', 'ml-empty');
                 box.append(element('strong', '', busy === 'scan' ? '기록을 찾고 있어요' : '표시할 채팅이 없어요'), element('p', '', '검색어나 표시 조건을 바꿔 보세요. 빈 서고와 미사용 채팅은 기본 목록에서 제외됩니다.'));
                 list.append(box);
             }
-            const groups = new Map();
-            for (const entry of rows.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE)) {
-                const id = ownerKey(entry);
-                let group = groups.get(id);
-                if (!group) {
-                    group = element('section', 'ml-owner');
-                    const heading = element('header', 'ml-owner-heading');
-                    const title = element('div');
-                    title.append(element('strong', '', entry.ownerName), element('small', '', `${entry.kind === 'group' ? '그룹' : '봇'} · ${entry.ownerId}`));
-                    heading.append(element('span', 'ml-avatar', entry.kind === 'group' ? '◈' : [...entry.ownerName][0] || 'M'), title);
-                    group.append(heading); list.append(group); groups.set(id, group);
+            if (!activeOwner) {
+                const names = new Map();
+                // Duplicate names stay distinguishable even when a search hides one of the bots.
+                for (const owner of groupLibrary(snapshot?.entries || [], { filter: 'all' })) names.set(owner.ownerName, (names.get(owner.ownerName) || 0) + 1);
+                for (const owner of result.items) {
+                    const row = element('div', 'ml-owner-row');
+                    const open = element('button', 'ml-owner-open'); open.type = 'button'; open.disabled = busy === 'scan';
+                    open.dataset.ownerKey = owner.key;
+                    open.setAttribute('aria-label', `${owner.ownerName} · ${owner.ownerId} 채팅 보기`);
+                    const info = element('span', 'ml-owner-info');
+                    info.append(element('strong', '', owner.ownerName), element('span', 'ml-owner-counts', `채팅 ${number(owner.entries.length)} · 요약 ${number(owner.summaries)} · 기억 ${number(owner.memories)}`));
+                    if (owner.kind === 'group' || names.get(owner.ownerName) > 1) info.append(element('small', '', names.get(owner.ownerName) > 1 ? owner.ownerId : '그룹 채팅'));
+                    open.append(avatar(owner), info, element('span', 'ml-chevron', '›'));
+                    open.addEventListener('click', () => enterOwner(owner));
+                    row.append(checkbox(owner.entries, `${owner.ownerName} · ${owner.ownerId}의 검색된 채팅 모두 선택`, row), open);
+                    list.append(row);
                 }
-                const row = element('div', `ml-chat${selected.has(entry.key) ? ' is-selected' : ''}`);
-                const check = element('input'); check.type = 'checkbox'; check.checked = selected.has(entry.key); check.disabled = !!busy || !entry.hasStore;
-                check.setAttribute('aria-label', `${entry.ownerName} · ${entry.chatId} 선택`);
-                check.addEventListener('change', () => {
-                    if (check.checked) selected.add(entry.key); else selected.delete(entry.key);
-                    row.classList.toggle('is-selected', check.checked); renderSelection();
-                });
+            } else for (const entry of result.items) {
+                const row = element('div', 'ml-chat');
                 const body = element('div', 'ml-chat-body');
-                const title = element('strong', 'ml-chat-title', entry.chatId);
-                const badges = element('div', 'ml-badges');
-                if (entry.live) badges.append(element('span', 'ml-badge', '현재 채팅'));
-                const labels = { recorded: '기록 있음', empty: '빈 서고', unused: '미사용', review: '형식 확인 필요', error: '읽기 실패' };
-                badges.append(element('span', `ml-badge${entry.state === 'recorded' ? ' ml-badge-used' : ''}`, labels[entry.state]));
-                body.append(title, badges);
-                if (entry.hasStore) {
-                    body.append(element('p', 'ml-counts', `요약 ${number(entry.counts.summaries)} · 기억 ${number(entry.counts.memories)} · 기록한 턴 ${number(entry.counts.turns)}`));
-                    const extra = [];
-                    if (entry.counts.characters) extra.push(`인물 ${number(entry.counts.characters)}`);
-                    if (entry.counts.checkpoints) extra.push(`복구 지점 ${number(entry.counts.checkpoints)}`);
-                    if (extra.length) body.append(element('small', '', extra.join(' · ')));
-                }
+                const detail = element('details', 'ml-chat-detail');
+                const summary = element('summary');
+                summary.append(element('strong', 'ml-chat-title', chatLabel(entry)));
+                const labels = { empty: '빈 서고', unused: '미사용', review: '형식 확인 필요', error: '읽기 실패' };
+                summary.append(element('span', 'ml-counts', entry.hasStore ? `요약 ${number(entry.counts.summaries)} · 기억 ${number(entry.counts.memories)}${entry.live ? ' · 현재 채팅' : ''}${labels[entry.state] ? ` · ${labels[entry.state]}` : ''}` : labels[entry.state]));
+                detail.append(summary, element('p', 'ml-original-name', `원래 채팅 이름: ${entry.chatId}`));
+                if (entry.hasStore) detail.append(element('p', '', `턴 기록 ${number(entry.counts.turns)} · 인물 ${number(entry.counts.characters)} · 복구 지점 ${number(entry.counts.checkpoints)}`));
                 const date = dateLabel(entry.updatedAt);
-                if (date) body.append(element('small', '', `최근 대화 ${date}`));
-                if (entry.error) body.append(element('small', 'ml-row-error', entry.error));
-                const button = element('button', 'ml-single-backup', 'JSON 백업'); button.type = 'button'; button.disabled = !!busy || !entry.hasStore;
+                if (date) detail.append(element('p', '', `최근 대화 ${date}`));
+                if (labels[entry.state]) detail.append(element('p', '', labels[entry.state]));
+                if (entry.error) detail.append(element('p', 'ml-row-error', entry.error));
+                const button = element('button', 'ml-single-backup', '이 채팅 JSON 백업'); button.type = 'button'; button.disabled = !!busy || !entry.hasStore;
                 button.setAttribute('aria-label', `${entry.ownerName} · ${entry.chatId} JSON 백업`);
                 button.addEventListener('click', () => backup([entry], true));
-                row.append(check, body, button); group.append(row);
+                detail.append(button); body.append(detail);
+                row.append(checkbox([entry], `${entry.ownerName} · ${entry.chatId} 선택`, row), body); list.append(row);
             }
             renderSelection();
         }
@@ -146,7 +214,7 @@ export async function showArchiveLibrary({ getContext, getRequestHeaders, downlo
 
         async function scan() {
             if (busy) return;
-            busy = 'scan'; cached = false; page = 0; selected.clear(); backupErrors = []; controller = new AbortController();
+            busy = 'scan'; cached = false; page = 0; activeOwner = null; overviewState = null; selected.clear(); backupErrors = []; controller = new AbortController();
             snapshot = null; message(''); render();
             try {
                 const result = await scanLibrary({ characters: getContext().characters || [], post, signal: controller.signal, live, liveTarget: getLiveTarget(),
@@ -166,6 +234,7 @@ export async function showArchiveLibrary({ getContext, getRequestHeaders, downlo
         async function backup(entries, single = false) {
             if (busy) return;
             busy = 'backup'; backupErrors = []; controller = new AbortController(); message('최신 기록을 읽어 백업 파일을 준비합니다…'); render();
+            ui('message').scrollIntoView({ block: 'nearest' });
             try {
                 if (single) {
                     const payload = await readLibraryExport(entries[0], { post, live, signal: controller.signal });
@@ -188,6 +257,18 @@ export async function showArchiveLibrary({ getContext, getRequestHeaders, downlo
 
         action('scan').addEventListener('click', scan);
         action('stop').addEventListener('click', () => controller?.abort());
+        action('backup-stop').addEventListener('click', () => controller?.abort());
+        action('back').addEventListener('click', () => {
+            const previous = activeOwner?.key;
+            activeOwner = null;
+            if (overviewState) {
+                ui('search').value = overviewState.query; ui('filter').value = overviewState.filter; ui('sort').value = overviewState.sort; page = overviewState.page;
+            }
+            renderList(); ui('results').scrollIntoView({ block: 'start' });
+            const focus = [...root.querySelectorAll('.ml-owner-open')].find(button => button.dataset.ownerKey === previous) || action('select');
+            focus.focus({ preventScroll: true });
+        });
+        action('owner-backup').addEventListener('click', () => backup(ownerEntries().filter(e => e.hasStore)));
         for (const key of ['search', 'filter', 'sort']) ui(key).addEventListener(key === 'search' ? 'input' : 'change', () => { page = 0; renderList(); });
         action('select').addEventListener('click', () => { for (const e of filtered()) if (e.hasStore) selected.add(e.key); renderList(); });
         action('clear').addEventListener('click', () => { selected.clear(); renderList(); });
@@ -198,6 +279,7 @@ export async function showArchiveLibrary({ getContext, getRequestHeaders, downlo
         };
         action('prev').addEventListener('click', () => movePage(-1));
         action('next').addEventListener('click', () => movePage(1));
+        ui('page').addEventListener('change', () => movePage(Number(ui('page').value) - page));
         action('backup').addEventListener('click', () => backup(snapshot.entries.filter(e => selected.has(e.key))));
         render();
         const context = getContext();

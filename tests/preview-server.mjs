@@ -16,10 +16,16 @@ const html = `<!doctype html><html lang="ko"><meta charset="utf-8"><meta name="v
 </style><link rel="stylesheet" href="/tests/preview-popup.css"><main><h1>Memoria · 화면 검증</h1><p class="fixture-note">가상 대화와 모의 API를 사용하는 로컬 검증 화면입니다. <a href="/?theme=light">밝은 테마</a> · <a href="/">어두운 테마</a></p><div id="extensions_settings2"></div></main><div id="toast" hidden role="status"></div>
 <script src="/jquery.js"></script><script>window.toastr=Object.fromEntries(['success','info','warning','error'].map(k=>[k,(msg)=>{const el=document.getElementById('toast');el.hidden=false;el.textContent=msg}]));</script><script type="module" src="/index.js"></script></html>`;
 const allowed = new Map([['/jquery.js', 'node_modules/jquery/dist/jquery.min.js'], ['/style.css', 'style.css'], ['/archive-engine.mjs', 'archive-engine.mjs'], ['/templates/settings.html', 'templates/settings.html'], ['/manifest.json', 'manifest.json'], ['/tests/mock-host.mjs', 'tests/mock-host.mjs']]);
-for (const file of ['library-engine.mjs', 'library-ui.mjs', 'templates/library.html', 'tests/library-fixture.mjs', 'tests/preview-popup.css']) allowed.set(`/${file}`, file);
+for (const file of ['library-engine.mjs', 'library-ui.mjs', 'library-view.mjs', 'templates/library.html', 'tests/library-fixture.mjs', 'tests/preview-popup.css']) allowed.set(`/${file}`, file);
 createServer(async (req, res) => {
     try {
         const url = new URL(req.url, 'http://localhost');
+        if (url.pathname === '/thumbnail') {
+            // Fictional portraits test the same image-loading route as the host, without user files.
+            const hue = [...(url.searchParams.get('file') || '')].reduce((n, c) => n + c.charCodeAt(0), 0) % 360;
+            res.setHeader('Content-Type', 'image/svg+xml');
+            res.end(`<svg xmlns="http://www.w3.org/2000/svg" width="100" height="120" viewBox="0 0 100 120"><rect width="100" height="120" fill="hsl(${hue} 25% 70%)"/><ellipse cx="50" cy="118" rx="42" ry="47" fill="hsl(${hue} 25% 33%)"/><path d="M24 57Q17 13 50 12Q83 14 77 65L68 81H32Z" fill="#313139"/><ellipse cx="50" cy="49" rx="22" ry="28" fill="#ebc7ab"/><path d="M25 41Q28 10 52 17Q75 17 76 41Q55 38 43 26Q37 38 25 41" fill="#313139"/><path d="M40 49h4m13 0h4" stroke="#48362d" stroke-width="3"/><path d="M46 64q5 3 10 0" stroke="#a96d68" fill="none" stroke-width="2"/></svg>`); return;
+        }
         if (url.pathname.startsWith('/api/') && req.method === 'POST') {
             let body = ''; for await (const chunk of req) body += chunk;
             res.setHeader('Content-Type', 'application/json; charset=utf-8');
