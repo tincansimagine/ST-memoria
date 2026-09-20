@@ -2,6 +2,7 @@ import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
+import { libraryFixturePost } from './library-fixture.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const html = `<!doctype html><html lang="ko"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Memoria · UI 검증</title>
@@ -15,9 +16,15 @@ const html = `<!doctype html><html lang="ko"><meta charset="utf-8"><meta name="v
 </style><main><h1>Memoria · 화면 검증</h1><p class="fixture-note">가상 대화와 모의 API를 사용하는 로컬 검증 화면입니다. <a href="/?theme=light">밝은 테마</a> · <a href="/">어두운 테마</a></p><div id="extensions_settings2"></div></main><div id="toast" hidden role="status"></div>
 <script src="/jquery.js"></script><script>window.toastr=Object.fromEntries(['success','info','warning','error'].map(k=>[k,(msg)=>{const el=document.getElementById('toast');el.hidden=false;el.textContent=msg}]));</script><script type="module" src="/index.js"></script></html>`;
 const allowed = new Map([['/jquery.js', 'node_modules/jquery/dist/jquery.min.js'], ['/style.css', 'style.css'], ['/archive-engine.mjs', 'archive-engine.mjs'], ['/templates/settings.html', 'templates/settings.html'], ['/manifest.json', 'manifest.json'], ['/tests/mock-host.mjs', 'tests/mock-host.mjs']]);
+for (const file of ['library-engine.mjs', 'library-ui.mjs', 'templates/library.html', 'tests/library-fixture.mjs']) allowed.set(`/${file}`, file);
 createServer(async (req, res) => {
     try {
         const url = new URL(req.url, 'http://localhost');
+        if (url.pathname.startsWith('/api/') && req.method === 'POST') {
+            let body = ''; for await (const chunk of req) body += chunk;
+            res.setHeader('Content-Type', 'application/json; charset=utf-8');
+            res.end(JSON.stringify(await libraryFixturePost(url.pathname, JSON.parse(body || '{}')))); return;
+        }
         if (url.pathname === '/') {
             const page = url.searchParams.get('theme') === 'light' ? html.replace('<html lang="ko">', '<html lang="ko" data-theme="light">') : html;
             res.setHeader('Content-Type', 'text/html; charset=utf-8'); res.end(page); return;
