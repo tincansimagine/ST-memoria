@@ -4,10 +4,16 @@
    ============================================================ */
 
 /* 회상 경로와 복구 검토 — 기존 서고의 색상과 간격을 따른다. */
-.memoria__packet-shares { display: flex; flex-wrap: wrap; gap: 5px; margin: 8px 0; }
-.memoria__recall-row, .memoria__checkpoint { display: flex; align-items: flex-start; gap: 8px; padding: 10px 0; border-bottom: 1px solid var(--mm-border); }
+#memoria_recall_diagnostics, #memoria_checkpoint_list { display: grid; gap: 14px; }
+#memoria_checkpoint_list { margin-top: 14px; }
+#memoria_recall_diagnostics > .memoria__hint,
+#memoria_recall_diagnostics > .memoria__diagnostic-warning,
+#memoria_checkpoint_list > .memoria__hint { margin: 0; }
+.memoria__packet-shares { display: flex; flex-wrap: wrap; gap: 8px; margin: 0; }
+.memoria__recall-row, .memoria__checkpoint { display: flex; align-items: flex-start; gap: 12px; padding: 0 0 14px; border-bottom: 1px solid var(--mm-border); }
+.memoria__recall-row:last-child, .memoria__checkpoint:last-child { padding-bottom: 0; border-bottom: 0; }
 .memoria__recall-row > div, .memoria__checkpoint > div { flex: 1; min-width: 0; overflow-wrap: anywhere; }
-.memoria__recall-row small, .memoria__checkpoint small { display: block; color: var(--mm-muted); margin-top: 4px; }
+.memoria__recall-row small, .memoria__checkpoint small { display: block; color: var(--mm-muted); margin-top: 8px; }
 .memoria__recall-row.is-excluded { opacity: 0.7; }
 .memoria__recall-row .menu_button, .memoria__checkpoint .menu_button { flex-shrink: 0; }
 .memoria__diagnostic-warning { padding: 8px; border-left: 3px solid var(--mm-accent); background: var(--mm-soft); }
@@ -176,8 +182,8 @@
 
 /* ===== 섹션 ===== */
 .memoria__section {
-    padding: 10px;
-    margin-bottom: 8px;
+    padding: 14px;
+    margin-bottom: 12px;
     border: 1px solid var(--mm-border);
     border-radius: var(--mm-r);
     background: var(--mm-bg);
@@ -188,8 +194,8 @@
     flex-wrap: wrap;
     justify-content: space-between;
     align-items: center;
-    gap: 6px;
-    margin-bottom: 8px;
+    gap: 8px;
+    margin-bottom: 12px;
 }
 
 .memoria__section-head > div:first-child {
@@ -197,7 +203,7 @@
     min-width: 0;
 }
 
-.memoria__section-head h4 { margin: 0 0 2px; font-size: 1em; }
+.memoria__section-head h4 { margin: 0 0 6px; font-size: 1em; }
 
 .memoria__section-head p {
     margin: 0;
@@ -222,7 +228,7 @@
 
 .memoria__compact-actions {
     display: flex;
-    gap: 6px;
+    gap: 8px;
     flex-shrink: 0;
     flex-wrap: wrap;
 }
@@ -248,6 +254,7 @@
 
 /* ===== 패킷 미리보기 ===== */
 .memoria__preview {
+    display: block;
     width: 100%;
     box-sizing: border-box;
     resize: vertical;
@@ -258,8 +265,10 @@
     color: var(--mm-text);
     border: 1px solid var(--mm-border);
     border-radius: 6px;
-    padding: 8px;
+    padding: 10px;
 }
+
+#memoria_packet_pin_banner { margin-bottom: 12px; }
 
 /* ===== 기억 브라우저 ===== */
 .memoria__toolbar {
@@ -735,7 +744,7 @@
 
 /* ===== 프롬프트 편집 ===== */
 .memoria__details {
-    padding: 8px;
+    padding: 12px;
     margin-bottom: 6px;
     border-radius: 6px;
     background: var(--mm-card);
@@ -745,7 +754,12 @@
 .memoria__details summary {
     cursor: pointer;
     font-weight: 600;
+    line-height: 1.55;
 }
+
+.memoria__section > .memoria__details { margin-top: 16px; }
+.memoria__section > .memoria__details:last-child { margin-bottom: 0; }
+.memoria__details[open] > summary { margin-bottom: 12px; }
 
 .memoria__advanced {
     margin-top: 8px;
@@ -780,7 +794,7 @@
     display: flex;
     flex-wrap: wrap;
     align-items: center;
-    gap: 6px;
+    gap: 10px;
 }
 
 .memoria__progress {
