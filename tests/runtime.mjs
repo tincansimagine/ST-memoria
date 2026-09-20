@@ -26,7 +26,8 @@ export async function runtime() {
     vm.runInContext(source, context, { filename: 'index.js' });
     const api = vm.runInContext(`({ getStore, getSettings, retrieveMemories, buildPacketWithinBudget, buildPacketSections,
         updateInjection, persistStore, authorizedEntities, runConsolidation, removeDerivedForTurn, invalidateTurnByMesId,
-        restoreCheckpoint, resetMemory, showMemorySource, mesHashOf, encodeVec, embedText, memoryIndexText })`, context);
+        restoreCheckpoint, resetMemory, showMemorySource, mesHashOf, encodeVec, embedText, memoryIndexText,
+        currentRecallQuery, renderPacket, runSupervisor, rewritePacketWithLibrarian })`, context);
     return { ...api, context, prompts, run: code => vm.runInContext(code, context), setChat: id => { chatId = id; } };
 }
 

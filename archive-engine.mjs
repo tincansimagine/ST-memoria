@@ -3,6 +3,7 @@ const normalize = value => String(value ?? '').normalize('NFKC').trim().toLowerC
 const lists = ['turns', 'memories', 'worldRules', 'entityStates', 'locks', 'chunkSummaries', 'arcSummaries', 'characters', 'milestones', 'items', 'dossier'];
 const genericCues = new Set(['manual', 'carried', 'episode_raw', 'event', 'relationship', 'fact', 'secret', '사건', '관계', '기억']);
 const knowledgeKey = m => JSON.stringify([m.visibility || 'public', normalize(m.owner)]);
+export const NARRATOR_PERSPECTIVE = '__narrator__';
 
 export function sameKnowledgeScope(a, b) {
     return (a.visibility || 'public') === (b.visibility || 'public')
@@ -140,8 +141,10 @@ export function archiveChanges(before, after) {
         }
         for (const [id, item] of next) if (!old.has(id)) changes.push({ shelf, id, type: 'added', before: '', after: describe(shelf, item) });
     }
-    for (const [key, label] of [['perspective', '기억 시점'], ['packetPin', '고정 장부']]) {
-        const value = store => key === 'packetPin' ? store[key]?.text || '(없음)' : store[key] === '__public__' ? '공개 기억만' : store[key] || '자동';
+    for (const [key, label] of [['perspective', '기억·서술 방식'], ['packetPin', '고정 장부']]) {
+        const value = store => key === 'packetPin' ? store[key]?.text || '(없음)'
+            : store[key] === NARRATOR_PERSPECTIVE ? '소설·풀사칭 (모든 인물 참고)'
+            : store[key] === '__public__' ? '공개 기억만' : store[key] || '자동';
         if (value(before) !== value(after)) changes.push({ shelf: 'archive', id: key, type: 'changed', before: `${label}: ${value(before)}`, after: `${label}: ${value(after)}` });
     }
     return changes;

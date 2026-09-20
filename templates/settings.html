@@ -1,7 +1,7 @@
 <div id="memoria_settings" class="memoria">
     <div class="inline-drawer">
         <div class="inline-drawer-toggle inline-drawer-header">
-            <b><i class="fa-solid fa-book-bookmark"></i> Memoria — 장기기억 서고 <span class="memoria__version">v1.8.1</span></b>
+            <b><i class="fa-solid fa-book-bookmark"></i> Memoria — 장기기억 서고 <span class="memoria__version">v1.9.0</span></b>
             <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
         </div>
         <div class="inline-drawer-content">
@@ -276,12 +276,13 @@
                     </label>
                     <label class="memoria__toggle-row" for="memoria_authorize_private">
                         <input type="checkbox" id="memoria_authorize_private">
-                        <span><strong>캐릭터 비공개 기억 허용</strong><small>현재 캐릭터가 소유한 비공개/비밀 기억을 서브텍스트 용도로만 주입에 포함합니다.</small></span>
+                        <span><strong>캐릭터 비공개 기억 허용</strong><small>아래에서 선택한 범위의 속마음·비밀도 참고합니다. 끄면 소설·풀사칭을 포함한 모든 방식에서 공개 기억만 검색합니다.</small></span>
                     </label>
                     <div class="memoria__perspective">
-                        <label for="memoria_perspective">이 채팅의 기억 시점</label>
-                        <select id="memoria_perspective"><option value="">자동</option><option value="__public__">공개 기억만</option></select>
-                        <small class="memoria__hint">자동은 1:1에서 상대 캐릭터, 그룹에서는 공개 기억만 사용합니다. 인물을 선택하면 그 인물의 비공개 기억만 서브텍스트로 허용합니다. 요약·원문 전체를 검열하는 기능은 아닙니다. 고정 장부에는 적용되지 않습니다.</small>
+                        <label for="memoria_perspective">이 채팅의 기억·서술 방식</label>
+                        <select id="memoria_perspective" aria-describedby="memoria_perspective_help"><option value="">자동</option><option value="__public__">공개 기억만</option><option value="__narrator__">소설·풀사칭 (모든 인물 참고)</option></select>
+                        <small id="memoria_perspective_help" class="memoria__hint" aria-live="polite"></small>
+                        <small>이 선택은 현재 채팅에만 적용됩니다. 원문·요약에 이미 나온 비밀까지 가리지는 않습니다. 장부를 직접 고정했다면 고정을 해제해야 새 방식이 적용됩니다.</small>
                     </div>
                     <label class="memoria__toggle-row" for="memoria_associative_recall">
                         <input type="checkbox" id="memoria_associative_recall">
