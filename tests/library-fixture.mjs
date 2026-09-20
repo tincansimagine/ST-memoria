@@ -1,4 +1,5 @@
 // Fictional data shared by the local preview and library integration tests.
+import { catalogEntry } from '../library-engine.mjs';
 export const libraryCharacters = [
     { name: '아리아', avatar: 'aria.png', chat_size: 3000 },
     { name: '보라', avatar: 'bora.png', chat_size: 3000 },
@@ -11,8 +12,8 @@ export function fictionalArchive(n = 2) {
         chunkSummaries: [{ id: 's1', fromTurn: 1, toTurn: n, text: '등대에서 다시 만날 약속을 했다.' }], arcSummaries: [], characters: [], checkpoints: [] };
 }
 export const libraryGroups = [
-    { id: 'crew', name: '새벽 항해단', chat_id: '첫 항해', chats: ['첫 항해', '북쪽 항로'], chat_metadata: { memoria: fictionalArchive(4) }, past_metadata: { '북쪽 항로': { memoria: fictionalArchive(3) } } },
-    { id: 'new-crew', name: '숲속의 동행', chat_id: '오두막의 밤', chats: ['오두막의 밤'] },
+    { id: 'crew', name: '새벽 항해단', members: ['aria.png', 'bora.png'], chat_id: '첫 항해', chats: ['첫 항해', '북쪽 항로'], chat_metadata: { memoria: fictionalArchive(4) }, past_metadata: { '북쪽 항로': { memoria: fictionalArchive(3) } } },
+    { id: 'new-crew', name: '숲속의 동행', avatar_url: '/thumbnail?type=avatar&file=forest.png', chat_id: '오두막의 밤', chats: ['오두막의 밤'] },
 ];
 const metadata = (store = fictionalArchive()) => ({ memoria: store });
 export const libraryChatFiles = {
@@ -37,4 +38,12 @@ export async function libraryFixturePost(path, body) {
         return [];
     }
     throw new Error(`Unexpected fixture endpoint: ${path}`);
+}
+
+export const largeLibraryCharacters = Array.from({ length: 700 }, (_, i) => ({ name: `서고 봇 ${String(i + 1).padStart(3, '0')}`, avatar: `scale-${i}.png`, chat_size: 1000 }));
+export function largeLibrarySnapshot() {
+    const entries = largeLibraryCharacters.flatMap((card, i) => Array.from({ length: i === 0 ? 1000 : 2 }, (_, j) => catalogEntry({
+        kind: 'character', ownerId: card.avatar, ownerName: card.name, chatId: `이야기 ${String(j + 1).padStart(4, '0')}`,
+    }, { memoria: fictionalArchive(1) }, { updatedAt: '2026-09-21T00:00:00Z' })));
+    return { schema: 1, at: Date.now(), phase: 'complete', entries, errors: [], ownersDone: 700, ownersTotal: 700, chatsDone: entries.length };
 }
