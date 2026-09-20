@@ -39,6 +39,7 @@ import { SlashCommand } from "../../../slash-commands/SlashCommand.js";
 import { ARGUMENT_TYPE, SlashCommandArgument } from "../../../slash-commands/SlashCommandArgument.js";
 import { MacrosParser } from "../../../../scripts/macros.js";
 import { NARRATOR_PERSPECTIVE, findAssociations, sameKnowledgeScope, archiveSnapshot, validateArchive, addCheckpoint, archiveChanges, packetSections } from './archive-engine.mjs';
+import { showArchiveLibrary } from './library-ui.mjs';
 
 const MODULE_NAME = 'memoria';
 const INJECT_KEY = 'memoria_ledger';
@@ -5811,7 +5812,29 @@ function findMemory(id) {
     return getStore().memories.find(m => m.id === id);
 }
 
+function currentLibraryTarget() {
+    const ctx = getContext();
+    const chatId = getCurrentChatId();
+    if (!chatId) return null;
+    if (selected_group != null) {
+        const group = ctx.groups?.find(g => String(g.id) === String(selected_group));
+        return { kind: 'group', ownerId: String(selected_group), ownerName: group?.name || String(selected_group), chatId: String(chatId) };
+    }
+    const card = characters[ctx.characterId];
+    return card?.avatar ? { kind: 'character', ownerId: card.avatar, ownerName: card.name || card.avatar, chatId: String(chatId) } : null;
+}
+
+function liveLibraryArchive(target) {
+    const current = currentLibraryTarget();
+    if (!current || current.kind !== target.kind || current.ownerId !== String(target.ownerId) || current.chatId !== String(target.chatId)) return null;
+    return { metadata: Object.hasOwn(chat_metadata, MODULE_NAME) ? { memoria: structuredClone(chat_metadata[MODULE_NAME]) } : {}, updatedAt: chat.at(-1)?.send_date || '' };
+}
+
 function bindUI() {
+    $('#memoria_library_open').on('click', () => {
+        showArchiveLibrary({ getContext, getRequestHeaders, download, live: liveLibraryArchive, getLiveTarget: currentLibraryTarget })
+            .catch(error => { console.error('[Memoria] 전체 서고:', error); toastr.error(error.message); });
+    });
     $('#memoria_settings').on('click', '.memoria-source', async function () {
         try { await showMemorySource(String($(this).attr('data-id'))); }
         catch (e) { toastr.error(e.message, 'Memoria'); }

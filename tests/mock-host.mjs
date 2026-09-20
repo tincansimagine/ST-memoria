@@ -1,9 +1,10 @@
 // Browser fixture only. All content is fictional; no model requests or user data.
+import { libraryCharacters, libraryGroups } from './library-fixture.mjs';
 export const chat = [];
 export const name1 = '여행자';
 export const name2 = '아리아';
 export const selected_group = null;
-export const characters = [];
+export const characters = libraryCharacters;
 export const extension_settings = {};
 export const power_user = {};
 export const oai_settings = {};
@@ -22,7 +23,10 @@ export const uuidv4 = () => crypto.randomUUID();
 export const setExtensionPrompt = () => {};
 export const hideChatMessageRange = async () => {};
 export const getFileText = file => file.text();
-export const download = () => {};
+export const download = (content, filename, type) => {
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([content], { type })); a.download = filename; a.click(); URL.revokeObjectURL(a.href);
+};
 export const SlashCommandParser = { addCommandObject() {} };
 export const SlashCommand = { fromProps: x => x };
 export const SlashCommandArgument = { fromProps: x => x };
@@ -49,8 +53,11 @@ export const chat_metadata = { memoria: { version: 1, lexiconRev: 5, turnCounter
     chunkSummaries: [{ id: 'chapter', fromTurn: 1, toTurn: 8, text: '여행자는 아리아를 만나 함께 해안을 걸었다. 등대에서 반지를 건네며 돌아오겠다고 약속했다.' }],
     arcSummaries: [], milestones: [], items: [], dossier: [] } };
 
+const fixtureStorage = new Map();
 export function getContext() {
     return {
+        characters, groups: libraryGroups, characterId: 0,
+        accountStorage: { getItem: key => fixtureStorage.get(key), setItem: (key, value) => fixtureStorage.set(key, value), removeItem: key => fixtureStorage.delete(key) },
         POPUP_TYPE: { CONFIRM: 1, TEXT: 2 }, POPUP_RESULT: { AFFIRMATIVE: 1 }, saveMetadata: async () => {},
         callGenericPopup: async (content, type, value, opts = {}) => new Promise(resolve => {
             const dialog = document.createElement('dialog');
