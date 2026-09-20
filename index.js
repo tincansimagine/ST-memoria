@@ -38,7 +38,7 @@ import { SlashCommandParser } from "../../../slash-commands/SlashCommandParser.j
 import { SlashCommand } from "../../../slash-commands/SlashCommand.js";
 import { ARGUMENT_TYPE, SlashCommandArgument } from "../../../slash-commands/SlashCommandArgument.js";
 import { MacrosParser } from "../../../../scripts/macros.js";
-import { NARRATOR_PERSPECTIVE, findAssociations, sameKnowledgeScope, archiveSnapshot, validateArchive, addCheckpoint, archiveChanges, packetSections } from './archive-engine.mjs';
+import { NARRATOR_PERSPECTIVE, isSharedPerspective, hasChatPerspective, resolvePerspective, findAssociations, sameKnowledgeScope, archiveSnapshot, validateArchive, addCheckpoint, archiveChanges, packetSections } from './archive-engine.mjs';
 import { showArchiveLibrary } from './library-ui.mjs';
 
 const MODULE_NAME = 'memoria';
@@ -269,6 +269,7 @@ const DEFAULT_SETTINGS = Object.freeze({
     reasoningHeadroom: 8000, // 추론 모델의 사고 토큰 여유분 — 용도별 상한에 얹는다 (0 = 얹지 않음)
     supervisorEnabled: false,
     authorizeCharPrivate: true,
+    defaultPerspective: null, // 첫 실제 채팅의 기존 선택을 한 번 이어받은 뒤 계정 공통값으로 유지
     summaryLanguage: 'auto',  // auto | ko | en | ja | hybrid
     autoHide: false,          // 요약이 커버한 옛 메시지를 채팅에서 숨겨 토큰 절약
     preserveRecent: 6,        // 자동 숨김 시 항상 남길 최근 메시지 수
@@ -517,6 +518,33 @@ function persistStore() {
     if (!getCurrentChatId()) return;
     saveMetadataDebounced();
     scheduleLocalSync();
+}
+
+function effectivePerspective(store = getStore()) {
+    const settings = getSettings();
+    if (!isSharedPerspective(settings.defaultPerspective) && getCurrentChatId()) {
+        // Only the first opened chat seeds the shared preference. Later chats
+        // cannot overwrite it with legacy per-chat automatic/novel selections.
+        settings.defaultPerspective = !hasChatPerspective(store) && isSharedPerspective(store.perspective) ? store.perspective : '';
+        saveSettingsDebounced();
+    }
+    return resolvePerspective(store, settings.defaultPerspective);
+}
+
+function setPerspectivePreference(value, local) {
+    if (typeof value !== 'string' || (!local && !isSharedPerspective(value))) throw new Error('기억·서술 방식의 선택을 확인해 주세요.');
+    if (local && !getCurrentChatId()) throw new Error('채팅을 먼저 열어 주세요.');
+    effectivePerspective();
+    if (!local) {
+        getSettings().defaultPerspective = value;
+        saveSettingsDebounced();
+    }
+    if (getCurrentChatId()) {
+        getStore().perspective = value;
+        getStore().perspectiveScope = local ? 'chat' : 'default';
+    }
+    packetOverrideOnce = packetDraft = null;
+    persistStore();
 }
 
 /* ============================================================
@@ -3131,7 +3159,7 @@ function authorizedEntities() {
     const names = new Set();
     if (getSettings().authorizeCharPrivate) {
         const store = getStore();
-        const perspective = store.perspective || '';
+        const perspective = effectivePerspective(store);
         if (perspective === NARRATOR_PERSPECTIVE) {
             // 서술자가 참고할 수 있어도 등장인물의 지식은 합치지 않는다. 소유자 표기를 그대로 유지한다.
             for (const m of store.memories) {
@@ -3587,7 +3615,7 @@ function getSceneSnapshot(store) {
 }
 
 function currentRecallQuery() {
-    if (getStore().perspective === NARRATOR_PERSPECTIVE) {
+    if (effectivePerspective() === NARRATOR_PERSPECTIVE) {
         // 소설 이어쓰기에서는 오래전 사용자 답장 대신 마지막 장면의 끝을 기준으로 찾는다.
         for (let i = chat.length - 1; i >= 0; i--) {
             if (!chat[i] || chat[i].is_system) continue;
@@ -3606,7 +3634,7 @@ function currentRecallQuery() {
 async function buildPacketSections(query, supervisorPlan) {
     const store = getStore();
     const settings = getSettings();
-    const narratorMode = store.perspective === NARRATOR_PERSPECTIVE;
+    const narratorMode = effectivePerspective(store) === NARRATOR_PERSPECTIVE;
 
     const recentUserTexts = [];
     for (let i = chat.length - 1; i >= 0 && recentUserTexts.length < settings.multiQueryRecent + 1; i--) {
@@ -3954,7 +3982,7 @@ function packetRewritePrompt(narratorMode) {
 async function rewritePacketWithLibrarian() {
     const chatId = getCurrentChatId();
     if (!chatId) throw new Error('열린 채팅이 없습니다');
-    const perspective = getStore().perspective || '';
+    const perspective = effectivePerspective();
     const privateAllowed = getSettings().authorizeCharPrivate;
     const parts = await buildPacketSections(currentRecallQuery(), null);
     // 새로 쓸 때는 연대기·청크를 빠짐없이 보여준다 (평소 주입은 최근 청크 3개까지만)
@@ -3972,7 +4000,7 @@ async function rewritePacketWithLibrarian() {
     const body = lines.slice(firstSection).filter(l => !l.startsWith('(End of archive.')).join('\n');
 
     const reply = await callAuxLLM(`${packetRewritePrompt(parts.narratorMode)}\n\n${languageDirective()}`, `Archive:\n${body}`, { maxTokens: auxTokens(6000) });
-    if (getCurrentChatId() !== chatId || (getStore().perspective || '') !== perspective || getSettings().authorizeCharPrivate !== privateAllowed) {
+    if (getCurrentChatId() !== chatId || effectivePerspective() !== perspective || getSettings().authorizeCharPrivate !== privateAllowed) {
         throw new Error('채팅 또는 기억·서술 방식이 바뀌어 이전 초안을 버렸습니다. 다시 새로 써 주세요.');
     }
     const rewritten = String(reply || '')
@@ -4155,7 +4183,7 @@ async function updateInjection({ runSupervisorPass = false } = {}) {
     // 전송(MESSAGE_SENT)과 생성 시작(GENERATION_STARTED)이 같은 상태로 연달아 부르는 경우,
     // 두 번째 호출은 장부를 다시 짓지 않는다 (연출 패스는 매번 새로 지어야 하므로 제외).
     // 창은 짧게(5초) — 그 사이 설정을 바꿔도 다음 턴이면 자연히 반영된다.
-    const buildKey = `${chatId}|${chat.length}|${getStringHash(query)}|${settings.tokenBudget}|${getStore().perspective || ''}|${settings.associativeRecall}|${settings.authorizeCharPrivate}`;
+    const buildKey = `${chatId}|${chat.length}|${getStringHash(query)}|${settings.tokenBudget}|${effectivePerspective()}|${settings.associativeRecall}|${settings.authorizeCharPrivate}`;
     if (!runSupervisorPass && buildKey === lastBuildKey && Date.now() - lastBuildAt < 5000 && lastPacketText !== '') {
         setExtensionPrompt(INJECT_KEY, lastPacketText, injectionType(), settings.injectDepth, false, extension_prompt_roles.SYSTEM);
         return;
@@ -5686,7 +5714,7 @@ function renderSummariesPanel() {
 }
 
 function renderPerspectiveHelp() {
-    const perspective = getStore().perspective || '';
+    const perspective = effectivePerspective();
     let help;
     if (perspective === NARRATOR_PERSPECTIVE) {
         help = 'AI가 내 캐릭터까지 함께 쓰며 소설처럼 이어가는 채팅용입니다. 모든 인물의 기억·속마음을 참고하되, 각 인물이 모르는 비밀은 그 인물에게 넘기지 않습니다. 내 답변 없이 이어갈 때는 최신 AI 본문으로 기억을 찾고, 직접 답변하면 그 내용을 우선합니다.';
@@ -5701,21 +5729,30 @@ function renderPerspectiveHelp() {
     }
     if (!getSettings().authorizeCharPrivate && perspective !== '__public__') help += ' 현재 비공개 기억 허용이 꺼져 있어 공개 기억만 참고합니다.';
     $('#memoria_perspective_help').text(help);
+    $('#memoria_perspective_scope_help').text(hasChatPerspective(getStore())
+        ? '이 채팅만 별도로 사용합니다. 체크를 끄면 다른 채팅과 같은 기본 방식으로 돌아갑니다.'
+        : '기본 방식으로 저장됩니다. 다른 봇·채팅으로 이동하거나 새로고침해도 유지되며, 따로 설정한 채팅만 예외입니다.');
 }
 
 function renderSettingsPanel() {
     const s = getSettings();
     const store = getStore();
+    const selectedPerspective = effectivePerspective(store);
+    const localPerspective = hasChatPerspective(store);
     $('#memoria_associative_recall').prop('checked', s.associativeRecall);
+    $('#memoria_perspective_local').prop('checked', localPerspective).prop('disabled', !getCurrentChatId());
+    $('#memoria_perspective_label').text(localPerspective ? '이 채팅의 기억·서술 방식' : '기본 기억·서술 방식');
     const perspective = $('#memoria_perspective').empty();
     perspective.append($('<option value=""></option>').text(selected_group ? '자동 · 그룹은 공개 기억만' : `자동 · ${name2 || '현재 캐릭터'}`));
     perspective.append($('<option value="__public__"></option>').text('공개 기억만'));
     perspective.append($('<option></option>').val(NARRATOR_PERSPECTIVE).text('소설·풀사칭 (모든 인물 참고)'));
-    const names = new Set(store.characters.filter(c => !c.disabled).map(c => c.name));
-    if (name2 && !selected_group) names.add(name2);
-    if (store.perspective && !['__public__', NARRATOR_PERSPECTIVE].includes(store.perspective)) names.add(store.perspective);
-    for (const name of names) perspective.append($('<option></option>').val(name).text(name));
-    perspective.val(store.perspective || '').prop('disabled', !getCurrentChatId());
+    if (localPerspective) {
+        const names = new Set(store.characters.filter(c => !c.disabled).map(c => c.name));
+        if (name2 && !selected_group) names.add(name2);
+        if (!isSharedPerspective(store.perspective) && store.perspective) names.add(store.perspective);
+        for (const name of names) perspective.append($('<option></option>').val(name).text(name));
+    }
+    perspective.val(selectedPerspective).prop('disabled', localPerspective && !getCurrentChatId());
     renderPerspectiveHelp();
     $('#memoria_enabled').prop('checked', s.enabled);
     $('#memoria_auto_record').prop('checked', s.autoRecord);
@@ -5853,12 +5890,16 @@ function bindUI() {
         catch (e) { toastr.error(e.message, 'Memoria'); }
     });
     $('#memoria_perspective').on('change', async function () {
+        setPerspectivePreference(String($(this).val() || ''), $('#memoria_perspective_local').prop('checked'));
+        renderSettingsPanel();
+        await updateInjection();
+    });
+    $('#memoria_perspective_local').on('change', async function () {
         if (!getCurrentChatId()) return;
-        getStore().perspective = String($(this).val() || '');
-        packetOverrideOnce = null;
-        packetDraft = null;
-        persistStore();
-        renderPerspectiveHelp();
+        const local = $(this).prop('checked');
+        const current = effectivePerspective();
+        setPerspectivePreference(local ? current : getSettings().defaultPerspective, local);
+        renderSettingsPanel();
         await updateInjection();
     });
     $('#memoria_associative_recall').on('change', async function () {

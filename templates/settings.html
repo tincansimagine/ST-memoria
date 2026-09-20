@@ -1,7 +1,7 @@
 <div id="memoria_settings" class="memoria">
     <div class="inline-drawer">
         <div class="inline-drawer-toggle inline-drawer-header">
-            <b><i class="fa-solid fa-book-bookmark"></i> Memoria — 장기기억 서고 <span class="memoria__version">v1.11.0</span></b>
+            <b><i class="fa-solid fa-book-bookmark"></i> Memoria — 장기기억 서고 <span class="memoria__version">v1.12.0</span></b>
             <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
         </div>
         <div class="inline-drawer-content">
@@ -285,10 +285,15 @@
                         <span><strong>캐릭터 비공개 기억 허용</strong><small>아래에서 선택한 범위의 속마음·비밀도 참고합니다. 끄면 소설·풀사칭을 포함한 모든 방식에서 공개 기억만 검색합니다.</small></span>
                     </label>
                     <div class="memoria__perspective">
-                        <label for="memoria_perspective">이 채팅의 기억·서술 방식</label>
-                        <select id="memoria_perspective" aria-describedby="memoria_perspective_help"><option value="">자동</option><option value="__public__">공개 기억만</option><option value="__narrator__">소설·풀사칭 (모든 인물 참고)</option></select>
+                        <label for="memoria_perspective" id="memoria_perspective_label">기본 기억·서술 방식</label>
+                        <select id="memoria_perspective" aria-describedby="memoria_perspective_scope_help memoria_perspective_help"><option value="">자동</option><option value="__public__">공개 기억만</option><option value="__narrator__">소설·풀사칭 (모든 인물 참고)</option></select>
+                        <label class="memoria__toggle-row" for="memoria_perspective_local">
+                            <input type="checkbox" id="memoria_perspective_local">
+                            <span><strong>이 채팅만 따로 설정</strong><small>다른 방식이나 특정 인물 시점을 이 채팅에서만 사용할 때 켜세요.</small></span>
+                        </label>
+                        <small id="memoria_perspective_scope_help" class="memoria__hint" aria-live="polite"></small>
                         <small id="memoria_perspective_help" class="memoria__hint" aria-live="polite"></small>
-                        <small>이 선택은 현재 채팅에만 적용됩니다. 원문·요약에 이미 나온 비밀까지 가리지는 않습니다. 장부를 직접 고정했다면 고정을 해제해야 새 방식이 적용됩니다.</small>
+                        <small>원문·요약에 이미 나온 비밀까지 가리지는 않습니다. 장부를 직접 고정했다면 고정을 해제해야 새 방식이 적용됩니다.</small>
                     </div>
                     <label class="memoria__toggle-row" for="memoria_associative_recall">
                         <input type="checkbox" id="memoria_associative_recall">
