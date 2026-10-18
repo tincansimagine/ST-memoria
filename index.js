@@ -520,6 +520,29 @@ function persistStore() {
     scheduleLocalSync();
 }
 
+/**
+ * 복구 지점을 만든다. 서고가 한도를 넘어 만들지 못하면 경고만 하고 작업은 계속한다 —
+ * 예전에는 여기서 예외를 던져, 서고가 너무 커서 초기화하려는 경우조차 막혔다.
+ * 반환: 복구 지점을 남겼는지 여부.
+ */
+function checkpointBeforeChange(store, label) {
+    if (addCheckpoint(store, label, uuidv4())) return true;
+    console.warn(`[${MODULE_NAME}] 복구 지점 생성 실패 (서고가 한도를 넘음): ${label}`);
+    toastr.warning('서고가 너무 커서 복구 지점을 만들지 못했습니다. 이 작업은 되돌릴 수 없으니, 필요하면 도구 탭에서 JSON으로 내보내 두세요.', 'Memoria', { timeOut: 12000 });
+    return false;
+}
+
+/** 복구 지점에는 임베딩을 담지 않는다 — 되살린 뒤 내장 벡터를 다시 계산한다 */
+function rebuildLocalVectors(store) {
+    for (const m of store.memories || []) {
+        m.vec = encodeVec(embedText(memoryIndexText(m)));
+        const cue = memoryCueText(m);
+        m.cvec = cue.length >= 4 ? encodeVec(embedText(cue)) : '';
+        if (!m.avec) m.avec = null;
+        if (!m.acvec) m.acvec = null;
+    }
+}
+
 function effectivePerspective(store = getStore()) {
     const settings = getSettings();
     if (!isSharedPerspective(settings.defaultPerspective) && getCurrentChatId()) {
@@ -2753,7 +2776,7 @@ async function rebuildAllSummaries(onProgress) {
         try {
             const made = await maybeSummarizeChunk(draft, { flushAll: true, strict: true, onProgress, shouldStop: stop });
             if (stop()) { outcome = { made: null }; return; }
-            addCheckpoint(store, '요약 전체 다시 만들기 전', uuidv4());
+            checkpointBeforeChange(store, '요약 전체 다시 만들기 전');
             store.chunkSummaries = draft.chunkSummaries;
             store.arcSummaries = draft.arcSummaries;
             store.summaryCursor = draft.summaryCursor;
@@ -3061,7 +3084,7 @@ async function runConsolidation(store, { review = false } = {}) {
     if (!unchanged()) {
         throw new Error('검토 중 채팅이나 서고가 바뀌었습니다. 최신 기록으로 다시 정리해 주세요.');
     }
-    addCheckpoint(liveStore, review ? '검토한 서고 정리 전' : '자동 서고 정리 전', uuidv4());
+    checkpointBeforeChange(liveStore, review ? '검토한 서고 정리 전' : '자동 서고 정리 전');
     liveStore.memories = store.memories;
     persistStore();
     return stats;
@@ -4770,7 +4793,7 @@ async function proposeEditorTurn(instruction) {
 /** 사람이 확인한 편집안을 실제로 store에 반영한다. 반환: {applied, skipped} */
 async function applyEditorOps(ops) {
     const store = getStore();
-    addCheckpoint(store, '사서 정정 적용 전', uuidv4());
+    checkpointBeforeChange(store, '사서 정정 적용 전');
     const now = store.turnCounter;
     let applied = 0;
     const skipped = [];
@@ -5078,7 +5101,7 @@ async function importMemory(file) {
         if (getCurrentChatId() !== chatId || getStore() !== store || archiveSnapshot(store) !== baseline || pendingCommits || llmBusy) {
             throw new Error('채팅이나 서고가 바뀌었거나 기록 중입니다. 작업이 끝난 뒤 다시 가져와 주세요.');
         }
-        addCheckpoint(store, '파일 복원 전', uuidv4());
+        checkpointBeforeChange(store, '파일 복원 전');
         restored.checkpoints = store.checkpoints;
         chat_metadata[MODULE_NAME] = restored;
         localSyncedChat = null;
@@ -5109,7 +5132,7 @@ async function importCarryOver(file) {
         const src = validateArchive(payload.store);
         if (getCurrentChatId() !== chatId || pendingCommits || llmBusy) throw new Error('기록이 끝난 뒤 같은 채팅에서 다시 가져와 주세요.');
         const store = getStore();
-        addCheckpoint(store, '다른 채팅 인계 전', uuidv4());
+        checkpointBeforeChange(store, '다른 채팅 인계 전');
         let carriedSummaries = 0;
         let carriedMemories = 0;
         let carriedRules = 0;
@@ -5185,7 +5208,7 @@ async function resetMemory() {
     if (pendingCommits || llmBusy) throw new Error('진행 중인 기록이 끝난 뒤 초기화해 주세요.');
     const chatId = getCurrentChatId();
     const previous = getStore();
-    addCheckpoint(previous, '서고 초기화 전', uuidv4());
+    checkpointBeforeChange(previous, '서고 초기화 전');
     delete chat_metadata[MODULE_NAME];
     getStore().checkpoints = previous.checkpoints;
     lastBuildKey = '';
@@ -5267,8 +5290,9 @@ async function restoreCheckpoint(id) {
     if (getCurrentChatId() !== chatId || getStore() !== store || archiveSnapshot(store) !== baseline || pendingCommits || llmBusy) {
         throw new Error('검토 중 채팅이나 기록이 바뀌었습니다. 다시 검토해 주세요.');
     }
-    addCheckpoint(store, '복구 실행 전', uuidv4());
+    checkpointBeforeChange(store, '복구 실행 전');
     restored.checkpoints = store.checkpoints;
+    rebuildLocalVectors(restored); // 복구 지점은 임베딩을 담지 않는다
     chat_metadata[MODULE_NAME] = restored;
     packetOverrideOnce = packetDraft = recallAudit = null;
     localSyncedChat = null;
@@ -5880,7 +5904,9 @@ function bindUI() {
         try {
             if (!getCurrentChatId()) throw new Error('먼저 채팅을 열어 주세요.');
             if (pendingCommits || llmBusy) throw new Error('기록이 끝난 뒤 저장해 주세요.');
-            addCheckpoint(getStore(), '직접 저장한 서고', uuidv4());
+            if (!addCheckpoint(getStore(), '직접 저장한 서고', uuidv4())) {
+                throw new Error('서고가 복구 지점 한도(3MB)를 넘습니다. 도구 탭에서 JSON으로 내보내 보관해 주세요.');
+            }
             persistStore(); renderCheckpoints();
             toastr.success('복구 지점을 저장했습니다.', 'Memoria');
         } catch (e) { toastr.error(e.message, 'Memoria'); }

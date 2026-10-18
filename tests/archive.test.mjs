@@ -33,13 +33,27 @@ test('checkpoints are bounded, independent, non-recursive and preserve old schem
     assert.throws(() => validateArchive({ ...store, memories: [memory('m'), memory('m')] }), /중복/);
 });
 
-test('oversize checkpoint fails without changing archive or evicting history', () => {
+test('oversize checkpoint is skipped without changing archive, evicting history, or throwing', () => {
     const store = { version: 1, turnCounter: 0, memories: [] };
     addCheckpoint(store, 'small', 'a');
     store.dossier = [{ chunks: ['가'.repeat(1_100_000)] }];
     const before = JSON.stringify(store);
-    assert.throws(() => addCheckpoint(store, 'large', 'b'), /3MB/);
+    // 던지면 "서고가 너무 커서" 쓰려던 초기화까지 막힌다 — 건너뛰고 부르는 쪽이 정하게 한다
+    assert.equal(addCheckpoint(store, 'large', 'b'), null);
     assert.equal(JSON.stringify(store), before);
+});
+
+test('checkpoints leave embeddings out so vector-heavy archives stay restorable', () => {
+    const vector = 'A'.repeat(8000);
+    const store = { version: 1, turnCounter: 1, memories: Array.from({ length: 200 },
+        (_, n) => memory(`m${n}`, { vec: vector, cvec: vector, avec: vector, acvec: vector })) };
+    assert.ok(new TextEncoder().encode(archiveSnapshot(store)).length > 3 * 1024 * 1024);
+    const point = addCheckpoint(store, 'heavy', 'a');
+    assert.ok(point && point.bytes < 200 * 1024);
+    const restored = validateArchive(JSON.parse(point.data));
+    assert.equal(restored.memories.length, 200);
+    assert.equal(restored.memories[0].vec, undefined);
+    assert.equal(store.memories[0].vec, vector); // 원본은 그대로
 });
 
 test('viewpoint defaults to public in groups and resolves character aliases explicitly', async () => {

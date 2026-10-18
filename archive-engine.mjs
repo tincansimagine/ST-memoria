@@ -121,11 +121,24 @@ export function validateArchive(value) {
     return copy;
 }
 
-/** Bounded snapshots exclude their own history; adding one never mutates archive content. */
+/* 임베딩 벡터는 기억 본문에서 언제든 다시 계산할 수 있다. 복구 지점 크기의 대부분을
+ * 차지하면서(API 임베딩은 기억 하나에 수 KB) 되살릴 가치는 없으므로 빼고 저장한다. */
+const VECTOR_FIELDS = ['vec', 'cvec', 'avec', 'acvec'];
+
+export function checkpointSnapshot(store) {
+    const { checkpoints, ...data } = store;
+    return JSON.stringify(data, (key, value) => (VECTOR_FIELDS.includes(key) ? undefined : value));
+}
+
+/**
+ * Bounded snapshots exclude their own history; adding one never mutates archive content.
+ * 한도를 넘으면 null을 돌려준다 — 예외를 던지면 초기화처럼 "서고가 너무 커서" 쓰려는
+ * 탈출구까지 같이 막힌다. 복구 지점 없이 진행할지는 부르는 쪽이 정한다.
+ */
 export function addCheckpoint(store, label, id, now = Date.now()) {
-    const data = archiveSnapshot(store);
+    const data = checkpointSnapshot(store);
     const bytes = new TextEncoder().encode(data).length;
-    if (bytes > 3 * 1024 * 1024) throw new Error('서고가 복구 지점 한도(3MB)를 넘어 작업을 중단했습니다. JSON으로 백업한 뒤 불필요한 자료실 문서 등을 줄여 주세요.');
+    if (bytes > 3 * 1024 * 1024) return null;
     const point = { id, label: String(label).slice(0, 100), at: now, turn: store.turnCounter, bytes, data };
     const points = [point, ...(store.checkpoints || [])].slice(0, 3);
     let total = bytes;
