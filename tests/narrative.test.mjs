@@ -102,7 +102,8 @@ test('assistant-only continuation searches the latest scene, while a new user co
 test('novel guidance works with an empty archive and does not disappear into the old long-packet footer', async () => {
     const app = await runtime();
     assert.equal((await app.buildPacketWithinBudget('', null)).text, '');
-    app.getStore().perspective = NARRATOR_PERSPECTIVE;
+    // 공통 기본값은 처음 연 채팅에서 한 번 정해진다 — 그 뒤에는 설정에서 바꾼 값이 기준이다
+    app.getSettings().defaultPerspective = NARRATOR_PERSPECTIVE;
     assert.match((await app.buildPacketWithinBudget('', null)).text, /Novel co-writing mode/);
     const parts = await app.buildPacketSections('', null);
     parts.rules = Array.from({ length: 50 }, (_, n) => ({ scope: 'world', key: `rule${n}`, value: '도시는 밤에 문을 닫는다.' }));

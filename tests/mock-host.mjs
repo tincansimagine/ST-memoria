@@ -47,10 +47,18 @@ memories.push({ id: 'private-memory', kind: 'secret', summary: '아리아만 편
 memories.push({ id: 'player-memory', kind: 'impression', summary: '여행자는 돌아갈 고향을 그리워하면서도 아리아에게 말하지 않았다.', mesId: 11, turnIndex: 6, entities: [name1], tags: ['고향'], visibility: 'private', owner: name1, pinned: true, importance: 0.8 });
 memories.push({ id: 'bora-memory', kind: 'secret', summary: '보라만 등대 창고의 열쇠가 어디에 있는지 안다.', mesId: 13, turnIndex: 7, entities: ['보라'], tags: ['열쇠'], visibility: 'secret', owner: '보라', pinned: true, importance: 0.8 });
 export const chat_metadata = { memoria: { version: 1, lexiconRev: 5, turnCounter: 18, turns, memories,
-    characters: [{ id: 'aria', name: name2, aliases: ['Aria'], role: '등대지기', traits: [], relationships: [], firstTurn: 1, updatedTurn: 18 }, { id: 'bora', name: '보라', aliases: [], traits: [], relationships: [], firstTurn: 6, updatedTurn: 6 }],
+    characters: [{ id: 'aria', name: name2, aliases: ['Aria'], role: '등대지기', traits: ['과묵함'], relationships: [{ target: '보라', relation: '옛 동료' }], firstTurn: 1, updatedTurn: 18,
+        core: '말수가 적고 약속을 무겁게 여긴다 · 먼저 다가가지 않지만 한번 받아들인 사람은 끝까지 챙긴다 · 거짓말은 하지 않고, 대신 침묵한다',
+        voice: '짧은 존댓말, "~잖아요"로 끝맺는 버릇',
+        growth: [{ text: '반지를 받은 뒤로 여행자 앞에서는 떠날 날짜를 먼저 묻는다', turn: 8 }],
+        lines: [{ text: '다시 돌아오겠다고 약속했잖아요.', turn: 2 }] }, { id: 'bora', name: '보라', aliases: [], traits: [], relationships: [], firstTurn: 6, updatedTurn: 6 }],
     worldRules: [{ id: 'rule', scope: 'world', key: 'lighthouse', value: '등대는 여행자들의 귀환을 알린다.', turnIndex: 1 }],
     entityStates: [{ id: 'place', entity: 'scene', slot: 'location', value: '해안의 등대', turnIndex: 18 }],
     locks: [{ id: 'pledge', kind: 'keep_unresolved', summary: '여행자는 보라에게 편지를 전하기로 약속했다.', status: 'active', priority: 1, turnIndex: 10 }],
+    bonds: [{ id: 'bond1', from: name2, to: name1, manual: false, disabled: false, log: [
+        { turn: 1, stage: '경계하는 낯선 손님', basis: '등대 문을 반만 열고 이름을 물었다', calls: '손님', unsaid: '' },
+        { turn: 8, stage: '마지못한 신뢰', basis: '창고 열쇠를 맡겼다', calls: '여행자 씨, 존댓말', unsaid: '' },
+        { turn: 16, stage: '떠나보내기 싫은 사람', basis: '반지를 받고 한참 말이 없었다', calls: '여행자 씨, 존댓말', unsaid: '가지 말라는 말' }] }],
     chunkSummaries: [{ id: 'chapter', fromTurn: 1, toTurn: 8, text: '여행자는 아리아를 만나 함께 해안을 걸었다. 등대에서 반지를 건네며 돌아오겠다고 약속했다.' }],
     arcSummaries: [], milestones: [], items: [], dossier: [] } };
 
