@@ -146,7 +146,7 @@
                     <div class="memoria__section-head">
                         <div>
                             <h4>인물 도감</h4>
-                            <p>대화에 등장한 인물의 프로필입니다. <b>핵심 캐해</b>(⚓)는 한 번 적히면 사서가 다시 쓰지 못하는 기준이고, 이야기 속에서 생긴 변화(🌱)와 실제로 한 대사(❝)는 따로 쌓입니다. ✏️로 모두 직접 고칠 수 있습니다.</p>
+                            <p>대화에 등장한 인물의 프로필입니다. <b>바탕</b>(⚓)은 한 번 적히면 사서가 다시 쓰지 못하는 기준이고, 이야기 속에서 생긴 변화(🌱)와 실제로 한 대사(❝)는 따로 쌓입니다. ✏️로 모두 직접 고칠 수 있습니다.</p>
                         </div>
                         <div class="memoria__compact-actions">
                             <div class="menu_button" id="memoria_character_add" title="인물 추가">
@@ -275,7 +275,7 @@
                 <div class="memoria__config-tools">
                     <label class="memoria__search" for="memoria_settings_search">
                         <i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i>
-                        <input type="search" id="memoria_settings_search" placeholder="설정 찾기 — 예: 숨김, 임베딩, 금지어" autocomplete="off">
+                        <input type="search" id="memoria_settings_search" placeholder="설정 찾기 — 예: 숨김, 임베딩, 삼갈 표현" autocomplete="off">
                     </label>
                     <div id="memoria_bundle_bar" class="memoria__bundle-bar">
                         <i class="fa-solid fa-layer-group" aria-hidden="true"></i>
@@ -617,13 +617,13 @@
                 <div class="memoria__section">
                     <div class="memoria__section-head">
                         <div>
-                            <h4>인물과 문체 지키기</h4>
-                            <p>요약은 서술자 말투로 쓰이고 옛 원문은 숨겨집니다. 그래서 대화가 길어질수록 캐릭터의 말투가 흐려지고, 옛 문체와 말버릇이 되살아납니다. 아래 설정이 그걸 막습니다.</p>
+                            <h4>인물과 말투</h4>
+                            <p>요약은 서술자 말투로 쓰이고 옛 원문은 숨겨집니다. 그래서 대화가 길어질수록 캐릭터의 말투가 흐려지고, 묵은 말투와 말버릇이 되살아납니다. 아래 설정이 그걸 막습니다.</p>
                         </div>
                     </div>
                     <label class="memoria__toggle-row" for="memoria_style_guard">
                         <input type="checkbox" id="memoria_style_guard">
-                        <span><strong>기록은 사실만 참고</strong><small>장부를 넣을 때 "사실만 참고하고, 문체는 지금 대화를 따르고, 옛 표현을 그대로 쓰지 말 것 · 인물의 성격과 말투는 핵심 캐해를 따르고 관계는 관계선의 단계를 지킬 것"을 함께 알려줍니다.</small></span>
+                        <span><strong>장부는 사실 확인용</strong><small>장부를 넣을 때 "장부에서는 사실만 확인하고, 문체는 지금 대화를 따르고, 옛 표현을 그대로 쓰지 말 것 · 인물의 성격과 말투는 바탕을 따르고 관계는 관계선의 단계를 지킬 것"을 함께 알려줍니다.</small></span>
                     </label>
                     <label class="memoria__toggle-row" for="memoria_recall_quotes">
                         <input type="checkbox" id="memoria_recall_quotes">
@@ -631,17 +631,17 @@
                     </label>
                     <div class="memoria__field-grid">
                         <div class="memoria__field">
-                            <label for="memoria_voice_samples" title="지금 장면에 있는 인물마다, 그 인물이 실제로 했던 대사를 몇 줄씩 말투 견본으로 실을지 (0 = 싣지 않음). 원문에 그대로 있는 대사만 모읍니다.">장면 인물 대사 샘플 수</label>
+                            <label for="memoria_voice_samples" title="지금 장면에 있는 인물마다, 그 인물이 실제로 했던 대사를 몇 줄씩 말투 견본으로 실을지 (0 = 싣지 않음). 원문에 그대로 있는 대사만 모읍니다.">장면 인물 남긴 말 수</label>
                             <input type="number" id="memoria_voice_samples" min="0" max="4" step="1">
                         </div>
                     </div>
                     <div class="memoria__setting-block">
-                        <label for="memoria_banned_phrases"><strong>금지어 · 반복 표현</strong></label>
+                        <label for="memoria_banned_phrases"><strong>삼갈 표현 · 반복 표현</strong></label>
                         <textarea id="memoria_banned_phrases" rows="3" placeholder="한 줄에 하나, 또는 쉼표로 구분 — 예: 나지막이, 입꼬리가 미세하게"></textarea>
                         <div class="memoria__button-row">
                             <div class="menu_button" id="memoria_find_repeats" title="말버릇 찾기"><i class="fa-solid fa-repeat"></i><span>말버릇</span></div>
                         </div>
-                        <small class="memoria__hint">적어 둔 표현은 Memoria가 넣는 장부(기억·회상·요약·대사 샘플)에서 빠집니다. 금지어가 든 옛 대사는 인용째로 뺍니다. <b>캐릭터가 꼭 쓰는 말은 넣지 마세요.</b></small>
+                        <small class="memoria__hint">적어 둔 표현은 Memoria가 넣는 장부(기억·회상·요약·남긴 말)에서 빠집니다. 삼갈 표현이 든 옛 대사는 인용째로 뺍니다. <b>캐릭터가 꼭 쓰는 말은 넣지 마세요.</b></small>
                     </div>
                     <label class="memoria__toggle-row" for="memoria_ban_in_chat">
                         <input type="checkbox" id="memoria_ban_in_chat">
@@ -649,7 +649,7 @@
                     </label>
                     <label class="memoria__toggle-row" for="memoria_ban_tell">
                         <input type="checkbox" id="memoria_ban_tell">
-                        <span><strong>AI에게 금지어 목록 알려주기</strong><small>"이 표현은 쓰지 마"라고 직접 알려줍니다. 모델에 따라 오히려 그 단어를 떠올리게 할 수 있어 기본은 꺼 둡니다.</small></span>
+                        <span><strong>AI에게 삼갈 표현 목록 알려주기</strong><small>"이 표현은 쓰지 마"라고 직접 알려줍니다. 모델에 따라 오히려 그 단어를 떠올리게 할 수 있어 기본은 꺼 둡니다.</small></span>
                     </label>
                 </div>
                 <div class="memoria__section">
@@ -671,7 +671,7 @@
                     </div>
                     <label class="memoria__toggle-row" for="memoria_yield_to_chat">
                         <input type="checkbox" id="memoria_yield_to_chat">
-                        <span><strong>답변 생성 중엔 양보하기</strong><small>답변을 생성하는 동안에는 사서·요약 호출을 새로 시작하지 않고, 답변이 온 뒤에 이어서 합니다. API나 프록시가 요청을 한 번에 하나씩만 받을 때 답변이 줄 서서 기다리는 일을 막습니다.</small></span>
+                        <span><strong>답변 먼저</strong><small>답변을 생성하는 동안에는 사서·요약 호출을 새로 시작하지 않고, 답변이 온 뒤에 이어서 합니다. API나 프록시가 요청을 한 번에 하나씩만 받을 때 답변이 줄 서서 기다리는 일을 막습니다.</small></span>
                     </label>
                     <label class="memoria__toggle-row" for="memoria_watch_updates">
                         <input type="checkbox" id="memoria_watch_updates">
