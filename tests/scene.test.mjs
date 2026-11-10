@@ -124,5 +124,8 @@ test('story views render pictures: pulse bars, flow cards, graph dots, table row
     assert.match(map, /mmv-edge is-picked" data-id="x"/);
     assert.equal(view.bondMapSvg([]), '');
     assert.notEqual(map.match(/marker id="([^"]+)"/)[1], view.bondMapSvg([{ id: 'x', from: 'A', to: 'B', stage: 's' }]).match(/marker id="([^"]+)"/)[1], 'each map owns its arrowhead');
+    const long = view.bondCardsHtml([{ id: 'z', from: 'A', to: 'B', log: ['하나', '둘', '셋', '넷', '다섯', '여섯'].map(stage => ({ stage })) }]);
+    assert.match(long, /is-earlier[\s\S]*앞서 · 하나 → 둘/);
+    assert.ok(!long.includes('--mmv-step:4'), 'the staircase never indents past four steps');
     assert.match(view.bondCardsHtml([{ id: 'x', from: 'A', to: 'B', log: [{ stage: '경계' }, { stage: '경계' }, { stage: '신뢰', unsaid: '고마움' }] }], { picked: 'x' }), /mmv-bond is-picked[\s\S]*--mmv-step:0[\s\S]*--mmv-step:1[\s\S]*말하지 못한 것 · 고마움/);
 });

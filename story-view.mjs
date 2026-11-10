@@ -236,7 +236,7 @@ export function bondMapSvg(bonds, { picked = '', focus = '' } = {}) {
         </g>`;
     }).join('');
     return `<svg class="mmv-map" viewBox="${box.map(n => Math.round(n)).join(' ')}" style="max-width:${Math.round(box[2])}px" role="img" aria-label="관계도">
-        <defs><marker id="${arrowId}" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="9" markerHeight="9" orient="auto-start-reverse"><path d="M0,1 L9,5 L0,9 z"/></marker></defs>
+        <defs><marker id="${arrowId}" viewBox="0 0 10 10" refX="8" refY="5" markerUnits="userSpaceOnUse" markerWidth="11" markerHeight="11" orient="auto-start-reverse"><path d="M0,1 L9,5 L0,9 z"/></marker></defs>
         ${edges}${nodes}
     </svg>`;
 }
@@ -252,7 +252,11 @@ export function bondCardsHtml(bonds, { picked = '', focus = '' } = {}) {
         const steps = [];
         for (const e of bond.log || []) if (steps[steps.length - 1]?.stage !== e.stage) steps.push(e);
         const now = bond.log[bond.log.length - 1] || {};
-        const stairs = steps.map((st, i) => `<li class="${i === steps.length - 1 ? 'is-now' : ''}" style="--mmv-step:${i}"><b>${esc(st.stage)}</b>${st.basis ? `<small>${esc(st.basis)}</small>` : ''}</li>`).join('');
+        // 계단은 최근 넷만 그린다 — 더 쌓여도 좁은 화면에서 글 칸이 줄지 않게. 그 앞은 한 줄로 접는다.
+        const shown = steps.slice(-4);
+        const earlier = steps.slice(0, -4);
+        const stairs = (earlier.length ? `<li class="is-earlier" style="--mmv-step:0"><small>앞서 · ${earlier.map(st => esc(st.stage)).join(' → ')}</small></li>` : '')
+            + shown.map((st, i) => `<li class="${i === shown.length - 1 ? 'is-now' : ''}" style="--mmv-step:${i}"><b>${esc(st.stage)}</b>${st.basis ? `<small>${esc(st.basis)}</small>` : ''}</li>`).join('');
         const extra = [now.calls ? `<span class="mmv-chip">부르는 말 · ${esc(now.calls)}</span>` : '', now.unsaid ? `<span class="mmv-chip mmv-chip--open">말하지 못한 것 · ${esc(now.unsaid)}</span>` : ''].join('');
         return `<section class="mmv-bond${picked === bond.id ? ' is-picked' : ''}" data-id="${esc(bond.id)}">
             <h5>${esc(bond.from)} <span class="mmv-arrow">→</span> ${esc(bond.to)}</h5>

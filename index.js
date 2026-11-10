@@ -517,6 +517,8 @@ function getStore() {
     if (!Array.isArray(s.items)) s.items = [];
     if (!Array.isArray(s.dossier)) s.dossier = [];
     if (!Array.isArray(s.bonds)) s.bonds = [];
+    // v2.0.3: 같은 단계를 말만 바꿔 여러 칸으로 쌓아 둔 관계선을 한 번 접는다
+    if ((s.bondRev || 0) < 1) { for (const b of s.bonds) compactBondLog(b); s.bondRev = 1; }
     // 구버전(v0.3 이전) 명칭을 새 명칭으로 정규화
     if (!s.lexiconRev) {
         for (const m of s.memories) { m.kind = normKind(m.kind); m.visibility = normVisibility(m.visibility); }
@@ -2402,7 +2404,8 @@ function removeDerivedForTurn(store, turnIndex) {
     }
     // 관계선: 이 턴에 적힌 단계만 걷어낸다 — 그 앞 단계가 다시 현재가 되고, 남는 단계가 없으면 줄 자체가 사라진다
     if (Array.isArray(store.bonds)) {
-        for (const b of store.bonds) b.log = (b.log || []).filter(e => e.manual || e.turn !== turnIndex);
+        // 이 턴이 같은 계단을 고쳐 쓴 것이었으면 고치기 전 글로, 새 계단을 놓은 것이었으면 그 계단을 걷어낸다
+        for (const b of store.bonds) b.log = (b.log || []).flatMap(e => (e.manual || e.turn !== turnIndex ? [e] : e.was ? [e.was] : []));
         store.bonds = store.bonds.filter(b => b.log.length);
     }
     for (const l of store.locks) {
@@ -2748,10 +2751,42 @@ function upsertBond(store, b, turnIndex, { manual = false } = {}) {
         if (!entry.basis) entry.basis = last.basis || '';
     }
     if (last && last.stage === entry.stage && (last.calls || '') === entry.calls && (last.unsaid || '') === entry.unsaid) return row; // 재확인일 뿐
-    if (last && last.turn === turnIndex && !last.manual && !manual) row.log[row.log.length - 1] = entry; // 같은 턴의 재기록
+    if (last && last.turn === turnIndex && !last.manual && !manual) row.log[row.log.length - 1] = { ...entry, was: last.was }; // 같은 턴의 재기록
+    else if (last && !manual && !last.manual && sameBondStep(last, entry)) {
+        // 같은 단계를 다듬어 적은 것 — 계단을 새로 놓지 않고 그 칸의 글만 고친다.
+        // 고치기 전 글은 was에 맡아 뒀다가, 이 턴이 지워지면 되돌린다.
+        const { was, ...before } = last;
+        row.log[row.log.length - 1] = { ...entry, was: before };
+    }
     else row.log.push(entry);
     if (row.log.length > BOND_LOG_MAX) row.log = row.log.slice(-BOND_LOG_MAX);
     return row;
+}
+
+const BOND_SETTLE_TURNS = 4;
+
+/**
+ * 새로 온 단계가 직전 단계와 "같은 계단"인가.
+ * 사서는 관계가 움직이지 않았는데도 같은 단계를 말만 바꿔 다시 적곤 한다("은근한 스킨십" → "짓궂은 스킨십").
+ * 직전 단계가 적힌 지 몇 턴 안 됐거나 문구가 크게 겹치면 새 계단이 아니라 같은 계단을 고쳐 쓴 것으로 본다.
+ * 감정선은 그렇게 빨리 여러 칸을 오르지 않는다.
+ */
+function sameBondStep(last, next) {
+    if ((next.turn || 0) - (last.turn || 0) <= BOND_SETTLE_TURNS) return true;
+    return textOverlap(last.stage, next.stage) >= 0.45;
+}
+
+/** 이미 쌓인 계단 가운데 같은 계단을 되풀이한 것을 하나로 접는다 (마지막 문구를 남긴다) */
+function compactBondLog(row) {
+    const out = [];
+    for (const e of row.log || []) {
+        const prev = out[out.length - 1];
+        if (prev && !prev.manual && !e.manual && sameBondStep(prev, e)) out[out.length - 1] = { ...e, turn: e.turn };
+        else out.push(e);
+    }
+    const changed = out.length !== (row.log || []).length;
+    row.log = out;
+    return changed;
 }
 
 /** 관계선 한 줄 — 현재 단계와 근거, 부르는 말, 말하지 못한 것, 지나온 길 */
@@ -5103,7 +5138,7 @@ function renumberTurns(store) {
         for (const l of (c.lines || [])) l.turn = remap(l.turn);
         for (const g of (c.growth || [])) g.turn = remap(g.turn);
     }
-    for (const b of (store.bonds || [])) for (const e of (b.log || [])) e.turn = remap(e.turn);
+    for (const b of (store.bonds || [])) for (const e of (b.log || [])) { e.turn = remap(e.turn); if (e.was) e.was.turn = remap(e.was.turn); }
     for (const e of store.milestones) e.turnIndex = remap(e.turnIndex);
     for (const it of store.items) {
         it.firstTurn = remap(it.firstTurn);

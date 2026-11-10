@@ -61,7 +61,7 @@ test('the player character gets no voice samples outside novel mode; locked card
     assert.deepEqual([...store.characters[1].lines.map(l => l.text)], ['오랜만이야.'], 'samples are evidence, not profile');
 });
 
-test('a bond keeps its path, ignores restatements, and steps back when a turn is rolled back', async () => {
+test('a bond keeps its path, folds rewordings into one step, and steps back when a turn is rolled back', async () => {
     const a = await app();
     const store = a.getStore();
     const upsert = a.run('upsertBond');
@@ -69,18 +69,30 @@ test('a bond keeps its path, ignores restatements, and steps back when a turn is
     upsert(store, { from: '아리아', to: '여행자', stage: '경계', basis: '문을 반만 열었다', calls: '손님' }, 1);
     upsert(store, { from: '아리아', to: '여행자', stage: '경계', basis: '', calls: '' }, 2);
     assert.equal(store.bonds[0].log.length, 1, 'restating the same stage files nothing');
-    upsert(store, { from: '아리아', to: '여행자', stage: '마지못한 신뢰', basis: '열쇠를 맡겼다', calls: '' }, 3);
-    upsert(store, { from: '아리아', to: '여행자', stage: '떠나보내기 싫음', basis: '반지를 받았다', calls: '', unsaid: '가지 말라는 말' }, 5);
+    upsert(store, { from: '아리아', to: '여행자', stage: '마지못한 신뢰', basis: '열쇠를 맡겼다', calls: '' }, 10);
+    upsert(store, { from: '아리아', to: '여행자', stage: '떠나보내기 싫음', basis: '반지를 받았다', calls: '', unsaid: '가지 말라는 말' }, 20);
     assert.equal(store.bonds.length, 1);
     assert.equal(store.bonds[0].log.at(-1).calls, '손님', 'an omitted address is inherited, not erased');
     assert.match(line(store.bonds[0]), /아리아 → 여행자: 떠나보내기 싫음 \| shown by: 반지를 받았다 \| calls them: 손님 \| unsaid: 가지 말라는 말 \| path: 경계 → 마지못한 신뢰 → now/);
 
-    a.removeDerivedForTurn(store, 5);
+    // 몇 턴 안에 말만 바꿔 다시 적은 것은 새 계단이 아니다
+    upsert(store, { from: '아리아', to: '여행자', stage: '붙잡고 싶은 사람', basis: '소매를 잡았다' }, 22);
+    assert.equal(store.bonds[0].log.length, 3, 'a quick rewording refines the current step');
+    assert.equal(store.bonds[0].log.at(-1).stage, '붙잡고 싶은 사람');
+    a.removeDerivedForTurn(store, 22);
+    assert.equal(store.bonds[0].log.at(-1).stage, '떠나보내기 싫음', 'rolling back restores the wording it replaced');
+
+    a.removeDerivedForTurn(store, 20);
     assert.equal(store.bonds[0].log.at(-1).stage, '마지못한 신뢰');
-    a.removeDerivedForTurn(store, 3);
+    a.removeDerivedForTurn(store, 10);
     a.removeDerivedForTurn(store, 1);
     assert.equal(store.bonds.length, 0);
     assert.equal(upsert(store, { from: '아리아', to: '아리아', stage: 'x' }, 1), null);
+
+    // 이미 잘게 쌓인 계단은 불러올 때 한 번 접힌다
+    const row = { from: 'A', to: 'B', log: [{ turn: 3, stage: '흥미와 낯선 유화' }, { turn: 4, stage: '노골적인 호기심과 은근한 스킨십' }, { turn: 5, stage: '짓궂은 스킨십과 은근한 배려' }, { turn: 40, stage: '연인' }] };
+    assert.equal(a.run('compactBondLog')(row), true);
+    assert.deepEqual([...row.log.map(e => e.stage)], ['짓궂은 스킨십과 은근한 배려', '연인']);
 });
 
 test('a secret reaches the people listed as knowing it, and the ledger says who they are', async () => {
