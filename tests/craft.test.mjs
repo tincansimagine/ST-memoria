@@ -68,7 +68,7 @@ test('switching bundles swaps live values, keeps base settings intact and saves 
     assert.equal(switchBundle(s, '시뮬봇', DEFAULTS), true);
     assert.equal(s.preserveRecent, 60);
     assert.equal(s.activeBundle, '시뮬봇');
-    s.tokenBudget = 12000;                                 // 묶음이 적용된 동안 바꾼 값
+    s.tokenBudget = 12000;                                 // 세트가 적용된 동안 바꾼 값
 
     assert.equal(switchBundle(s, '', DEFAULTS), true);
     assert.equal(s.tokenBudget, 8000, 'base settings untouched');
@@ -77,7 +77,7 @@ test('switching bundles swaps live values, keeps base settings intact and saves 
     assert.equal(s.bundleBase, null);
 
     assert.equal(switchBundle(s, '', DEFAULTS), false);
-    assert.equal(switchBundle(s, '없는 묶음', DEFAULTS), false);
+    assert.equal(switchBundle(s, '없는 세트', DEFAULTS), false);
 });
 
 test('bundle resolution: chat binding wins over character binding, unknown names fall through', () => {
@@ -85,7 +85,7 @@ test('bundle resolution: chat binding wins over character binding, unknown names
     saveBundle(s, 'A', DEFAULTS); saveBundle(s, 'B', DEFAULTS);
     s.bundleByOwner = { 'char:aria.png': 'B' };
     assert.equal(resolveBundleName(s, { chatBundle: 'A', ownerKey: 'char:aria.png' }), 'A');
-    assert.equal(resolveBundleName(s, { chatBundle: '지워진 묶음', ownerKey: 'char:aria.png' }), 'B');
+    assert.equal(resolveBundleName(s, { chatBundle: '지워진 세트', ownerKey: 'char:aria.png' }), 'B');
     assert.equal(resolveBundleName(s, { chatBundle: '', ownerKey: 'char:other.png' }), '');
 });
 

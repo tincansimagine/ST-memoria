@@ -3,9 +3,9 @@
  *
  * - 대기 상한: 응답 생성을 붙잡는 작업에 시간 제한을 건다
  * - 옛 문체·금지어: 장부에서 금지 표현을 걷어내고, 반복되는 표현을 찾는다
- * - 설정 묶음: 봇·채팅마다 다른 설정을 이름 붙여 저장하고 갈아 끼운다
+ * - 설정 세트: 봇·채팅마다 다른 설정을 이름 붙여 저장하고 갈아 끼운다
  * - 고정 장부: 장부의 안정 구간을 얼려 두고 달라진 줄만 따로 싣는다 (프롬프트 캐시)
- * - 활동 기록: 저절로 일어난 일을 알림 대신 기록으로 남긴다
+ * - 사서 일지: 저절로 일어난 일을 알림 대신 기록으로 남긴다
  */
 
 /* ------------------------------------------------------------
@@ -149,13 +149,13 @@ export function findRepeatedPhrases(replies, { minShare = 0.2, minReplies = 3, m
 }
 
 /* ------------------------------------------------------------
- * 설정 묶음
+ * 설정 세트
  * ------------------------------------------------------------ */
 
 /**
- * 묶음에 담지 않는 설정 — 모든 채팅 공통이어야 하는 것.
+ * 세트에 담지 않는 설정 — 모든 채팅 공통이어야 하는 것.
  * 켜기/끄기 스위치, API 키가 든 연결 설정, 임베딩(채팅마다 바뀌면 색인을 계속 다시 만든다),
- * 프롬프트와 개정 번호(업데이트 이전 로직이 관리), 계정 공통 서술 방식, 묶음 자체.
+ * 프롬프트와 개정 번호(업데이트 이전 로직이 관리), 계정 공통 서술 방식, 세트 자체.
  */
 export const BUNDLE_EXCLUDED = Object.freeze([
     'enabled', 'customApi', 'embedApi', 'prompts', 'promptRev', 'promptOutdated', 'settingsRev',
@@ -168,7 +168,7 @@ export function bundleKeys(defaults) {
     return Object.keys(defaults).filter(k => !BUNDLE_EXCLUDED.includes(k));
 }
 
-/** 지금 설정에서 묶음에 들어갈 값만 뽑는다 */
+/** 지금 설정에서 세트에 들어갈 값만 뽑는다 */
 export function pickBundleValues(settings, defaults) {
     const out = {};
     for (const k of bundleKeys(defaults)) if (settings[k] !== undefined) out[k] = clone(settings[k]);
@@ -181,7 +181,7 @@ function applyValues(settings, values, defaults) {
     }
 }
 
-/** 이 채팅에 적용할 묶음 이름: 채팅에 붙인 것 → 캐릭터(그룹)에 붙인 것 → 없음 */
+/** 이 채팅에 적용할 세트 이름: 채팅에 붙인 것 → 캐릭터(그룹)에 붙인 것 → 없음 */
 export function resolveBundleName(settings, { chatBundle = '', ownerKey = '' } = {}) {
     const bundles = settings.bundles || {};
     if (chatBundle && bundles[chatBundle]) return chatBundle;
@@ -190,10 +190,10 @@ export function resolveBundleName(settings, { chatBundle = '', ownerKey = '' } =
 }
 
 /**
- * 적용 중인 묶음을 `name`으로 바꾼다 ('' = 기본 설정).
- * 살아 있는 설정 객체에는 항상 "지금 적용 중인 값"이 들어 있고, 묶음이 적용된 동안의
+ * 적용 중인 세트를 `name`으로 바꾼다 ('' = 기본 설정).
+ * 살아 있는 설정 객체에는 항상 "지금 적용 중인 값"이 들어 있고, 세트가 적용된 동안의
  * 기본 설정은 `bundleBase`에 맡아 둔다. 그래서 설정 패널에서 바꾼 값은 저절로 적용 중인
- * 묶음의 것이 되고, 기본 설정은 건드려지지 않는다.
+ * 세트의 것이 되고, 기본 설정은 건드려지지 않는다.
  * 반환: 실제로 바뀌었는지 여부.
  */
 export function switchBundle(settings, name, defaults) {
@@ -201,12 +201,12 @@ export function switchBundle(settings, name, defaults) {
     const target = name && settings.bundles[name] ? name : '';
     const active = settings.activeBundle && settings.bundles[settings.activeBundle] ? settings.activeBundle : '';
     if (settings.activeBundle && !active) {
-        // 적용 중이던 묶음이 지워졌다 — 맡아 둔 기본 설정으로 돌아간다
+        // 적용 중이던 세트가 지워졌다 — 맡아 둔 기본 설정으로 돌아간다
         if (settings.bundleBase) applyValues(settings, settings.bundleBase, defaults);
         settings.bundleBase = null;
         settings.activeBundle = '';
     }
-    if (active) settings.bundles[active] = pickBundleValues(settings, defaults); // 그동안 바꾼 값을 묶음에 저장
+    if (active) settings.bundles[active] = pickBundleValues(settings, defaults); // 그동안 바꾼 값을 세트에 저장
     if (active === target) return false;
     if (active) {
         applyValues(settings, settings.bundleBase || {}, defaults);
@@ -220,7 +220,7 @@ export function switchBundle(settings, name, defaults) {
     return true;
 }
 
-/** 지금 설정을 새 묶음으로 저장 (같은 이름이면 덮어쓴다) */
+/** 지금 설정을 새 세트로 저장 (같은 이름이면 덮어쓴다) */
 export function saveBundle(settings, name, defaults) {
     const clean = String(name ?? '').replace(/\s+/g, ' ').trim().slice(0, 40);
     if (!clean) return '';
@@ -258,7 +258,7 @@ export function exportBundle(settings, name, defaults) {
     return JSON.stringify({ memoriaBundle: 1, name, values }, null, 2);
 }
 
-/** 묶음 파일 읽기 — 아는 설정 키만, 기본값과 같은 종류의 값만 받는다 */
+/** 세트 파일 읽기 — 아는 설정 키만, 기본값과 같은 종류의 값만 받는다 */
 export function parseBundleFile(text, defaults) {
     let data;
     try { data = JSON.parse(String(text ?? '').replace(/^﻿/, '')); } catch { return null; }
@@ -272,7 +272,7 @@ export function parseBundleFile(text, defaults) {
         if (sameKind) values[k] = clone(v);
     }
     const name = String(data.name ?? '').replace(/\s+/g, ' ').trim().slice(0, 40);
-    return Object.keys(values).length ? { name: name || '가져온 묶음', values } : null;
+    return Object.keys(values).length ? { name: name || '가져온 세트', values } : null;
 }
 
 /* ------------------------------------------------------------
@@ -311,7 +311,7 @@ export function shouldRefreeze(freeze, { chatId, key, level, turn, diff, maxDelt
 }
 
 /* ------------------------------------------------------------
- * 활동 기록
+ * 사서 일지
  * ------------------------------------------------------------ */
 
 export function createActivityLog(limit = 120) {
