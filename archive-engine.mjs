@@ -1,6 +1,6 @@
 // Memoria's deterministic archive helpers. No host APIs or model calls.
 const normalize = value => String(value ?? '').normalize('NFKC').trim().toLowerCase();
-const lists = ['turns', 'memories', 'worldRules', 'entityStates', 'locks', 'chunkSummaries', 'arcSummaries', 'characters', 'milestones', 'items', 'dossier'];
+const lists = ['turns', 'memories', 'worldRules', 'entityStates', 'locks', 'chunkSummaries', 'arcSummaries', 'characters', 'milestones', 'items', 'dossier', 'bonds'];
 const genericCues = new Set(['manual', 'carried', 'episode_raw', 'event', 'relationship', 'fact', 'secret', '사건', '관계', '기억']);
 const knowledgeKey = m => JSON.stringify([m.visibility || 'public', normalize(m.owner)]);
 export const NARRATOR_PERSPECTIVE = '__narrator__';
@@ -85,10 +85,10 @@ export function validateArchive(value) {
         turns: ['summary'], memories: ['summary', 'kind', 'visibility', 'owner', 'trigger', 'excerpt', 'vec', 'cvec', 'avec', 'acvec'],
         worldRules: ['scope', 'scopeName', 'key', 'value'], entityStates: ['entity', 'slot', 'value', 'owner', 'claim'],
         locks: ['kind', 'summary', 'owner', 'status'], chunkSummaries: ['text'], arcSummaries: ['text'],
-        characters: ['name', 'role', 'age', 'occupation', 'appearance', 'voice'], milestones: ['title', 'summary', 'grade'],
+        characters: ['name', 'role', 'age', 'occupation', 'appearance', 'voice', 'core'], bonds: ['from', 'to'], milestones: ['title', 'summary', 'grade'],
         items: ['name', 'meaning', 'holder', 'status'], dossier: ['title'],
     };
-    const arrayFields = { memories: ['entities', 'tags', 'hints'], characters: ['aliases', 'traits'], milestones: ['participants'], dossier: ['chunks'] };
+    const arrayFields = { memories: ['entities', 'tags', 'hints', 'knowers'], characters: ['aliases', 'traits'], milestones: ['participants'], dossier: ['chunks'] };
     const requiredText = { memories: ['summary'], worldRules: ['key', 'value'], entityStates: ['entity', 'slot', 'value'], locks: ['kind', 'summary', 'status'], chunkSummaries: ['text'], arcSummaries: ['text'], characters: ['name'], milestones: ['title'], items: ['name'], dossier: ['title'] };
     for (const shelf of lists) for (const row of copy[shelf]) {
         for (const key of requiredText[shelf] || []) if (typeof row[key] !== 'string') throw new Error(`${shelf}.${key}가 없습니다.`);
@@ -108,6 +108,15 @@ export function validateArchive(value) {
         if (shelf === 'characters' && row.relationships != null && (!Array.isArray(row.relationships)
             || row.relationships.some(r => !r || typeof r.target !== 'string' || typeof r.relation !== 'string'))) {
             throw new Error('인물 관계의 형식이 올바르지 않습니다.');
+        }
+        if (shelf === 'characters') for (const key of ['lines', 'growth']) {
+            if (row[key] != null && (!Array.isArray(row[key]) || row[key].some(x => !x || typeof x.text !== 'string'))) {
+                throw new Error('인물의 대사 샘플·변화 기록 형식이 올바르지 않습니다.');
+            }
+        }
+        if (shelf === 'bonds' && (typeof row.from !== 'string' || typeof row.to !== 'string' || !Array.isArray(row.log)
+            || row.log.some(e => !e || typeof e.stage !== 'string'))) {
+            throw new Error('관계선의 형식이 올바르지 않습니다.');
         }
         if (shelf === 'memories' && row.sources != null && (!Array.isArray(row.sources)
             || row.sources.some(s => !s || typeof s.turnId !== 'string' || !Number.isFinite(s.mesHash)))) {
@@ -151,8 +160,11 @@ export function archiveChanges(before, after) {
     const describe = (shelf, item) => {
         switch (shelf) {
             case 'characters': return [item.name, ...['role', 'age', 'occupation', 'appearance', 'voice'].map((key, i) => item[key] ? `${['역할', '나이', '직업', '외모', '말투'][i]}: ${item[key]}` : ''),
+                item.core ? `핵심 캐해: ${item.core}` : '', (item.growth || []).length ? `이야기 속 변화: ${item.growth.map(g => g.text).join(' / ')}` : '',
+                (item.lines || []).length ? `대사 샘플: ${item.lines.map(l => l.text).join(' / ')}` : '',
                 `별칭: ${(item.aliases || []).join(', ')}`, `특성: ${(item.traits || []).join(', ')}`,
                 `관계: ${(item.relationships || []).map(r => `${r.target} — ${r.relation}`).join(', ')}`, `고정: ${!!item.locked} · 비활성: ${!!item.disabled}`].filter(Boolean).join('\n');
+            case 'bonds': { const now = (item.log || [])[(item.log || []).length - 1] || {}; return `${item.from} → ${item.to}: ${now.stage || ''}\n${[now.basis, now.calls ? `부르는 말: ${now.calls}` : '', now.unsaid ? `말하지 못한 것: ${now.unsaid}` : ''].filter(Boolean).join(' · ')}`; }
             case 'memories': return `${item.summary}\n${item.kind || 'fact'} · ${item.visibility || 'public'}${item.owner ? ` (${item.owner})` : ''}${item.pinned ? ' · 고정' : ''}${item.disabled ? ' · 비활성' : ''}`;
             case 'entityStates': return `${item.entity}.${item.slot} = ${item.value}${item.claim === 'belief' ? ` (${item.owner || '미상'}의 믿음)` : ''}`;
             case 'worldRules': return `${item.scopeName || item.scope || 'world'} · ${item.key} = ${item.value}`;

@@ -1,7 +1,7 @@
 <div id="memoria_settings" class="memoria">
     <div class="inline-drawer">
         <div class="inline-drawer-toggle inline-drawer-header">
-            <b><i class="fa-solid fa-book-bookmark"></i> Memoria — 장기기억 서고 <span class="memoria__version">v1.12.0</span></b>
+            <b><i class="fa-solid fa-book-bookmark"></i> Memoria — 장기기억 서고 <span class="memoria__version">v2.0.0</span></b>
             <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
         </div>
         <div class="inline-drawer-content">
@@ -146,7 +146,7 @@
                     <div class="memoria__section-head">
                         <div>
                             <h4>인물 도감</h4>
-                            <p>대화에 등장한 인물의 프로필과 관계입니다. 새 인물이 등장하면 자동으로 기록되고, 매 턴 AI에게 전달됩니다.</p>
+                            <p>대화에 등장한 인물의 프로필입니다. <b>핵심 캐해</b>(⚓)는 한 번 적히면 사서가 다시 쓰지 못하는 기준이고, 이야기 속에서 생긴 변화(🌱)와 실제로 한 대사(❝)는 따로 쌓입니다. ✏️로 모두 직접 고칠 수 있습니다.</p>
                         </div>
                         <div class="memoria__compact-actions">
                             <div class="menu_button" id="memoria_character_add">
@@ -156,6 +156,21 @@
                         </div>
                     </div>
                     <div id="memoria_characters_list" class="memoria__char-list"></div>
+                </div>
+                <div class="memoria__section">
+                    <div class="memoria__section-head">
+                        <div>
+                            <h4>관계선</h4>
+                            <p>한 사람이 다른 한 사람을 지금 어떻게 대하는지 — 단계, 근거가 된 장면, 부르는 말, 아직 말하지 못한 것. 관계가 실제로 움직인 장면에서만 기록되고, 지나온 단계가 함께 남아 AI가 감정선을 건너뛰거나 되돌리지 않게 합니다.</p>
+                        </div>
+                        <div class="memoria__compact-actions">
+                            <div class="menu_button" id="memoria_bond_add">
+                                <i class="fa-solid fa-heart-circle-plus"></i>
+                                <span>관계선 추가</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div id="memoria_bonds_list" class="memoria__char-list"></div>
                 </div>
                 <div class="memoria__section">
                     <div class="memoria__section-head">
@@ -264,6 +279,17 @@
 
             <!-- ===== 설정 ===== -->
             <section class="memoria__panel" data-panel="config">
+                <div class="memoria__config-tools">
+                    <label class="memoria__search" for="memoria_settings_search">
+                        <i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i>
+                        <input type="search" id="memoria_settings_search" placeholder="설정 찾기 — 예: 숨김, 임베딩, 금지어" autocomplete="off">
+                    </label>
+                    <div id="memoria_bundle_bar" class="memoria__bundle-bar">
+                        <i class="fa-solid fa-layer-group" aria-hidden="true"></i>
+                        <span id="memoria_bundle_state"><b>기본 설정</b></span>
+                        <div class="menu_button" id="memoria_bundle_manage"><span>묶음 관리</span></div>
+                    </div>
+                </div>
                 <div class="memoria__section">
                     <div class="memoria__section-head">
                         <div><h4>기본</h4></div>
@@ -557,6 +583,74 @@
                 <div class="memoria__section">
                     <div class="memoria__section-head">
                         <div>
+                            <h4>인물과 문체 지키기</h4>
+                            <p>요약은 서술자 말투로 쓰이고 옛 원문은 숨겨집니다. 그래서 대화가 길어질수록 캐릭터의 말투가 흐려지고, 옛 문체와 말버릇이 되살아납니다. 아래 설정이 그걸 막습니다.</p>
+                        </div>
+                    </div>
+                    <label class="memoria__toggle-row" for="memoria_style_guard">
+                        <input type="checkbox" id="memoria_style_guard">
+                        <span><strong>기록은 사실만 참고</strong><small>장부를 넣을 때 "사실만 참고하고, 문체는 지금 대화를 따르고, 옛 표현을 그대로 쓰지 말 것 · 인물의 성격과 말투는 핵심 캐해를 따르고 관계는 관계선의 단계를 지킬 것"을 함께 알려줍니다.</small></span>
+                    </label>
+                    <label class="memoria__toggle-row" for="memoria_recall_quotes">
+                        <input type="checkbox" id="memoria_recall_quotes">
+                        <span><strong>회상에 옛 원문 대사 싣기</strong><small>끄면 회상에 요약만 싣고 옛 대사 인용은 넣지 않습니다. 옛 말투가 자꾸 돌아오면 꺼 보세요.</small></span>
+                    </label>
+                    <div class="memoria__field-grid">
+                        <div class="memoria__field">
+                            <label for="memoria_voice_samples" title="지금 장면에 있는 인물마다, 그 인물이 실제로 했던 대사를 몇 줄씩 말투 견본으로 실을지 (0 = 싣지 않음). 원문에 그대로 있는 대사만 모읍니다.">장면 인물 대사 샘플 수</label>
+                            <input type="number" id="memoria_voice_samples" min="0" max="4" step="1">
+                        </div>
+                    </div>
+                    <div class="memoria__setting-block">
+                        <label for="memoria_banned_phrases"><strong>금지어 · 반복 표현</strong></label>
+                        <textarea id="memoria_banned_phrases" rows="3" placeholder="한 줄에 하나, 또는 쉼표로 구분 — 예: 나지막이, 입꼬리가 미세하게"></textarea>
+                        <div class="memoria__button-row">
+                            <div class="menu_button" id="memoria_find_repeats"><i class="fa-solid fa-repeat"></i><span>반복 표현 찾기</span></div>
+                        </div>
+                        <small class="memoria__hint">적어 둔 표현은 Memoria가 넣는 장부(기억·회상·요약·대사 샘플)에서 빠집니다. 금지어가 든 옛 대사는 인용째로 뺍니다. <b>캐릭터가 꼭 쓰는 말은 넣지 마세요.</b></small>
+                    </div>
+                    <label class="memoria__toggle-row" for="memoria_ban_in_chat">
+                        <input type="checkbox" id="memoria_ban_in_chat">
+                        <span><strong>AI에게 보내는 최근 대화에서도 빼기</strong><small>AI가 자기 최근 답변을 보고 같은 말을 또 쓰는 고리를 끊습니다. 저장된 채팅은 그대로이고, 이어쓰기할 때 이어 쓰는 마지막 답변은 건드리지 않습니다. Chat Completion API에서만 동작합니다.</small></span>
+                    </label>
+                    <label class="memoria__toggle-row" for="memoria_ban_tell">
+                        <input type="checkbox" id="memoria_ban_tell">
+                        <span><strong>AI에게 금지어 목록 알려주기</strong><small>"이 표현은 쓰지 마"라고 직접 알려줍니다. 모델에 따라 오히려 그 단어를 떠올리게 할 수 있어 기본은 꺼 둡니다.</small></span>
+                    </label>
+                </div>
+                <div class="memoria__section">
+                    <div class="memoria__section-head">
+                        <div>
+                            <h4>답변 속도 · 캐시</h4>
+                            <p>Memoria 때문에 답변이 늦어지지 않게 합니다. 답변 생성이 언제나 먼저입니다.</p>
+                        </div>
+                    </div>
+                    <div class="memoria__field-grid">
+                        <div class="memoria__field">
+                            <label for="memoria_recall_wait" title="답변을 생성하기 전, 회상을 위한 임베딩 응답을 최대 몇 초 기다릴지. 넘으면 내장 검색 결과만으로 바로 생성합니다. 0 = 제한 없음">답변 전 최대 대기(초)</label>
+                            <input type="number" id="memoria_recall_wait" min="0" max="60" step="1">
+                        </div>
+                        <div class="memoria__field">
+                            <label for="memoria_stable_refresh" title="고정 장부를 이 턴 수마다 새로 뜹니다. 0 = 달라진 줄이 넘치거나 항목이 지워졌을 때만">고정 장부 새로 뜨는 주기(턴)</label>
+                            <input type="number" id="memoria_stable_refresh" min="0" max="200" step="1">
+                        </div>
+                    </div>
+                    <label class="memoria__toggle-row" for="memoria_yield_to_chat">
+                        <input type="checkbox" id="memoria_yield_to_chat">
+                        <span><strong>답변 생성 중엔 양보하기</strong><small>답변을 생성하는 동안에는 사서·요약 호출을 새로 시작하지 않고, 답변이 온 뒤에 이어서 합니다. API나 프록시가 요청을 한 번에 하나씩만 받을 때 답변이 줄 서서 기다리는 일을 막습니다.</small></span>
+                    </label>
+                    <label class="memoria__toggle-row" for="memoria_watch_updates">
+                        <input type="checkbox" id="memoria_watch_updates">
+                        <span><strong>다른 확장이 고친 메시지도 다시 기록</strong><small>답변을 다시 쓰거나 번역·그림을 끼워 넣는 확장이 메시지를 고쳤을 때, 본문이 실제로 바뀐 경우에만 그 턴을 다시 기록합니다. 화면만 다시 그린 경우에는 아무것도 하지 않습니다.</small></span>
+                    </label>
+                    <label class="memoria__toggle-row" for="memoria_split_injection">
+                        <input type="checkbox" id="memoria_split_injection">
+                        <span><strong>고정 장부 (프롬프트 캐시 아끼기)</strong><small>장부 가운데 잘 안 바뀌는 부분(캐논·인물·관계선·요약·서약)은 한 번 떠서 프롬프트 앞쪽에 그대로 두고, 매 턴 바뀌는 것(회상·지금 장면·상태·그 뒤 달라진 줄)만 최근 대화 옆에 따로 넣습니다. 프롬프트 앞부분이 매 턴 같아져 캐시를 지원하는 모델에서 비용과 지연이 줄어듭니다. 고정 장부를 새로 뜨는 턴에는 캐시가 한 번 새로 잡히므로, <b>주입 위치가 "메인 프롬프트 앞/뒤"이거나 자동 숨김을 함께 쓸 때</b> 가장 이득이 큽니다.</small></span>
+                    </label>
+                </div>
+                <div class="memoria__section">
+                    <div class="memoria__section-head">
+                        <div>
                             <h4>프롬프트</h4>
                             <p>각 역할의 시스템 프롬프트를 수정할 수 있습니다.</p>
                         </div>
@@ -587,6 +681,18 @@
 
             <!-- ===== 도구 ===== -->
             <section class="memoria__panel" data-panel="tools">
+                <div class="memoria__section">
+                    <div class="memoria__section-head">
+                        <div>
+                            <h4>활동 기록</h4>
+                            <p>회상에 몇 초 걸렸는지, 무엇을 기록·요약했는지, 무엇을 미뤘는지, 오류가 났는지. 저절로 일어난 일은 알림 대신 여기에 남습니다. 답변이 늦다 싶으면 여기부터 보세요.</p>
+                        </div>
+                        <div class="memoria__compact-actions">
+                            <div class="menu_button" id="memoria_activity_clear"><i class="fa-solid fa-eraser"></i><span>비우기</span></div>
+                        </div>
+                    </div>
+                    <div id="memoria_activity_list" class="memoria__row-list memoria__activity-list"></div>
+                </div>
                 <div class="memoria__section">
                     <div class="memoria__section-head">
                         <div>
