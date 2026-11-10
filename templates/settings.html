@@ -14,11 +14,11 @@
                 <div class="memoria__status-actions">
                     <div class="menu_button" id="memoria_record_now" title="마지막 어시스턴트 턴을 지금 바로 기억으로 기록합니다.">
                         <i class="fa-solid fa-feather"></i>
-                        <span>지금 기록</span>
+                        <span>기록</span>
                     </div>
                     <div class="menu_button" id="memoria_refresh_packet" title="현재 맥락 기준으로 주입 내용을 다시 생성합니다.">
                         <i class="fa-solid fa-arrows-rotate"></i>
-                        <span>주입 갱신</span>
+                        <span>갱신</span>
                     </div>
                 </div>
             </div>
@@ -39,8 +39,8 @@
                 <button class="memoria__tab" type="button" data-tab="world">
                     <i class="fa-solid fa-globe"></i><span>세계</span>
                 </button>
-                <button class="memoria__tab" type="button" data-tab="summaries">
-                    <i class="fa-solid fa-scroll"></i><span>요약</span>
+                <button class="memoria__tab" type="button" data-tab="summaries" title="이야기">
+                    <i class="fa-solid fa-scroll"></i><span>이야기</span>
                 </button>
                 <button class="memoria__tab" type="button" data-tab="config">
                     <i class="fa-solid fa-sliders"></i><span>설정</span>
@@ -91,7 +91,7 @@
                             <input type="text" id="memoria_editor_input" placeholder="고치고 싶은 걸 말해보세요…">
                             <div class="menu_button" id="memoria_editor_send_btn"><i class="fa-solid fa-paper-plane"></i><span>보내기</span></div>
                         </div>
-                        <div class="menu_button" id="memoria_editor_reset_btn" style="margin-top:6px;"><i class="fa-solid fa-broom"></i><span>대화 초기화</span></div>
+                        <div class="menu_button" id="memoria_editor_reset_btn" style="margin-top:6px;" title="대화 초기화"><i class="fa-solid fa-broom"></i><span>초기화</span></div>
                     </details>
                 </div>
                 <div class="memoria__hint">
@@ -111,9 +111,9 @@
                             <p>고정(📌)한 기억은 토큰 예산 안에서 우선 주입됩니다. 책 아이콘으로 대화 원문을 확인할 수 있습니다.</p>
                         </div>
                         <div class="memoria__compact-actions">
-                            <div class="menu_button" id="memoria_memory_add">
+                            <div class="menu_button" id="memoria_memory_add" title="기억 추가">
                                 <i class="fa-solid fa-plus"></i>
-                                <span>기억 추가</span>
+                                <span>추가</span>
                             </div>
                         </div>
                     </div>
@@ -149,9 +149,9 @@
                             <p>대화에 등장한 인물의 프로필입니다. <b>핵심 캐해</b>(⚓)는 한 번 적히면 사서가 다시 쓰지 못하는 기준이고, 이야기 속에서 생긴 변화(🌱)와 실제로 한 대사(❝)는 따로 쌓입니다. ✏️로 모두 직접 고칠 수 있습니다.</p>
                         </div>
                         <div class="memoria__compact-actions">
-                            <div class="menu_button" id="memoria_character_add">
+                            <div class="menu_button" id="memoria_character_add" title="인물 추가">
                                 <i class="fa-solid fa-user-plus"></i>
-                                <span>인물 추가</span>
+                                <span>추가</span>
                             </div>
                         </div>
                     </div>
@@ -164,12 +164,13 @@
                             <p>한 사람이 다른 한 사람을 지금 어떻게 대하는지 — 단계, 근거가 된 장면, 부르는 말, 아직 말하지 못한 것. 관계가 실제로 움직인 장면에서만 기록되고, 지나온 단계가 함께 남아 AI가 감정선을 건너뛰거나 되돌리지 않게 합니다.</p>
                         </div>
                         <div class="memoria__compact-actions">
-                            <div class="menu_button" id="memoria_bond_add">
+                            <div class="menu_button" id="memoria_bond_add" title="관계선 추가">
                                 <i class="fa-solid fa-heart-circle-plus"></i>
-                                <span>관계선 추가</span>
+                                <span>추가</span>
                             </div>
                         </div>
                     </div>
+                    <div id="memoria_bond_map" class="mmv-map-wrap"></div>
                     <div id="memoria_bonds_list" class="memoria__char-list"></div>
                 </div>
                 <div class="memoria__section">
@@ -179,9 +180,9 @@
                             <p>스토리에 의미 있는 물건들. 소유자와 상태가 자동으로 갱신됩니다.</p>
                         </div>
                         <div class="memoria__compact-actions">
-                            <div class="menu_button" id="memoria_item_add">
+                            <div class="menu_button" id="memoria_item_add" title="아이템 추가">
                                 <i class="fa-solid fa-plus"></i>
-                                <span>아이템 추가</span>
+                                <span>추가</span>
                             </div>
                         </div>
                     </div>
@@ -194,9 +195,9 @@
                             <p>비밀·미해결 떡밥·건너뛰면 안 되는 전개 등, 이야기가 지켜야 할 약속. 토큰이 부족해도 가장 마지막까지 유지됩니다.</p>
                         </div>
                         <div class="memoria__compact-actions">
-                            <div class="menu_button" id="memoria_lock_add">
+                            <div class="menu_button" id="memoria_lock_add" title="서약 추가">
                                 <i class="fa-solid fa-plus"></i>
-                                <span>서약 추가</span>
+                                <span>추가</span>
                             </div>
                         </div>
                     </div>
@@ -228,7 +229,7 @@
                             <p>원작 소설·설정 문서를 붙여넣어 두면, 매 턴 지금 장면과 관련된 대목만 골라 배경 참고로 주입합니다. 채팅에서 확정된 사실이 항상 우선하며, 토큰 예산이 부족하면 가장 먼저 줄어듭니다.</p>
                         </div>
                         <div class="memoria__compact-actions">
-                            <div class="menu_button" id="memoria_dossier_add"><i class="fa-solid fa-file-circle-plus"></i><span>문서 추가</span></div>
+                            <div class="menu_button" id="memoria_dossier_add" title="문서 추가"><i class="fa-solid fa-file-circle-plus"></i><span>추가</span></div>
                         </div>
                     </div>
                     <div id="memoria_dossier_list" class="memoria__row-list"></div>
@@ -240,40 +241,41 @@
                 <div class="memoria__section">
                     <div class="memoria__section-head">
                         <div>
-                            <h4>지금까지의 이야기</h4>
-                            <p>N턴마다 자동 요약되고, 서고 정리 때 같은 사건끼리 묶여 연대기로 병합됩니다. {{memoria_story}} 매크로로도 쓸 수 있습니다.</p>
+                            <h4>이야기</h4>
+                            <p id="memoria_story_stats"></p>
                         </div>
                         <div class="memoria__compact-actions">
-                            <div class="menu_button" id="memoria_summarize_now">
-                                <i class="fa-solid fa-wand-magic-sparkles"></i>
-                                <span>지금 요약</span>
+                            <div class="menu_button" id="memoria_story_open" title="연표 그래프 · 표 · 관계도 · 상태창을 크게 봅니다">
+                                <i class="fa-solid fa-chart-gantt"></i>
+                                <span>연표</span>
                             </div>
-                            <div class="menu_button" id="memoria_summary_rebuild" title="요약·연대기를 모두 지우고 턴 기록에서 처음부터 다시 만듭니다. 중단·실패하면 원래대로 되돌립니다.">
+                            <div class="menu_button" id="memoria_summarize_now" title="주기를 못 채운 자투리 턴까지 지금 요약합니다">
+                                <i class="fa-solid fa-wand-magic-sparkles"></i>
+                                <span>요약</span>
+                            </div>
+                            <div class="menu_button" id="memoria_summary_rebuild" title="요약·연대기를 모두 지우고 턴 기록에서 처음부터 다시 만듭니다. 중단·실패하면 원래 요약을 그대로 둡니다. 인계받은 연대기는 건드리지 않습니다.">
                                 <i class="fa-solid fa-rotate"></i>
-                                <span>전체 다시 만들기</span>
+                                <span>다시</span>
                             </div>
                         </div>
                     </div>
                     <span id="memoria_summary_rebuild_progress" class="memoria__progress"></span>
+                    <div id="memoria_story_pulse" class="mmv-pulse-wrap" title="턴마다의 무게 — 높을수록 이야기가 크게 움직인 턴"></div>
+                    <div id="memoria_pulse_note" class="mmv-pulse-note"></div>
                     <div id="memoria_summary_list" class="memoria__summary-list"></div>
                 </div>
                 <div class="memoria__section">
                     <div class="memoria__section-head">
-                        <div>
-                            <h4>턴별 기록</h4>
-                            <p>사서가 남긴 턴 단위 기록입니다. 요약은 이 기록을 엮어 만들어지므로, 여기서 고치면 다음 요약부터 반영됩니다.</p>
-                        </div>
-                    </div>
-                    <div id="memoria_digest_list" class="memoria__row-list"></div>
-                </div>
-                <div class="memoria__section">
-                    <div class="memoria__section-head">
-                        <div>
-                            <h4>주요 사건 연표</h4>
-                            <p>이야기의 방향을 바꾼 결정적 순간들을 시간순으로 정리한 연표입니다.</p>
-                        </div>
+                        <div><h4>전환점</h4></div>
                     </div>
                     <div id="memoria_milestone_list" class="memoria__row-list"></div>
+                </div>
+                <div class="memoria__section">
+                    <details class="memoria__details">
+                        <summary>턴별 기록</summary>
+                        <p class="memoria__hint">요약은 이 기록을 엮어 만듭니다. 여기서 고치면 다음 요약부터 반영됩니다.</p>
+                        <div id="memoria_digest_list" class="memoria__row-list"></div>
+                    </details>
                 </div>
             </section>
 
@@ -287,7 +289,7 @@
                     <div id="memoria_bundle_bar" class="memoria__bundle-bar">
                         <i class="fa-solid fa-layer-group" aria-hidden="true"></i>
                         <span id="memoria_bundle_state"><b>기본 설정</b></span>
-                        <div class="menu_button" id="memoria_bundle_manage"><span>묶음 관리</span></div>
+                        <div class="menu_button" id="memoria_bundle_manage" title="묶음 관리"><span>묶음</span></div>
                     </div>
                 </div>
                 <div class="memoria__section">
@@ -399,7 +401,7 @@
                             <p>기억 기록·요약을 담당하는 사서가 쓸 API입니다. 저렴하고 빠른 모델을 권장합니다.</p>
                         </div>
                         <div class="memoria__compact-actions">
-                            <div class="menu_button" id="memoria_api_test"><i class="fa-solid fa-plug-circle-check"></i><span>연결 테스트</span></div>
+                            <div class="menu_button" id="memoria_api_test" title="연결 테스트"><i class="fa-solid fa-plug-circle-check"></i><span>테스트</span></div>
                         </div>
                     </div>
                     <div class="memoria__field">
@@ -507,7 +509,7 @@
                     <div id="memoria_embed_local_block" style="display:none;">
                         <p class="memoria__hint">실리태번 서버가 임베딩 모델을 직접 돌립니다. 무료·무제한이며 API 키가 필요 없습니다. 처음 사용할 때 모델(수십 MB)을 한 번 내려받느라 잠시 걸릴 수 있습니다.</p>
                         <div class="memoria__button-row">
-                            <div class="menu_button" id="memoria_embed_local_test" title="내장 임베딩이 동작하는지 확인하고, 현재 채팅의 기억을 색인합니다."><i class="fa-solid fa-plug-circle-check"></i><span>테스트 · 색인 준비</span></div>
+                            <div class="menu_button" id="memoria_embed_local_test" title="내장 임베딩이 동작하는지 확인하고, 현재 채팅의 기억을 색인합니다."><i class="fa-solid fa-plug-circle-check"></i><span>테스트</span></div>
                             <span id="memoria_embed_local_progress" class="memoria__progress"></span>
                         </div>
                     </div>
@@ -530,8 +532,8 @@
                             <p class="memoria__hint">OpenAI 계열은 0.35~0.5, bge·e5 계열처럼 점수가 낮게 깔리는 모델은 0.2~0.3이 적당합니다. 회상이 안 되면 낮추고, 엉뚱한 기억이 딸려오면 올리세요. (기본 0.35)</p>
                         </div>
                         <div class="memoria__button-row">
-                            <div class="menu_button" id="memoria_embed_test"><i class="fa-solid fa-plug-circle-check"></i><span>연결 테스트</span></div>
-                            <div class="menu_button" id="memoria_embed_reindex" title="기존 기억 전체에 API 임베딩을 다시 계산합니다. 새 기억은 자동으로 계산됩니다."><i class="fa-solid fa-arrows-rotate"></i><span>기억 전체 재계산</span></div>
+                            <div class="menu_button" id="memoria_embed_test" title="연결 테스트"><i class="fa-solid fa-plug-circle-check"></i><span>테스트</span></div>
+                            <div class="menu_button" id="memoria_embed_reindex" title="기존 기억 전체에 API 임베딩을 다시 계산합니다. 새 기억은 자동으로 계산됩니다."><i class="fa-solid fa-arrows-rotate"></i><span>재계산</span></div>
                             <span id="memoria_embed_progress" class="memoria__progress"></span>
                         </div>
                     </div>
@@ -583,6 +585,47 @@
                 <div class="memoria__section">
                     <div class="memoria__section-head">
                         <div>
+                            <h4>상태창 · 번외편 · 점검</h4>
+                        </div>
+                    </div>
+                    <div class="memoria__field-grid">
+                        <div class="memoria__field">
+                            <label for="memoria_status_mode" title="답변에 붙는 상태창(시간·날짜·장소·날씨)을 모델을 부르지 않고 그대로 읽어 둡니다">상태창 기억</label>
+                            <select id="memoria_status_mode">
+                                <option value="auto">자동으로 찾기</option>
+                                <option value="custom">직접 정한 모양</option>
+                                <option value="off">쓰지 않기</option>
+                            </select>
+                        </div>
+                        <div class="memoria__field" id="memoria_status_pattern_field">
+                            <label for="memoria_status_pattern" title="정규식. 괄호 ( )로 묶은 부분을 상태창 내용으로 읽습니다">상태창 모양 (정규식)</label>
+                            <input type="text" id="memoria_status_pattern" placeholder="예: <<(.+?)>>" spellcheck="false">
+                        </div>
+                        <div class="memoria__field">
+                            <label for="memoria_qr_mode" title="빠른 답장(QR)·슬래시 명령으로 채팅에 들어온 메시지를 기억에서 뺄지">QR 메시지</label>
+                            <select id="memoria_qr_mode">
+                                <option value="side">코멘트·번외편만 빼기</option>
+                                <option value="all">전부 빼기</option>
+                                <option value="keep">빼지 않기</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="memoria__button-row">
+                        <div class="menu_button" id="memoria_side_sort" title="슬래시 명령으로 들어온 메시지를 모아 번외편/이야기로 직접 고릅니다"><i class="fa-solid fa-shuffle"></i><span>QR 분류</span></div>
+                    </div>
+                    <label class="memoria__toggle-row" for="memoria_status_inject">
+                        <input type="checkbox" id="memoria_status_inject">
+                        <span><strong>마지막 상태창 알려주기</strong><small>옛 답변이 숨겨지거나 번외편이 끼어도 시간·날짜·장소가 이어집니다.</small></span>
+                    </label>
+                    <label class="memoria__toggle-row" for="memoria_reply_check">
+                        <input type="checkbox" id="memoria_reply_check">
+                        <span><strong>답변 점검</strong><small>새 답변이 기록·최근 대화와 어긋나면 이름 옆에 ⚠를 붙입니다. 답변마다 사서 API를 한 번 더 씁니다.</small></span>
+                    </label>
+                    <p class="memoria__hint">번외편은 롤플을 멈추고 뽑은 퀴즈·인터뷰·운세 같은 QR 결과입니다. 지시문에 "롤플·시나리오를 멈춰라"는 문구가 있으면 자동으로 알아보고, 기록·회상·점검에서 뺍니다.</p>
+                </div>
+                <div class="memoria__section">
+                    <div class="memoria__section-head">
+                        <div>
                             <h4>인물과 문체 지키기</h4>
                             <p>요약은 서술자 말투로 쓰이고 옛 원문은 숨겨집니다. 그래서 대화가 길어질수록 캐릭터의 말투가 흐려지고, 옛 문체와 말버릇이 되살아납니다. 아래 설정이 그걸 막습니다.</p>
                         </div>
@@ -605,7 +648,7 @@
                         <label for="memoria_banned_phrases"><strong>금지어 · 반복 표현</strong></label>
                         <textarea id="memoria_banned_phrases" rows="3" placeholder="한 줄에 하나, 또는 쉼표로 구분 — 예: 나지막이, 입꼬리가 미세하게"></textarea>
                         <div class="memoria__button-row">
-                            <div class="menu_button" id="memoria_find_repeats"><i class="fa-solid fa-repeat"></i><span>반복 표현 찾기</span></div>
+                            <div class="menu_button" id="memoria_find_repeats" title="반복 표현 찾기"><i class="fa-solid fa-repeat"></i><span>반복 찾기</span></div>
                         </div>
                         <small class="memoria__hint">적어 둔 표현은 Memoria가 넣는 장부(기억·회상·요약·대사 샘플)에서 빠집니다. 금지어가 든 옛 대사는 인용째로 뺍니다. <b>캐릭터가 꼭 쓰는 말은 넣지 마세요.</b></small>
                     </div>
@@ -710,7 +753,7 @@
                             <span>~</span>
                             <input type="number" id="memoria_bulk_to" min="0" step="1" placeholder="끝 #">
                         </div>
-                        <div class="menu_button" id="memoria_bulk_index"><i class="fa-solid fa-clock-rotate-left"></i><span>색인 시작</span></div>
+                        <div class="menu_button" id="memoria_bulk_index" title="색인 시작"><i class="fa-solid fa-clock-rotate-left"></i><span>색인</span></div>
                         <div class="menu_button" id="memoria_bulk_cancel" style="display:none;"><i class="fa-solid fa-stop"></i><span>중단</span></div>
                         <span id="memoria_bulk_progress" class="memoria__progress"></span>
                     </div>
@@ -723,7 +766,7 @@
                         </div>
                     </div>
                     <div class="memoria__button-row">
-                        <div class="menu_button" id="memoria_repair_sync" title="채팅 메시지와 턴 기록을 다시 맞춥니다 (/memoria-reconcile)"><i class="fa-solid fa-link"></i><span>지금 맞추기</span></div>
+                        <div class="menu_button" id="memoria_repair_sync" title="채팅 메시지와 턴 기록을 다시 맞춥니다 (/memoria-reconcile)"><i class="fa-solid fa-link"></i><span>맞추기</span></div>
                     </div>
                 </div>
                 <div class="memoria__section">
@@ -734,7 +777,7 @@
                         </div>
                     </div>
                     <div class="memoria__button-row">
-                        <div class="menu_button" id="memoria_clock_recalc"><i class="fa-solid fa-hourglass-half"></i><span>지금 재계산</span></div>
+                        <div class="menu_button" id="memoria_clock_recalc" title="지금 재계산"><i class="fa-solid fa-hourglass-half"></i><span>재계산</span></div>
                         <span id="memoria_clock_progress" class="memoria__progress"></span>
                     </div>
                 </div>
@@ -746,7 +789,7 @@
                         </div>
                     </div>
                     <div class="memoria__button-row">
-                        <div class="menu_button" id="memoria_consolidate_now"><i class="fa-solid fa-broom"></i><span>정리안 검토</span></div>
+                        <div class="menu_button" id="memoria_consolidate_now" title="지금 상태 보관"><i class="fa-solid fa-broom"></i><span>검토</span></div>
                         <span id="memoria_consolidate_progress" class="memoria__progress"></span>
                     </div>
                 </div>
@@ -754,7 +797,7 @@
                     <div class="memoria__section-head">
                         <div><h4>서고 복구 지점</h4><p>기억 정리·사서 정정·요약 전체 다시 만들기·파일 복원·인계·초기화 직전의 기록을 보관합니다. 최근 3개, 합계 6MB까지 유지하며 대화 원문은 변경하지 않습니다. 오래 보관할 기록은 JSON으로 내보내세요.</p></div>
                     </div>
-                    <button type="button" class="menu_button" id="memoria_checkpoint_create"><i class="fa-solid fa-bookmark"></i><span>지금 상태 보관</span></button>
+                    <button type="button" class="menu_button" id="memoria_checkpoint_create"><i class="fa-solid fa-bookmark"></i><span>보관</span></button>
                     <div id="memoria_checkpoint_list" aria-live="polite"></div>
                 </div>
                 <div class="memoria__section">
@@ -766,7 +809,7 @@
                     </div>
                     <input type="file" id="memoria_carry_input" accept=".json" style="display:none;">
                     <div class="memoria__button-row">
-                        <div class="menu_button" id="memoria_carry_btn"><i class="fa-solid fa-people-arrows"></i><span>인계 파일 가져오기</span></div>
+                        <div class="menu_button" id="memoria_carry_btn" title="인계 파일 가져오기"><i class="fa-solid fa-people-arrows"></i><span>인계</span></div>
                     </div>
                 </div>
                 <div class="memoria__section">
@@ -777,7 +820,7 @@
                         </div>
                     </div>
                     <div class="memoria__button-row">
-                        <div class="menu_button" id="memoria_bible"><i class="fa-solid fa-book"></i><span>스토리 바이블 내보내기</span></div>
+                        <div class="menu_button" id="memoria_bible" title="스토리 바이블 내보내기"><i class="fa-solid fa-book"></i><span>내보내기</span></div>
                     </div>
                 </div>
                 <div class="memoria__section">
@@ -791,8 +834,8 @@
                     <div class="memoria__button-row">
                         <div class="menu_button" id="memoria_export"><i class="fa-solid fa-file-export"></i><span>내보내기</span></div>
                         <div class="menu_button" id="memoria_import_btn"><i class="fa-solid fa-file-import"></i><span>가져오기</span></div>
-                        <div class="menu_button" id="memoria_unhide_all"><i class="fa-solid fa-eye"></i><span>숨긴 메시지 모두 표시</span></div>
-                        <div class="menu_button memoria__danger" id="memoria_reset"><i class="fa-solid fa-trash"></i><span>이 채팅 기억 초기화</span></div>
+                        <div class="menu_button" id="memoria_unhide_all" title="숨긴 메시지 모두 표시"><i class="fa-solid fa-eye"></i><span>숨김 해제</span></div>
+                        <div class="menu_button memoria__danger" id="memoria_reset" title="이 채팅 기억 초기화"><i class="fa-solid fa-trash"></i><span>초기화</span></div>
                     </div>
                 </div>
                 <div class="memoria__hint">

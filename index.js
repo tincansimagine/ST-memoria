@@ -41,6 +41,8 @@ import { MacrosParser } from "../../../../scripts/macros.js";
 import { NARRATOR_PERSPECTIVE, isSharedPerspective, hasChatPerspective, resolvePerspective, findAssociations, sameKnowledgeScope, archiveSnapshot, validateArchive, addCheckpoint, archiveChanges, packetSections } from './archive-engine.mjs';
 import { showArchiveLibrary } from './library-ui.mjs';
 import { withDeadline, parsePhraseList, stripPhrases, hasPhrase, findRepeatedPhrases, pickBundleValues, resolveBundleName, switchBundle, saveBundle, deleteBundle, renameBundle, exportBundle, parseBundleFile, diffStableEntries, shouldRefreeze, createActivityLog, findRivalExtensions } from './craft-engine.mjs';
+import { findStatusBars, statusOneLine, isPauseDirective, isPauseMessage, buildTimelineRows, filterTimelineRows, timelineMarkdown, timelineCsv, layoutTimelineGraph, verifyIssues } from './scene-engine.mjs';
+import { pulseSvg, flowHtml, graphHtml, detailHtml, tableHtml, bondMapSvg, bondStepsHtml, statusListHtml } from './story-view.mjs';
 
 const MODULE_NAME = 'memoria';
 const INJECT_KEY = 'memoria_ledger';
@@ -329,6 +331,11 @@ const DEFAULT_SETTINGS = Object.freeze({
     bannedPhrases: '',        // 금지어·반복 표현 (줄바꿈·쉼표 구분) — 장부에서 걷어낸다
     banInChat: false,         // AI에게 보내는 최근 대화에서도 금지어를 뺀다 (저장된 채팅은 그대로)
     banTell: false,           // 금지어 목록을 모델에게 직접 알려준다 (모델에 따라 역효과)
+    statusMode: 'auto',       // 상태창 기억: 'auto' 자동으로 찾기 | 'custom' 직접 정한 모양 | 'off'
+    statusPattern: '',        // 직접 정한 모양(정규식) — 괄호로 묶은 부분을 상태창 내용으로 읽는다
+    statusInject: true,       // 가장 최근 상태창을 AI에게 알려 시간·날짜·장소를 잇는다
+    qrMode: 'side',           // QR·슬래시 명령 메시지: 'side' 코멘트와 번외편만 빼기 | 'all' 전부 빼기 | 'keep' 빼지 않기
+    replyCheck: false,        // 답변 점검 — 새 답변이 기록·최근 대화와 어긋나면 ⚠ (답변마다 호출 1회)
     bundles: {},              // 설정 묶음 { 이름: 값들 }
     bundleByOwner: {},        // 캐릭터·그룹에 붙인 묶음 { 'char:avatar.png' | 'group:id': 이름 }
     activeBundle: '',         // 지금 적용 중인 묶음 ('' = 기본 설정)
@@ -555,6 +562,226 @@ function getStore() {
         s.lexiconRev = 5;
     }
     return s;
+}
+
+/* ============================================================
+ * 상태창 기억 · 번외편 — 모델을 부르지 않고 본문에서 읽는다
+ * ============================================================ */
+
+/**
+ * 이야기가 아닌 메시지인가 — QR이 롤플을 멈추고 뽑은 퀴즈·인터뷰·운세 같은 번외편, /comment 결과.
+ * 기록·회상 질의·답변 점검·상태창에서 모두 뺀다. 사용자가 분류 창에서 정한 값이 자동 판정보다 우선한다.
+ */
+function isSideMessage(mes) {
+    const mode = getSettings().qrMode || 'side';
+    if (!mes || mode === 'keep') return false;
+    const tag = mes.extra?.memoria_side;
+    if (tag === true) return true;
+    if (tag === false) return false;
+    if (mes.extra?.type === 'comment') return true;
+    return mode === 'all' && (mes.extra?.type === 'narrator' || mes.extra?.model === 'slash command');
+}
+
+// 직전 조용한 생성(/gen)의 지시문 — 그 결과가 /sendas로 채팅에 들어올 때 번외편인지 가린다
+let lastQuietPrompt = null;
+
+/** 새로 들어온 메시지를 번외편/이야기로 표시한다. 번외편이면 true. */
+function tagSideMessage(id, type) {
+    const mes = chat[id];
+    if (!mes || mes.is_user || (getSettings().qrMode || 'side') === 'keep') return false;
+    if (typeof mes.extra !== 'object' || !mes.extra) mes.extra = {};
+    if (typeof mes.extra.memoria_side === 'boolean') return mes.extra.memoria_side;
+    let side = null;
+    if (mes.extra.model === 'slash command' && type === 'command') {
+        const recent = lastQuietPrompt && Date.now() - lastQuietPrompt.at < 30 * 60 * 1000 ? lastQuietPrompt : null;
+        if (recent) side = isPauseDirective(recent.text);
+        lastQuietPrompt = null;
+    } else {
+        // "/send <System>롤플을 멈추고…</System> | /trigger": 바로 앞 사용자 메시지가 곧 지시문이다
+        for (let i = id - 1; i >= 0 && i >= id - 3; i--) {
+            if (!chat[i]?.is_user) continue;
+            if (isPauseMessage(chat[i].mes)) {
+                side = true;
+                if (typeof chat[i].extra !== 'object' || !chat[i].extra) chat[i].extra = {};
+                chat[i].extra.memoria_side = true;
+            }
+            break;
+        }
+    }
+    if (side === null) return false;
+    mes.extra.memoria_side = side;
+    getContext().saveChatDebounced?.();
+    if (side) logActivity('side', `#${id}은 롤플을 멈추고 만든 번외편이라 기억에 넣지 않아요`);
+    return side;
+}
+
+const statusCache = new WeakMap();
+
+/** 한 메시지의 상태창들 (본문이 바뀌거나 설정이 바뀔 때만 다시 읽는다) */
+function messageStatusBars(mes) {
+    const settings = getSettings();
+    if (!mes || mes.is_user || settings.statusMode === 'off' || isSideMessage(mes)) return [];
+    const key = `${settings.statusMode}|${settings.statusPattern}`;
+    let hit = statusCache.get(mes);
+    if (!hit || hit.mes !== mes.mes || hit.key !== key) {
+        let bars = [];
+        try { bars = findStatusBars(mes.mes, { mode: settings.statusMode, pattern: settings.statusPattern }); } catch (e) { console.debug(`[${MODULE_NAME}] 상태창 읽기 실패`, e); }
+        hit = { mes: mes.mes, key, bars };
+        statusCache.set(mes, hit);
+    }
+    return hit.bars;
+}
+
+/** 채팅에서 가장 최근 상태창 (숨겨진 메시지도 본다). before: 이 번호 앞까지만 */
+function latestStatus(before = chat.length) {
+    if (getSettings().statusMode === 'off') return null;
+    const end = Math.min(chat.length, before) - 1;
+    for (let i = end; i >= 0 && i > end - 300; i--) {
+        const bars = messageStatusBars(chat[i]);
+        if (bars.length) return { mesId: i, ...bars[bars.length - 1] };
+    }
+    return null;
+}
+
+/** 시간·장소·날씨가 바뀐 순서대로 — 최신이 위 */
+function statusHistory(limit = 200) {
+    const out = [];
+    let last = '';
+    for (let i = 0; i < chat.length; i++) {
+        for (const bar of messageStatusBars(chat[i])) {
+            const line = statusOneLine(bar);
+            if (!line || line === last) continue;
+            last = line;
+            out.push({ mesId: i, ...bar });
+        }
+    }
+    return out.slice(-limit).reverse();
+}
+
+function jumpToMessage(mesId) {
+    const el = document.querySelector(`#chat .mes[mesid="${Number(mesId)}"]`);
+    if (!el) return toastr.info(`#${mesId} 메시지는 지금 화면에 불러와져 있지 않아요.`, 'Memoria');
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    el.classList.add('memoria-flash');
+    setTimeout(() => el.classList.remove('memoria-flash'), 1600);
+}
+
+/* ============================================================
+ * 답변 점검 — 새 답변이 기록·최근 대화와 어긋나는지
+ * ============================================================ */
+
+const REPLY_CHECK_PROMPT = `You check one new reply of an ongoing roleplay for continuity, against the story's archive and the messages just before it. You never rewrite the reply.
+
+How to judge:
+- The new reply continues directly from the last recent message. Facts change as a story moves, and the newest source wins: recent messages first, then the archive. The archive may lag behind the recent messages.
+- Before reporting anything, read through ALL the recent messages for something that changes, explains, or sets up what the new reply says — a move to another place, a new object in hand, a healed wound, a relationship that shifted, time skipped. If it is there, nothing is wrong.
+- Report real contradictions only: someone dead or absent acting, a wrong name, a forgotten injury, an item in the wrong hands, a character knowing a secret they are not listed as knowing, a promise broken with no explanation, a wrong relationship or timeline. Also small slips against the recent messages: what someone holds, eats, drinks, or wears, which hand or side, where people stand or sit, the time of day.
+- Also report a clear out-of-character slip against the Cast entry: the wrong speech level or form of address, or behaviour that flatly contradicts a character's core with no story reason. Begin the "problem" of such an issue with "[캐해]". Gradual growth the Cast or Bonds entries record, and a mood with a visible cause, are not slips.
+- Never report style, new information, a plausible development, or something the archive simply does not mention. When in doubt, do not report — a false alarm is worse than a missed one.
+
+Reply with ONE minified JSON object and nothing else:
+{"issues":[{"quote":"short exact quote from the new reply","evidence":"short exact quote, copied from the archive or a recent message, that states the conflicting fact","source":"#12 for a message number, or archive, or cast","problem":"what it contradicts and what the established fact is — written in Korean"}]}
+Use an empty array when nothing is wrong, which is the usual answer.`;
+
+/** 메시지에 붙은 점검 결과 — 그 글에 대한 것일 때만 (스와이프·수정으로 글이 바뀌면 옛 경고는 무효) */
+function checkOf(mes) {
+    const c = mes?.extra?.memoria_check;
+    return c && c.h === mesHashOf(mes) ? c : null;
+}
+
+function decorateCheck(mesId) {
+    const $mes = $(`#chat .mes[mesid="${Number(mesId)}"]`);
+    if (!$mes.length) return;
+    $mes.find('.memoria-check-badge').remove();
+    const c = checkOf(chat[mesId]);
+    if (!c || (!c.issues?.length && !c.filtered?.length)) return;
+    const quiet = !c.issues?.length;
+    $mes.find('.ch_name').first().append(`<span class="memoria-check-badge${quiet ? ' is-quiet' : ''}" title="${quiet ? '걸러진 경고 보기' : '기록과 다른 부분'}">${quiet ? 'ⓘ' : `⚠ ${c.issues.length}`}</span>`);
+}
+
+function decorateAllChecks() {
+    $('#chat .mes').each(function () { decorateCheck(Number($(this).attr('mesid'))); });
+}
+
+async function showCheckIssues(mesId) {
+    const mes = chat[mesId];
+    const c = checkOf(mes);
+    if (!c) return;
+    const ctx = getContext();
+    const row = (i) => `<div class="memoria-review__row">
+        <b>“${escapeHtml(i.quote)}”</b>
+        <div>${escapeHtml(i.problem)}</div>
+        ${i.evidence ? `<div class="memoria-review__before">근거${i.source ? ` (${escapeHtml(i.source)})` : ''}: “${escapeHtml(i.evidence)}”</div>` : ''}
+        ${i.why ? `<div class="memoria-review__before">${escapeHtml(i.why)}</div>` : ''}
+    </div>`;
+    const html = `<div class="memoria-review">
+        <h3>기록과 다른 부분</h3>
+        ${(c.issues || []).map(row).join('') || '<p class="memoria__hint">남은 경고가 없습니다.</p>'}
+        ${(c.filtered || []).length ? `<details><summary>걸러진 경고 ${c.filtered.length}개</summary>${c.filtered.map(row).join('')}</details>` : ''}
+    </div>`;
+    const clear = await ctx.callGenericPopup(html, ctx.POPUP_TYPE.CONFIRM, '', { okButton: '경고 지우기', cancelButton: '닫기', wide: true, allowVerticalScrolling: true });
+    if (!clear) return;
+    delete mes.extra.memoria_check;
+    decorateCheck(mesId);
+    ctx.saveChatDebounced?.();
+}
+
+async function checkReply(mesId) {
+    const settings = getSettings();
+    if (!settings.enabled || !settings.replyCheck) return;
+    const chatId = getCurrentChatId();
+    await waitForChatIdle('답변 점검');
+    const mes = chat[mesId];
+    if (getCurrentChatId() !== chatId || !mes || mes.is_user || mes.is_system || isSideMessage(mes)) return;
+    const reply = visibleProse(mes.mes || '');
+    if (reply.trim().length < 20) return;
+    const hash = mesHashOf(mes);
+    // 아직 요약되지 않은 최근 대화를 가능한 한 많이 보여 준다 — 그 안에서 바뀐 것을 모순으로 잘못 짚지 않게
+    const recent = [];
+    let room = 12000;
+    for (let i = mesId - 1; i >= 0 && recent.length < 24 && room > 0; i--) {
+        const m = chat[i];
+        if (!m || m.is_system || isSideMessage(m)) continue;
+        const line = `[#${i}] ${m.is_user ? (m.name || name1 || 'User') : (m.name || name2 || 'Character')}: ${cleanMultiline(visibleProse(m.mes), 1600)}`;
+        room -= line.length;
+        recent.unshift(line);
+    }
+    const store = getStore();
+    const parts = await buildPacketSections(reply.slice(0, 600), null);
+    const archive = renderPacket({ ...parts, voices: [], banned: [], banTell: false }, { excerptLimit: 4 })
+        .split('\n').filter(l => l !== PACKET_HEADER && l !== PACKET_FOOTER).slice(packetGuidance(parts).length).join('\n');
+    const context = `<archive>\n${archive}\n</archive>\n\n<recent_messages>\n${recent.join('\n\n')}\n</recent_messages>`;
+    const userPrompt = `${context}\n\n<new_reply number="#${mesId}" by="${mes.name || name2 || 'Character'}">\n${reply.slice(0, 8000)}\n</new_reply>`;
+    updateStatusUI('답변 점검 중…');
+    let result = null;
+    try {
+        const { value, timedOut } = await withDeadline(callAuxLLM(REPLY_CHECK_PROMPT, userPrompt, { maxTokens: auxTokens(1500) }), 120000, null);
+        if (timedOut) logActivity('error', `#${mesId} 답변 점검이 2분 안에 끝나지 않아 건너뛰었어요`);
+        else result = parseJsonLoose(value);
+    } catch (e) {
+        logActivity('error', `#${mesId} 답변 점검 실패: ${e?.message || e}`);
+    } finally {
+        updateStatusUI();
+    }
+    // 점검하는 사이 다른 답변으로 넘겼거나 고쳤으면 결과를 붙이지 않는다
+    if (!result || getStore() !== store || chat[mesId] !== mes || mesHashOf(mes) !== hash) return;
+    const found = Array.isArray(result) ? result : result.issues;
+    const { kept, filtered } = verifyIssues(found, reply, context);
+    if (typeof mes.extra !== 'object' || !mes.extra) mes.extra = {};
+    if (kept.length || filtered.length) mes.extra.memoria_check = { h: hash, issues: kept, filtered };
+    else delete mes.extra.memoria_check;
+    decorateCheck(mesId);
+    getContext().saveChatDebounced?.();
+    const total = Array.isArray(found) ? found.length : 0;
+    logActivity('check', total
+        ? `#${mesId} 점검: 찾은 경고 ${total}개 → 근거 확인 안 됨 ${filtered.length}개 → 남은 경고 ${kept.length}개`
+        : `#${mesId} 점검: 어긋난 곳 없음`);
+}
+
+/** 점검은 기록과 같은 줄에 세운다 — 보조 모델을 동시에 두 번 부르지 않는다 */
+function queueCheck(mesId) {
+    commitQueue = commitQueue.then(() => checkReply(mesId)).catch(e => console.error(`[${MODULE_NAME}] 답변 점검 오류:`, e));
+    return commitQueue;
 }
 
 /* ============================================================
@@ -2628,6 +2855,7 @@ async function commitTurn(mesId, { silent = true, force = false, retry = 1 } = {
     if (!assistantMes || assistantMes.is_user) return false;
     // 숨김(is_system) 메시지는 기본적으로 건너뛰되, 자동 숨김으로 가려진 기존 턴의 재기록(force)은 허용
     if (assistantMes.is_system && !force) return false;
+    if (isSideMessage(assistantMes)) return false; // 번외편은 이야기가 아니다
 
     const userMes = findPrecedingUserMessage(mesId);
     // 사서에게는 화면에 보이는 이야기만 보여준다 — 다른 확장의 숨은 패킷·상태창 잔해 차단
@@ -2807,9 +3035,11 @@ async function commitTurn(mesId, { silent = true, force = false, retry = 1 } = {
     for (const s of extracted.entityStates) upsertEntityState(store, s, turn.turnIndex);
     for (const l of extracted.locks) upsertLock(store, l, turn.turnIndex);
     // 이 턴이 끝난 시점의 작중 시간·장소를 턴에 찍어 둔다 — 요약이 "언제·어디서"를 지어내지 않고 받아 적게
+    // 답변에 상태창이 있으면 그쪽이 더 정확하다 (모델이 적은 그대로)
     const sceneAt = getSceneSnapshot(store);
-    turn.when = [sceneAt.date, sceneAt.time].filter(Boolean).join(' ') || null;
-    turn.where = sceneAt.location || null;
+    const ownBar = messageStatusBars(assistantMes).slice(-1)[0];
+    turn.when = ownBar?.when || [sceneAt.date, sceneAt.time].filter(Boolean).join(' ') || null;
+    turn.where = ownBar?.place || sceneAt.location || null;
 
     // 사서가 해소됐다고 판정한 서약 처리 (스와이프 시 되돌릴 수 있게 턴 기록)
     // 수기 서약은 사서가 직접 닫지 못한다 — 대신 "해소된 듯" 의견만 붙여 사용자가 ✔로 확정
@@ -2923,7 +3153,7 @@ function commitSettledTurns() {
         const m = chat[i];
         if (!m) continue;
         const steps = Math.max(users, replies); // 이 메시지보다 뒤에 있는 것만 센다
-        if (!m.is_user && !m.is_system) {
+        if (!m.is_user && !m.is_system && !isSideMessage(m)) {
             const need = requiredStepsFor(i);
             // 지연 0이면 응답이 도착할 때 이미 기록됐다
             if (need > 0 && steps >= need) {
@@ -3969,7 +4199,7 @@ function currentRecallQuery() {
     if (effectivePerspective() === NARRATOR_PERSPECTIVE) {
         // 소설 이어쓰기에서는 오래전 사용자 답장 대신 마지막 장면의 끝을 기준으로 찾는다.
         for (let i = chat.length - 1; i >= 0; i--) {
-            if (!chat[i] || chat[i].is_system) continue;
+            if (!chat[i] || chat[i].is_system || isSideMessage(chat[i])) continue;
             const text = visibleProse(chat[i].mes || '').trim();
             if (text) return chat[i].is_user ? text : text.slice(-2400);
         }
@@ -3977,7 +4207,7 @@ function currentRecallQuery() {
     }
     let query = '';
     for (let i = chat.length - 1; i >= 0; i--) {
-        if (chat[i]?.is_user && chat[i].mes) { query = chat[i].mes; break; }
+        if (chat[i]?.is_user && chat[i].mes && !isSideMessage(chat[i])) { query = chat[i].mes; break; }
     }
     return visibleProse(query || chat[chat.length - 1]?.mes || '');
 }
@@ -3989,13 +4219,13 @@ async function buildPacketSections(query, supervisorPlan) {
 
     const recentUserTexts = [];
     for (let i = chat.length - 1; i >= 0 && recentUserTexts.length < settings.multiQueryRecent + 1; i--) {
-        if (chat[i]?.is_user && chat[i].mes) recentUserTexts.push(visibleProse(chat[i].mes));
+        if (chat[i]?.is_user && chat[i].mes && !isSideMessage(chat[i])) recentUserTexts.push(visibleProse(chat[i].mes));
     }
     // 직전 본문(어시스턴트) — "응", "계속해줘" 같은 짧은 입력에도 장면이 이어지게 회상 보조 질의로 쓴다.
     // 회상 질의에도 숨은 패킷·태그 잔해가 섞이지 않게 걷어낸 본문만 쓴다.
     let lastAssistantText = '';
     for (let i = chat.length - 1; i >= 0; i--) {
-        if (chat[i] && !chat[i].is_user && !chat[i].is_system && chat[i].mes) {
+        if (chat[i] && !chat[i].is_user && !chat[i].is_system && chat[i].mes && !isSideMessage(chat[i])) {
             lastAssistantText = visibleProse(chat[i].mes);
             if (narratorMode) lastAssistantText = lastAssistantText.slice(-2400);
             break;
@@ -4034,6 +4264,13 @@ async function buildPacketSections(query, supervisorPlan) {
     }
     const rules = store.worldRules.slice(-8);
     const scene = getSceneSnapshot(store);
+    // 가장 최근 상태창 — 옛 답변이 숨겨지거나 번외편이 끼어도 시간·날짜·장소가 이어지게.
+    // 다시 생성하는 중이면 지금 다시 쓰는 답변의 상태창은 빼고 그 앞의 것을 알려준다.
+    if (settings.statusInject !== false) {
+        const rewriting = chatGenerating && ['regenerate', 'swipe'].includes(lastGenerationType);
+        scene.status = latestStatus(rewriting ? chat.length - 1 : chat.length);
+        if (scene.status) scene.any = true;
+    }
     // 장면 한 줄에 이미 담긴 scene 슬롯은 상태 보드 목록에서 제외 (중복 방지)
     const sceneSlots = [...SCENE_LOC_SLOTS, ...SCENE_DATE_SLOTS, ...SCENE_TIME_SLOTS, 'present', 'mood'];
     // 장면 전환 앵커: 장소·날짜가 마지막으로 기록된 턴 — 그보다 먼저 기록된 자세·복장 등은
@@ -4323,9 +4560,12 @@ function renderPacket(parts, { withExcerpts = true, excerptLimit = Infinity, rec
     }
     if (parts.scene?.any) {
         const bits = [];
-        if (parts.scene.location) bits.push(`place: ${parts.scene.location}`);
-        if (parts.scene.date) bits.push(`date: ${parts.scene.date}`);
-        if (parts.scene.time) bits.push(`time: ${parts.scene.time}`);
+        const bar = parts.scene.status;
+        // 채팅 속 상태창은 장부의 시간·장소보다 새롭고 정확하다 — 있으면 그것을 기준으로 삼는다
+        if (bar) bits.push(`latest status bar: ${statusOneLine(bar)} (carry the in-story time, date and place on from here; move them forward only as the story does)`);
+        if (parts.scene.location && !bar?.place) bits.push(`place: ${parts.scene.location}`);
+        if (parts.scene.date && !bar?.when) bits.push(`date: ${parts.scene.date}`);
+        if (parts.scene.time && !bar?.when) bits.push(`time: ${parts.scene.time}`);
         if (parts.scene.present) bits.push(`present: ${parts.scene.present}`);
         if (parts.scene.mood) bits.push(`mood: ${parts.scene.mood}`);
         if ((parts.storyTotalDays || 0) >= 1) bits.push(`story clock: ~${humanizeStoryDays(parts.storyTotalDays)} since the story began`);
@@ -6187,7 +6427,7 @@ function renderBondsPanel() {
     }
 }
 
-const ACTIVITY_ICONS = { recall: 'fa-magnifying-glass', record: 'fa-feather', summary: 'fa-book', defer: 'fa-hourglass-half', ledger: 'fa-snowflake', update: 'fa-pen-to-square', bundle: 'fa-layer-group', error: 'fa-triangle-exclamation' };
+const ACTIVITY_ICONS = { check: 'fa-circle-check', side: 'fa-shuffle', recall: 'fa-magnifying-glass', record: 'fa-feather', summary: 'fa-book', defer: 'fa-hourglass-half', ledger: 'fa-snowflake', update: 'fa-pen-to-square', bundle: 'fa-layer-group', error: 'fa-triangle-exclamation' };
 
 function renderActivityLog() {
     const list = $('#memoria_activity_list');
@@ -6263,6 +6503,7 @@ function renderStatePanel() {
     if (!$rules.length) return;
     renderCharactersPanel();
     renderBondsPanel();
+    renderBondMap();
     renderItemsPanel();
     renderDossierPanel();
 
@@ -6360,39 +6601,182 @@ function renderMilestonesPanel() {
     }
 }
 
+/** 이야기 탭 — 맥박(턴별 무게)과 흐름(줄기 위의 요약 카드) */
 function renderSummariesPanel() {
     const store = getStore();
     renderMilestonesPanel();
     renderTurnDigests();
     const list = $('#memoria_summary_list');
     if (!list.length) return;
-    list.empty();
 
     const all = [
         ...store.arcSummaries.map(s => ({ ...s, level: 'arc' })),
         ...store.chunkSummaries.map(s => ({ ...s, level: 'chunk' })),
-    ].sort((a, b) => a.fromTurn - b.fromTurn);
+    ].sort((a, b) => (a.carried ? -1 : 0) - (b.carried ? -1 : 0) || a.fromTurn - b.fromTurn);
+
+    // 맥박: 턴마다의 무게를 막대로. 요약이 덮은 구간은 색으로 구분하고, 전환점은 별로 찍는다.
+    const local = all.filter(s => !s.carried);
+    const turns = store.turns.filter(t => t.turnIndex > 0);
+    $('#memoria_story_pulse').html(pulseSvg(turns, { spans: local, marks: store.milestones.map(m => m.turnIndex) }))
+        .toggle(turns.length > 1).scrollLeft(1e6);
+    $('#memoria_pulse_note').empty();
+    const days = store.turns.reduce((a, t) => a + (t.elapsedDays || 0), 0);
+    const scene = getSceneSnapshot(store);
+    $('#memoria_story_stats').text([
+        `${store.turns.length}턴`,
+        days >= 1 ? `이야기 속 ${humanizeStoryDays(days).replace(/(\d)\s*d\b/, '$1일').replace(/(\d)\s*w\b/, '$1주').replace(/(\d)\s*mo\b/, '$1개월').replace(/(\d)\s*y\b/, '$1년')}` : '',
+        local.length ? `챕터 ${store.chunkSummaries.length} · 연대기 ${store.arcSummaries.filter(x => !x.carried).length}` : '',
+        scene.location ? `지금 ${scene.location}` : '',
+    ].filter(Boolean).join(' · '));
 
     if (!all.length) {
-        list.append('<div class="memoria__empty">아직 요약이 없습니다. 턴이 쌓이면 자동 생성됩니다.</div>');
+        list.html('<div class="memoria__empty">아직 요약이 없습니다. 턴이 쌓이면 자동으로 만들어집니다.</div>');
         return;
     }
-    for (const s of all) {
-        list.append($(`
-            <div class="memoria__summary-card" data-id="${s.id}" data-level="${s.level}">
-                <div class="memoria__summary-head">
-                    <span class="memoria__badge ${s.carried ? 'memoria__badge--carried' : s.level === 'arc' ? 'memoria__badge--arc' : 'memoria__badge--chunk'}">${s.carried ? '인계' : s.level === 'arc' ? '연대기' : '요약'}</span>
-                    <span>${s.carried ? escapeHtml(s.carriedFrom || '이전 채팅') : `t${s.fromTurn}–t${s.toTurn}`}</span>
-                    <span class="memoria__mem-actions">
-                        ${!s.carried && s.level === 'chunk' ? '<i class="fa-solid fa-rotate memoria-summary-regen" title="이 구간의 턴 기록으로 요약 다시 생성"></i>' : ''}
-                        <i class="fa-solid fa-pen memoria-summary-edit" title="편집"></i>
-                        <i class="fa-solid fa-trash memoria-summary-delete" title="삭제"></i>
-                    </span>
-                </div>
-                <div class="memoria__summary-text">${escapeHtml(s.text)}</div>
-            </div>
-        `));
-    }
+    const marksIn = (s) => (s.carried ? [] : store.milestones.filter(m => m.turnIndex >= s.fromTurn && m.turnIndex <= s.toTurn));
+    list.html(flowHtml(all.map((s, i) => ({ ...s, marks: marksIn(s), open: i >= all.length - 2 }))));
+}
+
+/* ============================================================
+ * 이야기 크게 보기 — 연표 그래프 · 표 · 관계도 · 상태창
+ * ============================================================ */
+
+function bondViewRows(store) {
+    return (store.bonds || []).filter(b => !b.disabled && bondNow(b)).map(b => ({ id: b.id, from: b.from, to: b.to, stage: bondNow(b).stage, log: b.log }));
+}
+
+/** 세계 탭의 작은 관계도 */
+function renderBondMap() {
+    const $map = $('#memoria_bond_map');
+    if (!$map.length) return;
+    const svg = bondMapSvg(bondViewRows(getStore()));
+    $map.html(svg).toggle(Boolean(svg));
+}
+
+const STORY_TABS = [['graph', 'fa-chart-gantt', '연표'], ['table', 'fa-table', '표'], ['map', 'fa-diagram-project', '관계도'], ['status', 'fa-clock', '상태창']];
+
+async function openStoryView(tab = 'graph', picked = '') {
+    const ctx = getContext();
+    const store = getStore();
+    const state = { tab, by: 'people', query: '', minStars: 0, sort: 'order', desc: false, picked, bond: tab === 'map' ? picked : '', focus: '' };
+    const rows = buildTimelineRows(store);
+    const bonds = bondViewRows(store);
+    const $dlg = $('<div class="mmv"></div>');
+    const draw = () => {
+        const shown = filterTimelineRows(rows, state);
+        const shownIds = new Set(shown.map(r => r.id));
+        const tabs = STORY_TABS.map(([k, icon, label]) => `<button type="button" class="mmv-tab${state.tab === k ? ' is-active' : ''}" data-tab="${k}"><i class="fa-solid ${icon}"></i><span>${label}</span></button>`).join('');
+        const filters = `<div class="mmv-tools">
+            <input type="search" class="mmv-query" placeholder="인물 · 장소 · 내용" value="${escapeHtml(state.query)}">
+            <select class="mmv-stars-min" title="중요도">${[0, 3, 4, 5].map(n => `<option value="${n}"${state.minStars === n ? ' selected' : ''}>${n ? `★${n}+` : '전체'}</option>`).join('')}</select>
+            ${state.tab === 'graph'
+                ? `<span class="mmv-seg"><button type="button" data-by="people" class="${state.by === 'people' ? 'is-active' : ''}">인물</button><button type="button" data-by="place" class="${state.by === 'place' ? 'is-active' : ''}">장소</button></span>`
+                : '<button type="button" class="mmv-export" data-kind="md" title="마크다운 표 복사">MD</button><button type="button" class="mmv-export" data-kind="csv" title="CSV 저장">CSV</button>'}
+        </div>`;
+        let body = '';
+        if (state.tab === 'graph') {
+            const dim = new Set(rows.filter(r => !shownIds.has(r.id)).map(r => r.id));
+            body = rows.length
+                ? `${filters}${graphHtml(layoutTimelineGraph(rows, { by: state.by }), { dim, picked: state.picked })}${detailHtml(rows.find(r => r.id === state.picked))}`
+                : '<div class="mmv-detail is-empty">아직 그릴 사건이 없어요. 턴이 기록되면 채워집니다.</div>';
+        } else if (state.tab === 'table') {
+            body = `${filters}${tableHtml(shown, state)}`;
+        } else if (state.tab === 'map') {
+            const svg = bondMapSvg(bonds, { picked: state.bond, focus: state.focus });
+            body = svg
+                ? `<div class="mmv-map-wrap is-large">${svg}</div>${bondStepsHtml(bonds.find(b => b.id === state.bond))}`
+                : '<div class="mmv-detail is-empty">관계선이 아직 없어요. 관계가 움직이는 장면이 나오면 그려집니다.</div>';
+        } else {
+            body = statusListHtml(statusHistory());
+        }
+        $dlg.html(`<nav class="mmv-tabs">${tabs}</nav><div class="mmv-body mmv-body--${state.tab}">${body}</div>`);
+    };
+    const redrawKeepingFocus = (sel) => { draw(); const el = $dlg.find(sel)[0]; if (el) { el.focus(); if (el.setSelectionRange) el.setSelectionRange(el.value.length, el.value.length); } };
+    $dlg.on('click', '.mmv-tab', function () { state.tab = String($(this).data('tab')); draw(); });
+    $dlg.on('input', '.mmv-query', function () { state.query = String($(this).val() || ''); redrawKeepingFocus('.mmv-query'); });
+    $dlg.on('change', '.mmv-stars-min', function () { state.minStars = Number($(this).val()) || 0; draw(); });
+    $dlg.on('click', '.mmv-seg button', function () { state.by = String($(this).data('by')); draw(); });
+    $dlg.on('click keydown', '.mmv-pt', function (e) {
+        if (e.type === 'keydown' && e.key !== 'Enter' && e.key !== ' ') return;
+        state.picked = String($(this).data('id'));
+        const left = $dlg.find('.mmv-graph-scroll').scrollLeft();
+        draw();
+        $dlg.find('.mmv-graph-scroll').scrollLeft(left);
+    });
+    $dlg.on('click', '.mmv-table th.is-sortable', function () {
+        const key = String($(this).data('sort'));
+        state.desc = state.sort === key ? !state.desc : false;
+        state.sort = key;
+        draw();
+    });
+    $dlg.on('click', '.mmv-table td.mmv-text', function () { $(this).toggleClass('is-open'); });
+    $dlg.on('click keydown', '.mmv-edge', function (e) {
+        if (e.type === 'keydown' && e.key !== 'Enter' && e.key !== ' ') return;
+        state.bond = String($(this).data('id')); draw();
+    });
+    $dlg.on('click', '.mmv-person', function () {
+        const name = String($(this).data('name'));
+        state.focus = state.focus === name ? '' : name;
+        draw();
+    });
+    $dlg.on('click', '.mmv-jump', function () { jumpToMessage(Number($(this).data('mes'))); });
+    $dlg.on('click', '.mmv-export', async function () {
+        const shown = filterTimelineRows(rows, state);
+        if ($(this).data('kind') === 'csv') return download(timelineCsv(shown), 'memoria-timeline.csv', 'text/csv');
+        try {
+            await navigator.clipboard.writeText(timelineMarkdown(shown));
+            toastr.success('마크다운 표를 복사했습니다.', 'Memoria');
+        } catch { toastr.error('복사하지 못했습니다.', 'Memoria'); }
+    });
+    draw();
+    await ctx.callGenericPopup($dlg, ctx.POPUP_TYPE.TEXT, '', { wide: true, large: true, allowVerticalScrolling: true });
+}
+
+/** QR·슬래시 명령으로 들어온 메시지를 번외편/이야기로 직접 고른다 */
+async function openSideSorter() {
+    const ctx = getContext();
+    const found = [];
+    chat.forEach((m, i) => {
+        if (!m || m.extra?.type === 'comment') return;
+        const slash = m.extra?.model === 'slash command' || m.extra?.type === 'narrator';
+        const tagged = typeof m.extra?.memoria_side === 'boolean';
+        const pause = m.is_user && isPauseMessage(m.mes);
+        if (!slash && !tagged && !pause) return;
+        found.push({ i, m, side: tagged ? m.extra.memoria_side : (pause || isSideMessage(m)), guess: !tagged });
+    });
+    if (!found.length) return toastr.info('슬래시 명령으로 들어온 메시지가 없습니다.', 'Memoria');
+    const $dlg = $(`<div class="memoria__repeat-dialog">
+        <h3>QR 분류</h3>
+        <p class="memoria__hint">번외편은 기억·회상·점검에서 빠집니다. 흐리게 보이는 줄은 아직 고르지 않은 추정입니다.</p>
+        <div class="memoria__row-list">${found.map(f => `
+            <div class="memoria__row${f.guess ? ' is-guess' : ''}" data-i="${f.i}">
+                <button type="button" class="mmv-jump" data-mes="${f.i}">#${f.i}</button>
+                <span class="memoria__row-text"><b>${escapeHtml(f.m.name || '')}</b> ${escapeHtml(cleanStr(visibleProse(f.m.mes), 90))}</span>
+                <select><option value="story"${f.side ? '' : ' selected'}>이야기</option><option value="side"${f.side ? ' selected' : ''}>번외편</option></select>
+            </div>`).join('')}</div>
+    </div>`);
+    $dlg.on('click', '.mmv-jump', function () { jumpToMessage(Number($(this).data('mes'))); });
+    const ok = await ctx.callGenericPopup($dlg, ctx.POPUP_TYPE.CONFIRM, '', { okButton: '저장', cancelButton: '닫기', wide: true, allowVerticalScrolling: true });
+    if (!ok) return;
+    let toSide = 0;
+    let toStory = 0;
+    $dlg.find('.memoria__row').each(function () {
+        const i = Number($(this).data('i'));
+        const m = chat[i];
+        if (!m) return;
+        const side = $(this).find('select').val() === 'side';
+        const was = isSideMessage(m);
+        if (typeof m.extra !== 'object' || !m.extra) m.extra = {};
+        m.extra.memoria_side = side;
+        if (m.is_user || side === was) return;
+        if (side) { invalidateTurnByMesId(i); toSide++; } // 이미 기록된 번외편은 그 턴의 기억째로 걷어낸다
+        else if (getSettings().autoRecord && isSettledForRecord(i)) { queueCommit(i); toStory++; }
+    });
+    ctx.saveChatDebounced?.();
+    reconcileWithChat();
+    renderAllPanels();
+    updateInjection({ quiet: true });
+    toastr.success(`분류를 저장했습니다.${toSide ? ` 번외편 ${toSide}개를 기억에서 뺐어요.` : ''}${toStory ? ` 이야기 ${toStory}개를 기록합니다.` : ''}`, 'Memoria');
 }
 
 function renderPerspectiveHelp() {
@@ -6455,6 +6839,12 @@ function renderSettingsPanel() {
     $('#memoria_recall_quotes').prop('checked', s.recallQuotes !== false);
     $('#memoria_ban_in_chat').prop('checked', s.banInChat === true);
     $('#memoria_ban_tell').prop('checked', s.banTell === true);
+    $('#memoria_status_mode').val(s.statusMode || 'auto');
+    $('#memoria_status_pattern').val(s.statusPattern || '');
+    $('#memoria_status_pattern_field').toggle(s.statusMode === 'custom');
+    $('#memoria_qr_mode').val(s.qrMode || 'side');
+    $('#memoria_status_inject').prop('checked', s.statusInject !== false);
+    $('#memoria_reply_check').prop('checked', s.replyCheck === true);
     $('#memoria_recall_wait').val(s.recallWaitSec ?? 5);
     $('#memoria_stable_refresh').val(s.stableRefreshTurns ?? 24);
     $('#memoria_voice_samples').val(s.voiceSamples ?? 2);
@@ -6640,8 +7030,8 @@ async function openBundleManager() {
                     <i class="fa-solid fa-trash memoria-bundle-delete" title="삭제"></i>
                 </div>`).join('') : '<div class="memoria__empty">아직 묶음이 없습니다. 설정을 원하는 대로 바꾼 뒤 아래 버튼으로 저장하세요.</div>'}</div>
             <div class="memoria__button-row">
-                <div class="menu_button memoria-bundle-new"><i class="fa-solid fa-plus"></i><span>지금 설정을 새 묶음으로</span></div>
-                <div class="menu_button memoria-bundle-import"><i class="fa-solid fa-file-import"></i><span>파일에서 가져오기</span></div>
+                <div class="menu_button memoria-bundle-new" title="지금 설정을 새 묶음으로 저장"><i class="fa-solid fa-plus"></i><span>새 묶음</span></div>
+                <div class="menu_button memoria-bundle-import" title="묶음 파일 가져오기"><i class="fa-solid fa-file-import"></i><span>가져오기</span></div>
             </div>
             <p class="memoria__hint">묶음에 들어가지 않는 것: Memoria 켜기/끄기, 커스텀 API(키 포함)·임베딩 설정, 프롬프트, 계정 공통 기억·서술 방식. 묶음이 적용된 채팅에서 설정을 바꾸면 기본 설정이 아니라 그 묶음이 바뀝니다.</p>
         `);
@@ -7520,7 +7910,7 @@ function bindUI() {
             console.error(`[${MODULE_NAME}] 요약 다시 만들기 실패:`, e);
             toastr.error(`요약 다시 만들기에 실패해 원래 요약으로 되돌렸습니다. ${e.message || ''}`, 'Memoria', { timeOut: 12000 });
         } finally {
-            $btn.find('span').text('전체 다시 만들기');
+            $btn.find('span').text('다시');
             $prog.text('');
             renderSummariesPanel(); updateInjection();
         }
@@ -7727,6 +8117,46 @@ function bindUI() {
     $('#memoria_bundle_manage').on('click', () => openBundleManager().catch(e => toastr.error(e.message, 'Memoria')));
     $('#memoria_activity_clear').on('click', () => { activityLog.clear(); renderActivityLog(); });
     bindSettingsSearch();
+    flagBind('#memoria_status_inject', 'statusInject');
+    flagBind('#memoria_reply_check', 'replyCheck', { reinject: false });
+    $('#memoria_status_mode').on('change', function () {
+        getSettings().statusMode = String($(this).val() || 'auto');
+        saveSettingsDebounced();
+        $('#memoria_status_pattern_field').toggle(getSettings().statusMode === 'custom');
+        reinjectNow();
+    });
+    $('#memoria_status_pattern').on('change', function () {
+        const v = String($(this).val() || '').slice(0, 300);
+        try { new RegExp(v); } catch { return toastr.warning('정규식을 읽을 수 없습니다.', 'Memoria'); }
+        getSettings().statusPattern = v;
+        saveSettingsDebounced();
+        reinjectNow();
+    });
+    $('#memoria_qr_mode').on('change', function () {
+        getSettings().qrMode = String($(this).val() || 'side');
+        saveSettingsDebounced();
+        reinjectNow();
+    });
+    $('#memoria_side_sort').on('click', () => openSideSorter().catch(e => toastr.error(e.message, 'Memoria')));
+    $('#memoria_story_open').on('click', () => openStoryView('graph').catch(e => toastr.error(e.message, 'Memoria')));
+    // 관계도의 화살표를 누르면 큰 화면에서 지나온 길을 보여준다
+    $('#memoria_settings').on('click', '#memoria_bond_map .mmv-edge', function () {
+        openStoryView('map', String($(this).data('id'))).catch(e => toastr.error(e.message, 'Memoria'));
+    });
+    // 맥박의 막대를 누르면 그 턴의 기록을 보여준다
+    $('#memoria_settings').on('click', '.mmv-pulse-bar', function () {
+        const t = getStore().turns.find(x => x.turnIndex === Number($(this).data('turn')));
+        if (!t) return;
+        $('.mmv-pulse-bar.is-picked').removeClass('is-picked');
+        $(this).addClass('is-picked');
+        $('#memoria_pulse_note').html(`<button type="button" class="mmv-jump" data-mes="${t.mesId}">#${t.mesId}</button> ${[t.when, t.where].filter(Boolean).map(escapeHtml).join(' · ')}<span>${escapeHtml(t.summary || '(기록 없음)')}</span>`);
+    });
+    $('#memoria_settings').on('click', '.mmv-jump', function () { jumpToMessage(Number($(this).data('mes'))); });
+    // 카드 머리의 버튼을 눌러도 카드가 접히지 않게
+    $('#memoria_settings').on('click', '.mmv-card > summary .memoria__mem-actions', (e) => e.preventDefault());
+    $(document).on('click', '.memoria-check-badge', function () {
+        showCheckIssues(Number($(this).closest('.mes').attr('mesid'))).catch(e => toastr.error(e.message, 'Memoria'));
+    });
 
     // ── 관계선
     const bondOf = (el) => getStore().bonds.find(x => x.id === $(el).closest('.memoria__bond-card').data('id'));
@@ -8110,7 +8540,9 @@ function bindEvents() {
         const id = Number(mesId);
         const mes = chat[id];
         if (!mes || mes.is_user || mes.is_system) return;
+        if (tagSideMessage(id, type) || isSideMessage(mes)) return; // 번외편은 기록도 점검도 하지 않는다
         auditRecallEcho(mes); // 직전 주입 기억의 반영 여부 채점 (기록보다 먼저, 원본 감사표 기준)
+        if (settings.replyCheck && type !== 'first_message' && type !== 'command') queueCheck(id);
         if (type !== 'first_message' && requiredStepsFor(id) === 0) {
             queueCommit(id).then(() => updateInjection({ quiet: true }));
         } else {
@@ -8125,7 +8557,8 @@ function bindEvents() {
         await updateInjection();
     });
 
-    on(event_types.GENERATION_STARTED, async (type, _params, dryRun) => {
+    on(event_types.GENERATION_STARTED, async (type, params, dryRun) => {
+        if (type === 'quiet' && params?.quiet_prompt) lastQuietPrompt = { text: String(params.quiet_prompt), at: Date.now() };
         if (dryRun || type === 'quiet' || type === 'impersonate') return;
         setChatGenerating(true, type); // 답변 생성이 먼저다 — 사서·요약은 끝날 때까지 새로 시작하지 않는다
         const settings = getSettings();
@@ -8140,6 +8573,7 @@ function bindEvents() {
     on(event_types.MESSAGE_SWIPED, (mesId) => {
         if (!getSettings().enabled) return;
         invalidateTurnByMesId(Number(mesId));
+        decorateCheck(Number(mesId));
         updateInjection({ quiet: true });
     });
 
@@ -8158,7 +8592,8 @@ function bindEvents() {
         }
     });
 
-    on(event_types.MESSAGE_UPDATED, (mesId) => onMessageUpdated(mesId));
+    on(event_types.MESSAGE_UPDATED, (mesId) => { onMessageUpdated(mesId); decorateCheck(Number(mesId)); });
+    on(event_types.CHARACTER_MESSAGE_RENDERED, (mesId) => decorateCheck(Number(mesId)));
 
     on(event_types.MESSAGE_DELETED, () => {
         if (!getSettings().enabled) return;
@@ -8190,6 +8625,7 @@ function bindEvents() {
         renderAllPanels();
         // 채팅을 열기만 해서는 임베딩을 부르지 않는다 — 첫 메시지를 주고받을 때 제대로 짓는다
         updateInjection({ quiet: true });
+        setTimeout(decorateAllChecks, 600);
     });
 }
 

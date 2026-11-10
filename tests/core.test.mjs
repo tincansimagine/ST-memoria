@@ -244,3 +244,72 @@ test('a recorded turn files bonds, voice samples and scene stamp end to end, and
     a.invalidateTurnByMesId(1);
     assert.equal(store.bonds.length, 0, 'the bond filed by that turn goes with it');
 });
+
+test('the latest status bar is carried into Scene Now and stamps the turn; side pieces are ignored', async () => {
+    const a = await app();
+    const store = a.getStore();
+    a.context.chat.push(
+        { is_user: true, mes: '문을 연다.', name: '여행자' },
+        { is_user: false, mes: '[ 오후 8:15 · 12월 9일 (목) · 호그와트 → 병동 · 눈발, -1°C ]\n\n병동은 조용했다.', name: '아리아' },
+        { is_user: false, mes: '[ 오전 9:00 · 1월 1일 · 퀴즈쇼 스튜디오 · 맑음 ]\n\n오늘의 퀴즈!', name: '아리아', extra: { memoria_side: true } },
+    );
+    store.memories.push(memory('m1', { summary: '병동에 도착했다', pinned: true }));
+    store.turnCounter = 5;
+    const packet = (await a.buildPacketWithinBudget('병동', null)).text;
+    assert.match(packet, /## Scene Now — latest status bar: 오후 8:15 12월 9일 \(목\) · 호그와트 → 병동 · 눈발, -1°C/);
+    assert.doesNotMatch(packet, /퀴즈쇼/);
+    assert.equal(a.run('statusHistory')().length, 1);
+    a.getSettings().statusMode = 'off';
+    assert.doesNotMatch((await a.buildPacketWithinBudget('병동', null)).text, /latest status bar/);
+});
+
+test('QR results are sorted into side pieces by the pause wording of their prompt, and never recorded', async () => {
+    const a = await app();
+    const tag = a.run('tagSideMessage');
+    a.context.chat.push(
+        { is_user: true, mes: '안녕', name: '여행자' },
+        { is_user: false, mes: '오늘의 운세: 뜻밖의 손님이 찾아옵니다. 행운의 색은 은색.', name: '아리아', extra: { model: 'slash command' } },
+        { is_user: false, mes: '사흘 뒤, 그는 다시 그 문 앞에 섰다. 바람이 차가웠다.', name: '아리아', extra: { model: 'slash command' } },
+        { is_user: true, mes: '<System>Pause the roleplay. Quiz time.</System>', name: '여행자' },
+        { is_user: false, mes: '퀴즈! 등대는 몇 층일까요? 정답을 맞혀 보세요.', name: '아리아' },
+    );
+    a.run('lastQuietPrompt = { text: "<System>STOP the role-play and write a horoscope</System>", at: Date.now() }');
+    assert.equal(tag(1, 'command'), true);
+    a.run('lastQuietPrompt = { text: "Skip three days ahead and continue the scene.", at: Date.now() }');
+    assert.equal(tag(2, 'command'), false, 'a scene-skip QR is story');
+    assert.equal(tag(4, 'normal'), true, 'the reply to a pause message is a side piece');
+    assert.equal(a.context.chat[3].extra.memoria_side, true);
+    let calls = 0;
+    a.context.generateRaw = async () => { calls++; return '{}'; };
+    assert.equal(await a.run('commitTurn')(1, {}), false);
+    assert.equal(calls, 0);
+    a.getSettings().qrMode = 'keep';
+    assert.equal(a.run('isSideMessage')(a.context.chat[1]), false);
+});
+
+test('reply check keeps only warnings that quote the reply, and drops them when the text changes', async () => {
+    const a = await app();
+    a.getSettings().replyCheck = true;
+    const reply = '아리아는 차갑게 식은 콜라를 한 모금 마셨다. 창밖으로 눈이 내렸다. 그녀는 말이 없었다.';
+    a.context.chat.push(
+        { is_user: false, mes: '아리아는 김이 나는 커피를 두 손으로 감쌌다.', name: '아리아' },
+        { is_user: true, mes: '창밖을 본다.', name: '여행자' },
+        { is_user: false, mes: reply, name: '아리아' },
+    );
+    let seen = '';
+    a.context.generateRaw = async ({ prompt, systemPrompt }) => {
+        seen = prompt[0].content;
+        assert.match(systemPrompt, /newest source wins/);
+        return JSON.stringify({ issues: [
+            { quote: '차갑게 식은 콜라를 한 모금', evidence: '김이 나는 커피를 두 손으로 감쌌다', source: '#0', problem: '커피가 콜라로 바뀌었어요' },
+            { quote: '없는 인용', evidence: 'x', problem: '지어낸 경고' },
+        ] });
+    };
+    await a.run('checkReply')(2);
+    assert.match(seen, /<recent_messages>[\s\S]*\[#0\] 아리아: 아리아는 김이 나는 커피/);
+    const mes = a.context.chat[2];
+    assert.equal(mes.extra.memoria_check.issues.length, 1);
+    assert.equal(a.run('checkOf')(mes).issues[0].problem, '커피가 콜라로 바뀌었어요');
+    mes.mes = '아리아는 따뜻한 커피를 한 모금 마셨다. 창밖으로 눈이 내렸다. 그녀는 말이 없었다.';
+    assert.equal(a.run('checkOf')(mes), null, 'an old warning never sticks to edited text');
+});
