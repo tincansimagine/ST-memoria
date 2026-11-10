@@ -594,15 +594,15 @@
                         </div>
                         <div class="memoria__field">
                             <label for="memoria_qr_mode" title="빠른 답장(QR)·슬래시 명령으로 채팅에 들어온 메시지를 기억에서 뺄지">QR 메시지</label>
-                            <select id="memoria_qr_mode">
-                                <option value="side">코멘트·막간만 빼기</option>
-                                <option value="all">전부 빼기</option>
-                                <option value="keep">빼지 않기</option>
-                            </select>
+                            <div class="memoria__field-inline">
+                                <select id="memoria_qr_mode">
+                                    <option value="side">코멘트·막간만 빼기</option>
+                                    <option value="all">전부 빼기</option>
+                                    <option value="keep">빼지 않기</option>
+                                </select>
+                                <div class="menu_button" id="memoria_side_sort" title="막간 분류 — 슬래시 명령으로 들어온 메시지를 모아 막간/이야기로 직접 고릅니다"><i class="fa-solid fa-shuffle"></i><span>분류</span></div>
+                            </div>
                         </div>
-                    </div>
-                    <div class="memoria__button-row">
-                        <div class="menu_button" id="memoria_side_sort" title="슬래시 명령으로 들어온 메시지를 모아 막간/이야기로 직접 고릅니다"><i class="fa-solid fa-shuffle"></i><span>막간 분류</span></div>
                     </div>
                     <label class="memoria__toggle-row" for="memoria_status_inject">
                         <input type="checkbox" id="memoria_status_inject">

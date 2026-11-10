@@ -32,7 +32,7 @@
     .memoria__checkpoint > div { flex-basis: 100%; }
 }
 
-#memoria_settings.memoria, .memoria-library {
+#memoria_settings.memoria, .memoria-library, .memoria__bundle-dialog, .memoria__repeat-dialog, .memoria-review {
     --mm-bg: color-mix(in srgb, var(--SmartThemeBlurTintColor, #1a1a1a) 90%, transparent);
     --mm-panel: var(--SmartThemeBlurTintColor, #1a1a1a);
     --mm-card: color-mix(in srgb, var(--SmartThemeBodyColor, #888) 8%, transparent);
@@ -48,7 +48,7 @@
 
 /* 반투명 테마에서 탭-패널 연결선이 비치지 않도록 알파 제거 */
 @supports (color: rgb(from white r g b)) {
-    #memoria_settings.memoria, .memoria-library {
+    #memoria_settings.memoria, .memoria-library, .memoria__bundle-dialog, .memoria__repeat-dialog, .memoria-review {
         --mm-panel: rgb(from var(--SmartThemeBlurTintColor, #1a1a1a) r g b);
     }
 }
@@ -58,7 +58,13 @@
     margin-top: 8px;
 }
 
-#memoria_settings .menu_button {
+/* 팝업은 #memoria_settings 바깥에 그려진다 — 같은 규칙을 팝업에도 건다.
+   (실리태번의 기본 .menu_button은 폭이 글자 하나만큼으로 줄어 한글이 세로로 쌓인다) */
+#memoria_settings .menu_button,
+.memoria__bundle-dialog .menu_button,
+.memoria__repeat-dialog .menu_button {
+    width: auto;
+    flex-shrink: 0;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -69,7 +75,7 @@
     margin: 0;
 }
 
-#memoria_settings .menu_button i { margin: 0; }
+#memoria_settings .menu_button i, .memoria__bundle-dialog .menu_button i, .memoria__repeat-dialog .menu_button i { margin: 0; }
 
 .memoria__version {
     display: inline-block;
@@ -1238,3 +1244,9 @@
 .memoria__repeat-dialog .memoria__row select { flex-shrink: 0; width: auto; margin: 0; }
 @media (prefers-reduced-motion: reduce) { .mes.memoria-flash { animation: none; } }
 @media (min-width: 600px) { #memoria_settings.memoria { --mmv-lane-w: 20px; } }
+
+/* 칸 옆에 붙는 버튼 (QR 메시지 고르기 옆의 막간 분류) */
+.memoria__field-inline { display: flex; gap: 8px; align-items: stretch; min-width: 0; }
+#memoria_settings .memoria__field-inline select { flex: 1; min-width: 0; margin: 0; }
+#memoria_settings .memoria__field-inline .menu_button { padding: 0 12px; }
+.memoria__bundle-dialog .memoria__row > i { cursor: pointer; padding: 4px; }
