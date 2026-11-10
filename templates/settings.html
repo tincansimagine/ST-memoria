@@ -238,31 +238,22 @@
 
             <!-- ===== 요약 ===== -->
             <section class="memoria__panel" data-panel="summaries">
-                <div class="memoria__section">
-                    <div class="memoria__section-head">
-                        <div>
-                            <h4>이야기</h4>
-                            <p id="memoria_story_stats"></p>
-                        </div>
-                        <div class="memoria__compact-actions">
-                            <div class="menu_button" id="memoria_story_open" title="연표 그래프 · 표 · 관계도 · 상태창을 크게 봅니다">
-                                <i class="fa-solid fa-chart-gantt"></i>
-                                <span>연표</span>
-                            </div>
-                            <div class="menu_button" id="memoria_summarize_now" title="주기를 못 채운 자투리 턴까지 지금 요약합니다">
-                                <i class="fa-solid fa-wand-magic-sparkles"></i>
-                                <span>요약</span>
-                            </div>
-                            <div class="menu_button" id="memoria_summary_rebuild" title="요약·연대기를 모두 지우고 턴 기록에서 처음부터 다시 만듭니다. 중단·실패하면 원래 요약을 그대로 둡니다. 인계받은 연대기는 건드리지 않습니다.">
-                                <i class="fa-solid fa-rotate"></i>
-                                <span>다시</span>
-                            </div>
-                        </div>
-                    </div>
-                    <span id="memoria_summary_rebuild_progress" class="memoria__progress"></span>
+                <div class="memoria__section mmv-story">
+                    <div id="memoria_story_hero"></div>
                     <div id="memoria_story_pulse" class="mmv-pulse-wrap" title="턴마다의 무게 — 높을수록 이야기가 크게 움직인 턴"></div>
                     <div id="memoria_pulse_note" class="mmv-pulse-note"></div>
-                    <div id="memoria_summary_list" class="memoria__summary-list"></div>
+                    <div class="mmv-bar">
+                        <div id="memoria_story_tabs" class="mmv-views" role="tablist">
+                            <button type="button" data-view="flow" class="is-active">흐름</button>
+                            <button type="button" data-view="line">연표</button>
+                            <button type="button" data-view="bonds">관계</button>
+                            <button type="button" data-view="table">표</button>
+                        </div>
+                        <div class="menu_button" id="memoria_summarize_now" title="지금 요약 — 주기를 못 채운 자투리 턴까지 요약합니다"><i class="fa-solid fa-wand-magic-sparkles"></i></div>
+                        <div class="menu_button" id="memoria_summary_rebuild" title="전체 다시 만들기 — 요약·연대기를 턴 기록에서 처음부터 다시 만듭니다. 중단·실패하면 원래 요약을 그대로 둡니다."><i class="fa-solid fa-rotate"></i><span></span></div>
+                    </div>
+                    <span id="memoria_summary_rebuild_progress" class="memoria__progress"></span>
+                    <div id="memoria_story_view" class="mmv-view"></div>
                 </div>
                 <div class="memoria__section">
                     <div class="memoria__section-head">

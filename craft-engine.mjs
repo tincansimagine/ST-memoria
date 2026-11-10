@@ -355,3 +355,70 @@ export function findRivalExtensions(names, disabled = []) {
     }
     return found;
 }
+
+/* ------------------------------------------------------------
+ * 떡밥(미해결 서약) 관리 — 끝난 일이 "미해결"로 남아 계속 실리지 않게
+ * ------------------------------------------------------------ */
+
+export const THREAD_KINDS = Object.freeze(['keep_unresolved', 'loose_end', 'foreshadow']);
+
+/**
+ * 요약 응답 끝의 "CLOSED: o2, o5" 줄을 떼어 낸다.
+ * 요약을 만드는 호출이 그 구간을 통째로 읽으므로, 어떤 떡밥이 풀렸는지도 그때 함께 묻는다
+ * (호출을 따로 쓰지 않는다). 반환: { text: 요약 본문, closed: 닫힌 꼬리표들 }
+ */
+export function splitClosedLine(raw) {
+    const closed = [];
+    const text = String(raw ?? '').replace(/^[ \t]*CLOSED[ \t]*[:：](.*)$/gim, (m, rest) => {
+        for (const tag of String(rest).toLowerCase().match(/\bo\d{1,2}\b/g) || []) if (!closed.includes(tag)) closed.push(tag);
+        return '';
+    }).replace(/\n{3,}/g, '\n\n').trim();
+    return { text, closed };
+}
+
+/**
+ * 오래 손대지 않은 떡밥을 잠재운다 (지우지 않는다 — 서고에 남고, 다시 언급되면 깨어난다).
+ * 사용자가 직접 적은 것과 최우선(P1)은 건드리지 않는다. 반환: 잠재운 개수.
+ */
+export function sleepStaleThreads(locks, turnNow, after = 60) {
+    if (!(after > 0)) return 0;
+    let slept = 0;
+    for (const l of locks || []) {
+        if (l.status !== 'active' || l.manual || !THREAD_KINDS.includes(l.kind) || (l.priority ?? 2) <= 1) continue;
+        if (turnNow - (l.turnIndex || 0) < after) continue;
+        l.status = 'dormant';
+        l.sleptTurn = turnNow;
+        slept++;
+    }
+    return slept;
+}
+
+/**
+ * 이번 턴에 실을 서약 고르기.
+ * 비밀·동의 경계·세계 제약처럼 늘 지켜야 하는 것은 그대로 싣고, 떡밥은 지금 장면과 닿아 있거나
+ * 최근 것이거나 최우선일 때만 싣는다 — 무관한 옛 떡밥이 매 턴 자리를 차지하면 모델이 억지로 꺼낸다.
+ * overlap(a, b): 두 글의 겹침(0~1)
+ */
+export function pickPledges(locks, { turnNow = 0, sceneText = '', overlap = () => 0, cap = 8, threadCap = 4, fresh = 24 } = {}) {
+    const active = (locks || []).filter(l => l.status === 'active').sort((a, b) => (a.priority ?? 2) - (b.priority ?? 2));
+    const standing = active.filter(l => !THREAD_KINDS.includes(l.kind));
+    const threads = active.filter(l => THREAD_KINDS.includes(l.kind)).map((l) => {
+        const age = turnNow - (l.turnIndex || 0);
+        const near = sceneText ? overlap(l.summary, sceneText) : 0;
+        const keep = (l.priority ?? 2) <= 1 || age <= fresh || near >= 0.34;
+        return { l, keep, rank: ((l.priority ?? 2) <= 1 ? 2 : 0) + near * 2 + Math.max(0, 1 - age / 80) };
+    }).filter(x => x.keep).sort((a, b) => b.rank - a.rank).slice(0, threadCap).map(x => x.l);
+    return [...standing, ...threads].sort((a, b) => (a.priority ?? 2) - (b.priority ?? 2)).slice(0, cap);
+}
+
+/** 요약 레코드에서 OPEN 줄을 뗀다 — 옛 요약의 "미해결"은 그 뒤에 풀렸을 수 있고, 지금의 미해결은 서약이 추적한다 */
+export function stripOpenLines(text) {
+    const out = [];
+    let skipping = false;
+    for (const line of String(text ?? '').split('\n')) {
+        if (/^\s*OPEN\s*[:：]/i.test(line)) { skipping = true; continue; }
+        if (skipping && /^\s*(?:WHEN|PLOT|SHIFTS)\s*[:：]/i.test(line)) skipping = false;
+        if (!skipping) out.push(line);
+    }
+    return out.join('\n').trim();
+}

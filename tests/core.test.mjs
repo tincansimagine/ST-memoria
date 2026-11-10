@@ -73,7 +73,7 @@ test('a bond keeps its path, ignores restatements, and steps back when a turn is
     upsert(store, { from: '아리아', to: '여행자', stage: '떠나보내기 싫음', basis: '반지를 받았다', calls: '', unsaid: '가지 말라는 말' }, 5);
     assert.equal(store.bonds.length, 1);
     assert.equal(store.bonds[0].log.at(-1).calls, '손님', 'an omitted address is inherited, not erased');
-    assert.match(line(store.bonds[0]), /아리아 → 여행자: 떠나보내기 싫음 \| shown by: 반지를 받았다 \| calls them: 손님 \| unsaid: 가지 말라는 말 \| path so far: 경계 → 마지못한 신뢰 → now/);
+    assert.match(line(store.bonds[0]), /아리아 → 여행자: 떠나보내기 싫음 \| shown by: 반지를 받았다 \| calls them: 손님 \| unsaid: 가지 말라는 말 \| path: 경계 → 마지못한 신뢰 → now/);
 
     a.removeDerivedForTurn(store, 5);
     assert.equal(store.bonds[0].log.at(-1).stage, '마지못한 신뢰');
@@ -312,4 +312,82 @@ test('reply check keeps only warnings that quote the reply, and drops them when 
     assert.equal(a.run('checkOf')(mes).issues[0].problem, '커피가 콜라로 바뀌었어요');
     mes.mes = '아리아는 따뜻한 커피를 한 모금 마셨다. 창밖으로 눈이 내렸다. 그녀는 말이 없었다.';
     assert.equal(a.run('checkOf')(mes), null, 'an old warning never sticks to edited text');
+});
+
+test('summaries close settled threads in the same call, stale threads go dormant, and old eras fold into one', async () => {
+    const a = await app();
+    const store = a.getStore();
+    const settings = a.getSettings();
+    settings.chunkTurns = 3;
+    settings.consolidateEvery = 0; settings.arcConsolidateEvery = 0;
+    store.turnCounter = 3;
+    store.turns = [1, 2, 3].map(n => ({ id: `t${n}`, mesId: n, mesHash: n, turnIndex: n, summary: `${n}번째 일이 있었다.`, importance: 0.5 }));
+    store.locks.push(
+        { id: 'l1', kind: 'loose_end', summary: '빵집에 들르기로 했다', status: 'active', priority: 3, turnIndex: 1 },
+        { id: 'l2', kind: 'foreshadow', summary: '북문 너머의 불빛', status: 'active', priority: 2, turnIndex: 1 },
+        { id: 'l3', kind: 'keep_unresolved', summary: '직접 적은 떡밥', status: 'active', priority: 2, turnIndex: 1, manual: true },
+        { id: 'l4', kind: 'keep_secret', summary: '아리아만 편지의 발신인을 안다', status: 'active', priority: 1, turnIndex: 1 },
+    );
+    let asked = '';
+    a.context.generateRaw = async ({ prompt, systemPrompt }) => {
+        asked = `${systemPrompt}\n${prompt[0].content}`;
+        return 'PLOT:\n- 빵집에 들러 빵을 샀다.\nOPEN: 북문 너머의 불빛\nCLOSED: o1, o3';
+    };
+    assert.equal(await a.run('maybeSummarizeChunk')(store), 1);
+    assert.match(asked, /THREAD CHECK[\s\S]*\[o1\] 빵집에 들르기로 했다/);
+    assert.doesNotMatch(asked, /아리아만 편지/, 'standing pledges are not offered for closing');
+    assert.doesNotMatch(store.chunkSummaries[0].text, /CLOSED/);
+    assert.equal(store.locks[0].status, 'resolved');
+    assert.equal(store.locks[1].status, 'active');
+    assert.equal(store.locks[2].status, 'active', 'a hand-written thread is only suggested');
+    assert.equal(store.locks[2].suggestResolved, true);
+
+    assert.equal(a.run('sleepStaleThreads')(store.locks, 70, 60), 1);
+    assert.equal(store.locks[1].status, 'dormant');
+    assert.equal(store.locks[3].status, 'active', 'secrets never sleep');
+
+    settings.eraKeep = 3;
+    store.arcSummaries = [1, 2, 3, 4, 5].map(n => ({ id: `a${n}`, fromTurn: n * 10, toTurn: n * 10 + 9, text: `PLOT:\n- ${n}번째 시대` }));
+    a.context.generateRaw = async ({ systemPrompt }) => { assert.match(systemPrompt, /OLDEST records of a long story/); return 'PLOT:\n- 처음 만났다.\n- 약속했다.'; };
+    assert.equal(await a.run('maybeFoldEras')(store), true);
+    assert.equal(store.arcSummaries.length, 2, 'folds a little past the limit so it does not refold every turn');
+    const saga = store.arcSummaries.find(x => x.saga);
+    assert.equal(saga.fromTurn, 10);
+    assert.equal(saga.toTurn, 49);
+    a.context.generateRaw = async () => '';
+    store.arcSummaries.push({ id: 'a6', fromTurn: 60, toTurn: 69, text: 'x' }, { id: 'a7', fromTurn: 70, toTurn: 79, text: 'y' });
+    assert.equal(await a.run('maybeFoldEras')(store), false, 'a failed fold leaves the records untouched');
+    assert.equal(store.arcSummaries.length, 4);
+});
+
+test('the ledger carries only live, relevant threads and items, and keeps OPEN on the newest summary only', async () => {
+    const a = await app();
+    const store = a.getStore();
+    store.turnCounter = 100;
+    a.context.chat.push({ is_user: true, mes: '북문 너머의 불빛이 다시 보인다.', name: '여행자' });
+    store.locks.push(
+        { id: 'old', kind: 'loose_end', summary: '시장에서 사과를 사기로 했다', status: 'active', priority: 3, turnIndex: 10 },
+        { id: 'hit', kind: 'foreshadow', summary: '북문 너머의 불빛', status: 'active', priority: 2, turnIndex: 12 },
+        { id: 'new', kind: 'loose_end', summary: '내일 선장을 만나기로 했다', status: 'active', priority: 2, turnIndex: 95 },
+        { id: 'sec', kind: 'keep_secret', summary: '아리아만 발신인을 안다', status: 'active', priority: 1, turnIndex: 5 },
+        { id: 'zzz', kind: 'loose_end', summary: '잠든 떡밥', status: 'dormant', priority: 2, turnIndex: 5 },
+    );
+    store.items.push(
+        { id: 'i1', name: '낡은 우산', meaning: '첫날 빌린 것', holder: '선장', status: 'kept', firstTurn: 3, updatedTurn: 3 },
+        { id: 'i2', name: '은빛 반지', meaning: '약속의 증표', holder: '아리아', status: 'kept', firstTurn: 90, updatedTurn: 90 },
+        { id: 'i3', name: '깨진 등불', meaning: '', holder: null, status: 'broken', firstTurn: 40, updatedTurn: 40 },
+    );
+    store.chunkSummaries.push(
+        { id: 'c1', fromTurn: 1, toTurn: 8, text: 'PLOT:\n- 처음 만났다.\nOPEN: 옛 미해결' },
+        { id: 'c2', fromTurn: 9, toTurn: 16, text: 'PLOT:\n- 약속했다.\nOPEN: 지금 미해결' },
+    );
+    const packet = (await a.buildPacketWithinBudget('북문 너머의 불빛이 다시 보인다.', null)).text;
+    assert.match(packet, /\[foreshadow\] 북문 너머의 불빛/);
+    assert.match(packet, /내일 선장을 만나기로 했다/);
+    assert.match(packet, /\[keep_secret\] 아리아만 발신인을 안다/);
+    assert.doesNotMatch(packet, /사과를 사기로|잠든 떡밥/);
+    assert.match(packet, /은빛 반지/);
+    assert.doesNotMatch(packet, /낡은 우산|깨진 등불/);
+    assert.match(packet, /OPEN: 지금 미해결/);
+    assert.doesNotMatch(packet, /옛 미해결/);
 });
