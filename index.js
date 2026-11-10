@@ -49,7 +49,7 @@ const INJECT_KEY = 'memoria_ledger';
 const INJECT_KEY_STABLE = 'memoria_archive'; // 고정 장부(안정 구간) — 분할 주입일 때만 쓴다
 const NOW_HEADER = '<memoria_now>';
 const NOW_FOOTER = '</memoria_now>';
-const BUNDLE_META_KEY = 'memoria_bundle';    // 이 채팅에 붙인 설정 묶음 이름 (서고와 따로 — 복원·초기화에 휩쓸리지 않게)
+const BUNDLE_META_KEY = 'memoria_bundle';    // 이 채팅에 붙인 설정 세트 이름 (서고와 따로 — 복원·초기화에 휩쓸리지 않게)
 const PACKET_HEADER = '<memoria_ledger>';
 const PACKET_FOOTER = '</memoria_ledger>';
 const EMB_DIM = 128;
@@ -333,15 +333,15 @@ const DEFAULT_SETTINGS = Object.freeze({
     banTell: false,           // 금지어 목록을 모델에게 직접 알려준다 (모델에 따라 역효과)
     threadSleepTurns: 60,     // 이 턴 수 동안 진전 없는 떡밥은 잠재운다 (서고에는 남고, 다시 언급되면 깨어남. 0 = 끔)
     eraKeep: 8,               // 연대기를 이 개수까지만 따로 두고, 넘치면 가장 오래된 것부터 하나의 '옛 이야기'로 접는다
-    statusMode: 'auto',       // 상태창 기억: 'auto' 자동으로 찾기 | 'custom' 직접 정한 모양 | 'off'
+    statusMode: 'auto',       // 상태창 읽기: 'auto' 자동으로 찾기 | 'custom' 직접 정한 모양 | 'off'
     statusPattern: '',        // 직접 정한 모양(정규식) — 괄호로 묶은 부분을 상태창 내용으로 읽는다
     statusInject: true,       // 가장 최근 상태창을 AI에게 알려 시간·날짜·장소를 잇는다
-    qrMode: 'side',           // QR·슬래시 명령 메시지: 'side' 코멘트와 번외편만 빼기 | 'all' 전부 빼기 | 'keep' 빼지 않기
-    replyCheck: false,        // 답변 점검 — 새 답변이 기록·최근 대화와 어긋나면 ⚠ (답변마다 호출 1회)
-    bundles: {},              // 설정 묶음 { 이름: 값들 }
-    bundleByOwner: {},        // 캐릭터·그룹에 붙인 묶음 { 'char:avatar.png' | 'group:id': 이름 }
-    activeBundle: '',         // 지금 적용 중인 묶음 ('' = 기본 설정)
-    bundleBase: null,         // 묶음이 적용된 동안 맡아 둔 기본 설정
+    qrMode: 'side',           // QR·슬래시 명령 메시지: 'side' 코멘트와 막간만 빼기 | 'all' 전부 빼기 | 'keep' 빼지 않기
+    replyCheck: false,        // 연속성 검사 — 새 답변이 기록·최근 대화와 어긋나면 ⚠ (답변마다 호출 1회)
+    bundles: {},              // 설정 세트 { 이름: 값들 }
+    bundleByOwner: {},        // 캐릭터·그룹에 붙인 세트 { 'char:avatar.png' | 'group:id': 이름 }
+    activeBundle: '',         // 지금 적용 중인 세트 ('' = 기본 설정)
+    bundleBase: null,         // 세트가 적용된 동안 맡아 둔 기본 설정
     noticed: {},              // 한 번만 띄우는 안내를 이미 봤는지
     promptRev: 23,
     settingsRev: 3,
@@ -568,12 +568,12 @@ function getStore() {
 }
 
 /* ============================================================
- * 상태창 기억 · 번외편 — 모델을 부르지 않고 본문에서 읽는다
+ * 상태창 읽기 · 막간 — 모델을 부르지 않고 본문에서 읽는다
  * ============================================================ */
 
 /**
- * 이야기가 아닌 메시지인가 — QR이 롤플을 멈추고 뽑은 퀴즈·인터뷰·운세 같은 번외편, /comment 결과.
- * 기록·회상 질의·답변 점검·상태창에서 모두 뺀다. 사용자가 분류 창에서 정한 값이 자동 판정보다 우선한다.
+ * 이야기가 아닌 메시지인가 — QR이 롤플을 멈추고 뽑은 퀴즈·인터뷰·운세 같은 막간, /comment 결과.
+ * 기록·회상 질의·연속성 검사·상태창에서 모두 뺀다. 사용자가 분류 창에서 정한 값이 자동 판정보다 우선한다.
  */
 function isSideMessage(mes) {
     const mode = getSettings().qrMode || 'side';
@@ -585,10 +585,10 @@ function isSideMessage(mes) {
     return mode === 'all' && (mes.extra?.type === 'narrator' || mes.extra?.model === 'slash command');
 }
 
-// 직전 조용한 생성(/gen)의 지시문 — 그 결과가 /sendas로 채팅에 들어올 때 번외편인지 가린다
+// 직전 조용한 생성(/gen)의 지시문 — 그 결과가 /sendas로 채팅에 들어올 때 막간인지 가린다
 let lastQuietPrompt = null;
 
-/** 새로 들어온 메시지를 번외편/이야기로 표시한다. 번외편이면 true. */
+/** 새로 들어온 메시지를 막간/이야기로 표시한다. 막간이면 true. */
 function tagSideMessage(id, type) {
     const mes = chat[id];
     if (!mes || mes.is_user || (getSettings().qrMode || 'side') === 'keep') return false;
@@ -614,7 +614,7 @@ function tagSideMessage(id, type) {
     if (side === null) return false;
     mes.extra.memoria_side = side;
     getContext().saveChatDebounced?.();
-    if (side) logActivity('side', `#${id}은 롤플을 멈추고 만든 번외편이라 기억에 넣지 않아요`);
+    if (side) logActivity('side', `#${id}은 롤플을 멈추고 만든 막간이라 기억에 넣지 않아요`);
     return side;
 }
 
@@ -670,7 +670,7 @@ function jumpToMessage(mesId) {
 }
 
 /* ============================================================
- * 답변 점검 — 새 답변이 기록·최근 대화와 어긋나는지
+ * 연속성 검사 — 새 답변이 기록·최근 대화와 어긋나는지
  * ============================================================ */
 
 const REPLY_CHECK_PROMPT = `You check one new reply of an ongoing roleplay for continuity, against the story's archive and the messages just before it. You never rewrite the reply.
@@ -733,7 +733,7 @@ async function checkReply(mesId) {
     const settings = getSettings();
     if (!settings.enabled || !settings.replyCheck) return;
     const chatId = getCurrentChatId();
-    await waitForChatIdle('답변 점검');
+    await waitForChatIdle('연속성 검사');
     const mes = chat[mesId];
     if (getCurrentChatId() !== chatId || !mes || mes.is_user || mes.is_system || isSideMessage(mes)) return;
     const reply = visibleProse(mes.mes || '');
@@ -755,14 +755,14 @@ async function checkReply(mesId) {
         .split('\n').filter(l => l !== PACKET_HEADER && l !== PACKET_FOOTER).slice(packetGuidance(parts).length).join('\n');
     const context = `<archive>\n${archive}\n</archive>\n\n<recent_messages>\n${recent.join('\n\n')}\n</recent_messages>`;
     const userPrompt = `${context}\n\n<new_reply number="#${mesId}" by="${mes.name || name2 || 'Character'}">\n${reply.slice(0, 8000)}\n</new_reply>`;
-    updateStatusUI('답변 점검 중…');
+    updateStatusUI('연속성 검사 중…');
     let result = null;
     try {
         const { value, timedOut } = await withDeadline(callAuxLLM(REPLY_CHECK_PROMPT, userPrompt, { maxTokens: auxTokens(1500) }), 120000, null);
-        if (timedOut) logActivity('error', `#${mesId} 답변 점검이 2분 안에 끝나지 않아 건너뛰었어요`);
+        if (timedOut) logActivity('error', `#${mesId} 연속성 검사이 2분 안에 끝나지 않아 건너뛰었어요`);
         else result = parseJsonLoose(value);
     } catch (e) {
-        logActivity('error', `#${mesId} 답변 점검 실패: ${e?.message || e}`);
+        logActivity('error', `#${mesId} 연속성 검사 실패: ${e?.message || e}`);
     } finally {
         updateStatusUI();
     }
@@ -783,15 +783,15 @@ async function checkReply(mesId) {
 
 /** 점검은 기록과 같은 줄에 세운다 — 보조 모델을 동시에 두 번 부르지 않는다 */
 function queueCheck(mesId) {
-    commitQueue = commitQueue.then(() => checkReply(mesId)).catch(e => console.error(`[${MODULE_NAME}] 답변 점검 오류:`, e));
+    commitQueue = commitQueue.then(() => checkReply(mesId)).catch(e => console.error(`[${MODULE_NAME}] 연속성 검사 오류:`, e));
     return commitQueue;
 }
 
 /* ============================================================
- * 활동 기록 · 답변 속도 (대기 상한과 양보)
+ * 사서 일지 · 답변 속도 (대기 상한과 양보)
  * ============================================================ */
 
-// 저절로 일어난 일은 알림을 띄우지 않고 여기에 남긴다 — 도구 탭의 "활동 기록"에서 본다
+// 저절로 일어난 일은 알림을 띄우지 않고 여기에 남긴다 — 도구 탭의 "사서 일지"에서 본다
 const activityLog = createActivityLog(120);
 
 function logActivity(kind, text) {
@@ -2858,7 +2858,7 @@ async function commitTurn(mesId, { silent = true, force = false, retry = 1 } = {
     if (!assistantMes || assistantMes.is_user) return false;
     // 숨김(is_system) 메시지는 기본적으로 건너뛰되, 자동 숨김으로 가려진 기존 턴의 재기록(force)은 허용
     if (assistantMes.is_system && !force) return false;
-    if (isSideMessage(assistantMes)) return false; // 번외편은 이야기가 아니다
+    if (isSideMessage(assistantMes)) return false; // 막간은 이야기가 아니다
 
     const userMes = findPrecedingUserMessage(mesId);
     // 사서에게는 화면에 보이는 이야기만 보여준다 — 다른 확장의 숨은 패킷·상태창 잔해 차단
@@ -4321,7 +4321,7 @@ async function buildPacketSections(query, supervisorPlan) {
         { turnNow: store.turnCounter, sceneText: threadScene, overlap: textOverlap });
     const rules = store.worldRules.slice(-8);
     const scene = getSceneSnapshot(store);
-    // 가장 최근 상태창 — 옛 답변이 숨겨지거나 번외편이 끼어도 시간·날짜·장소가 이어지게.
+    // 가장 최근 상태창 — 옛 답변이 숨겨지거나 막간이 끼어도 시간·날짜·장소가 이어지게.
     // 다시 생성하는 중이면 지금 다시 쓰는 답변의 상태창은 빼고 그 앞의 것을 알려준다.
     if (settings.statusInject !== false) {
         const rewriting = chatGenerating && ['regenerate', 'swipe'].includes(lastGenerationType);
@@ -6827,7 +6827,7 @@ function bindStoryView() {
     });
 }
 
-/** QR·슬래시 명령으로 들어온 메시지를 번외편/이야기로 직접 고른다 */
+/** QR·슬래시 명령으로 들어온 메시지를 막간/이야기로 직접 고른다 */
 async function openSideSorter() {
     const ctx = getContext();
     const found = [];
@@ -6841,13 +6841,13 @@ async function openSideSorter() {
     });
     if (!found.length) return toastr.info('슬래시 명령으로 들어온 메시지가 없습니다.', 'Memoria');
     const $dlg = $(`<div class="memoria__repeat-dialog">
-        <h3>QR 분류</h3>
-        <p class="memoria__hint">번외편은 기억·회상·점검에서 빠집니다. 흐리게 보이는 줄은 아직 고르지 않은 추정입니다.</p>
+        <h3>막간 분류</h3>
+        <p class="memoria__hint">막간은 기억·회상·점검에서 빠집니다. 흐리게 보이는 줄은 아직 고르지 않은 추정입니다.</p>
         <div class="memoria__row-list">${found.map(f => `
             <div class="memoria__row${f.guess ? ' is-guess' : ''}" data-i="${f.i}">
                 <button type="button" class="mmv-jump" data-mes="${f.i}">#${f.i}</button>
                 <span class="memoria__row-text"><b>${escapeHtml(f.m.name || '')}</b> ${escapeHtml(cleanStr(visibleProse(f.m.mes), 90))}</span>
-                <select><option value="story"${f.side ? '' : ' selected'}>이야기</option><option value="side"${f.side ? ' selected' : ''}>번외편</option></select>
+                <select><option value="story"${f.side ? '' : ' selected'}>이야기</option><option value="side"${f.side ? ' selected' : ''}>막간</option></select>
             </div>`).join('')}</div>
     </div>`);
     $dlg.on('click', '.mmv-jump', function () { jumpToMessage(Number($(this).data('mes'))); });
@@ -6864,14 +6864,14 @@ async function openSideSorter() {
         if (typeof m.extra !== 'object' || !m.extra) m.extra = {};
         m.extra.memoria_side = side;
         if (m.is_user || side === was) return;
-        if (side) { invalidateTurnByMesId(i); toSide++; } // 이미 기록된 번외편은 그 턴의 기억째로 걷어낸다
+        if (side) { invalidateTurnByMesId(i); toSide++; } // 이미 기록된 막간은 그 턴의 기억째로 걷어낸다
         else if (getSettings().autoRecord && isSettledForRecord(i)) { queueCommit(i); toStory++; }
     });
     ctx.saveChatDebounced?.();
     reconcileWithChat();
     renderAllPanels();
     updateInjection({ quiet: true });
-    toastr.success(`분류를 저장했습니다.${toSide ? ` 번외편 ${toSide}개를 기억에서 뺐어요.` : ''}${toStory ? ` 이야기 ${toStory}개를 기록합니다.` : ''}`, 'Memoria');
+    toastr.success(`분류를 저장했습니다.${toSide ? ` 막간 ${toSide}개를 기억에서 뺐어요.` : ''}${toStory ? ` 이야기 ${toStory}개를 기록합니다.` : ''}`, 'Memoria');
 }
 
 function renderPerspectiveHelp() {
@@ -7048,10 +7048,10 @@ function liveLibraryArchive(target) {
 }
 
 /* ============================================================
- * 설정 묶음 — 봇·채팅마다 다른 설정
+ * 설정 세트 — 봇·채팅마다 다른 설정
  * ============================================================ */
 
-/** 묶음을 붙일 대상 — 지금 캐릭터(아바타 파일명 기준) 또는 그룹 */
+/** 세트를 붙일 대상 — 지금 캐릭터(아바타 파일명 기준) 또는 그룹 */
 function bundleOwner() {
     if (selected_group) return { key: `group:${selected_group}`, label: '이 그룹' };
     const ctx = getContext();
@@ -7059,7 +7059,7 @@ function bundleOwner() {
     return ch?.avatar ? { key: `char:${ch.avatar}`, label: `이 캐릭터 (${ch.name || name2 || ''})` } : { key: '', label: '이 캐릭터' };
 }
 
-/** 지금 채팅에 맞는 묶음으로 설정을 갈아 끼운다. 바뀌었으면 true. */
+/** 지금 채팅에 맞는 세트로 설정을 갈아 끼운다. 바뀌었으면 true. */
 function applyBundleForChat() {
     const settings = getSettings();
     const name = getCurrentChatId()
@@ -7069,7 +7069,7 @@ function applyBundleForChat() {
     saveSettingsDebounced();
     stableFreeze = null;
     lastBuildKey = '';
-    logActivity('bundle', name ? `설정 묶음 "${name}"을(를) 적용했어요` : '기본 설정으로 돌아왔어요');
+    logActivity('bundle', name ? `설정 세트 "${name}"을(를) 적용했어요` : '기본 설정으로 돌아왔어요');
     return true;
 }
 
@@ -7084,8 +7084,8 @@ function renderBundleBar() {
         where = chat_metadata[BUNDLE_META_KEY] === active ? '이 채팅에 붙음' : `${bundleOwner().label}에 붙음`;
     }
     $('#memoria_bundle_state').html(active
-        ? `<b>${escapeHtml(active)}</b> <small>${escapeHtml(where)} · 지금 바꾸는 설정은 이 묶음에 저장됩니다</small>`
-        : '<b>기본 설정</b> <small>묶음을 만들어 봇·채팅마다 다른 설정을 쓸 수 있어요</small>');
+        ? `<b>${escapeHtml(active)}</b> <small>${escapeHtml(where)} · 지금 바꾸는 설정은 이 세트에 저장됩니다</small>`
+        : '<b>기본 설정</b> <small>세트를 만들어 봇·채팅마다 다른 설정을 쓸 수 있어요</small>');
 }
 
 async function openBundleManager() {
@@ -7110,7 +7110,7 @@ async function openBundleManager() {
         const options = (selected) => ['<option value="">없음</option>', ...names.map(n => `<option value="${escapeHtml(n)}"${n === selected ? ' selected' : ''}>${escapeHtml(n)}</option>`)].join('');
         const useCount = (n) => Object.values(settings.bundleByOwner || {}).filter(v => v === n).length;
         $dlg.html(`
-            <h3>설정 묶음</h3>
+            <h3>설정 세트</h3>
             <p class="memoria__hint">봇마다 다른 설정을 이름 붙여 저장하고, 채팅이나 캐릭터에 붙여 두면 그 채팅을 열 때 알아서 바뀝니다. 먼저 보는 순서: <b>이 채팅 → 이 캐릭터 → 기본 설정</b>.</p>
             <div class="memoria__field-grid">
                 <div class="memoria__field"><label>이 채팅</label><select class="memoria-bundle-chat"${chatOpen ? '' : ' disabled'}>${options(String(chat_metadata[BUNDLE_META_KEY] || ''))}</select></div>
@@ -7123,12 +7123,12 @@ async function openBundleManager() {
                     <i class="fa-solid fa-pen memoria-bundle-rename" title="이름 바꾸기"></i>
                     <i class="fa-solid fa-file-export memoria-bundle-export" title="파일로 내보내기"></i>
                     <i class="fa-solid fa-trash memoria-bundle-delete" title="삭제"></i>
-                </div>`).join('') : '<div class="memoria__empty">아직 묶음이 없습니다. 설정을 원하는 대로 바꾼 뒤 아래 버튼으로 저장하세요.</div>'}</div>
+                </div>`).join('') : '<div class="memoria__empty">아직 세트가 없습니다. 설정을 원하는 대로 바꾼 뒤 아래 버튼으로 저장하세요.</div>'}</div>
             <div class="memoria__button-row">
-                <div class="menu_button memoria-bundle-new" title="지금 설정을 새 묶음으로 저장"><i class="fa-solid fa-plus"></i><span>새 묶음</span></div>
-                <div class="menu_button memoria-bundle-import" title="묶음 파일 가져오기"><i class="fa-solid fa-file-import"></i><span>가져오기</span></div>
+                <div class="menu_button memoria-bundle-new" title="지금 설정을 새 세트로 저장"><i class="fa-solid fa-plus"></i><span>새 세트</span></div>
+                <div class="menu_button memoria-bundle-import" title="세트 파일 가져오기"><i class="fa-solid fa-file-import"></i><span>가져오기</span></div>
             </div>
-            <p class="memoria__hint">묶음에 들어가지 않는 것: Memoria 켜기/끄기, 커스텀 API(키 포함)·임베딩 설정, 프롬프트, 계정 공통 기억·서술 방식. 묶음이 적용된 채팅에서 설정을 바꾸면 기본 설정이 아니라 그 묶음이 바뀝니다.</p>
+            <p class="memoria__hint">세트에 들어가지 않는 것: Memoria 켜기/끄기, 커스텀 API(키 포함)·임베딩 설정, 프롬프트, 계정 공통 기억·서술 방식. 세트가 적용된 채팅에서 설정을 바꾸면 기본 설정이 아니라 그 세트가 바뀝니다.</p>
         `);
     };
     $dlg.on('change', '.memoria-bundle-chat', function () {
@@ -7147,17 +7147,17 @@ async function openBundleManager() {
     });
     const rowName = (el) => String($(el).closest('.memoria__row').data('name') ?? '');
     $dlg.on('click', '.memoria-bundle-new', async () => {
-        const name = await askName('새 묶음 이름 (예: 시뮬봇, 1인봇)');
+        const name = await askName('새 세트 이름 (예: 시뮬봇, 1인봇)');
         if (!name) return;
-        if (settings.bundles[name] && !await ctx.callGenericPopup(`"${name}" 묶음이 이미 있습니다. 지금 설정으로 덮어쓸까요?`, ctx.POPUP_TYPE.CONFIRM)) return;
+        if (settings.bundles[name] && !await ctx.callGenericPopup(`"${name}" 세트가 이미 있습니다. 지금 설정으로 덮어쓸까요?`, ctx.POPUP_TYPE.CONFIRM)) return;
         saveBundle(settings, name, DEFAULT_SETTINGS);
         saveSettingsDebounced();
-        toastr.success(`"${name}" 묶음을 저장했습니다. 위에서 채팅이나 캐릭터에 붙이면 적용됩니다.`, 'Memoria');
+        toastr.success(`"${name}" 세트를 저장했습니다. 위에서 채팅이나 캐릭터에 붙이면 적용됩니다.`, 'Memoria');
         refreshAll();
     });
     $dlg.on('click', '.memoria-bundle-save', async function () {
         const name = rowName(this);
-        if (!await ctx.callGenericPopup(`"${name}" 묶음을 지금 설정으로 덮어쓸까요?`, ctx.POPUP_TYPE.CONFIRM)) return;
+        if (!await ctx.callGenericPopup(`"${name}" 세트를 지금 설정으로 덮어쓸까요?`, ctx.POPUP_TYPE.CONFIRM)) return;
         saveBundle(settings, name, DEFAULT_SETTINGS);
         saveSettingsDebounced();
         refreshAll();
@@ -7166,7 +7166,7 @@ async function openBundleManager() {
         const from = rowName(this);
         const to = await askName('새 이름', from);
         if (!to || to === from) return;
-        if (!renameBundle(settings, from, to)) return toastr.warning('같은 이름의 묶음이 이미 있습니다.', 'Memoria');
+        if (!renameBundle(settings, from, to)) return toastr.warning('같은 이름의 세트가 이미 있습니다.', 'Memoria');
         if (chat_metadata[BUNDLE_META_KEY] === from) { chat_metadata[BUNDLE_META_KEY] = to; saveMetadataDebounced(); }
         saveSettingsDebounced();
         refreshAll();
@@ -7178,7 +7178,7 @@ async function openBundleManager() {
     });
     $dlg.on('click', '.memoria-bundle-delete', async function () {
         const name = rowName(this);
-        if (!await confirmDelete(`묶음 "${name}"`)) return;
+        if (!await confirmDelete(`세트 "${name}"`)) return;
         deleteBundle(settings, name, DEFAULT_SETTINGS);
         saveSettingsDebounced();
         refreshAll();
@@ -7189,12 +7189,12 @@ async function openBundleManager() {
             const file = this.files?.[0];
             if (!file) return;
             const parsed = parseBundleFile(await getFileText(file), DEFAULT_SETTINGS);
-            if (!parsed) return toastr.error('Memoria 설정 묶음 파일이 아닙니다.', 'Memoria');
+            if (!parsed) return toastr.error('Memoria 설정 세트 파일이 아닙니다.', 'Memoria');
             let name = parsed.name;
             for (let n = 2; settings.bundles[name]; n++) name = `${parsed.name} (${n})`;
             settings.bundles[name] = parsed.values;
             saveSettingsDebounced();
-            toastr.success(`"${name}" 묶음을 가져왔습니다.`, 'Memoria');
+            toastr.success(`"${name}" 세트를 가져왔습니다.`, 'Memoria');
             refreshAll();
         });
         $file.trigger('click');
@@ -7224,7 +7224,7 @@ async function openRepeatFinder() {
     const found = findRepeatedPhrases(replies, { names }).filter(f => !already.has(f.phrase.toLowerCase()));
     if (!found.length) return toastr.info(`최근 답변 ${replies.length}개에서 되풀이된 표현을 찾지 못했습니다.`, 'Memoria');
     const $dlg = $(`<div class="memoria__repeat-dialog">
-        <h3>반복 표현 찾기</h3>
+        <h3>말버릇 찾기</h3>
         <p class="memoria__hint">최근 AI 답변 ${replies.length}개에서 여러 답변에 나온 표현입니다. 체크한 표현을 금지어에 넣습니다. <b>캐릭터 고유의 말투는 체크하지 마세요</b> — 대사 샘플과 회상에서도 빠집니다.</p>
         <div class="memoria__row-list">${found.map((f, i) => `
             <label class="memoria__row"><input type="checkbox" data-i="${i}"><span class="memoria__row-text">${escapeHtml(f.phrase)}</span><small>답변 ${f.count}개</small></label>`).join('')}</div>
@@ -7281,7 +7281,7 @@ function bindSettingsSearch() {
         $panel.find('.memoria__section').removeClass('memoria--search-hide');
         if (!q) return;
         $items.each(function () {
-            // 묶음 안에 든 항목은 안쪽 항목이 스스로 판정한다
+            // 세트 안에 든 항목은 안쪽 항목이 스스로 판정한다
             if ($(this).is('.memoria__perspective, details, .memoria__setting-block') && $(this).find('.memoria__toggle-row, .memoria__field').length) return;
             const hay = `${$(this).text()} ${$(this).find('[title]').addBack('[title]').map(function () { return $(this).attr('title'); }).get().join(' ')}`.toLowerCase();
             if (!hay.includes(q)) $(this).addClass('memoria--search-hide');
@@ -8633,7 +8633,7 @@ function bindEvents() {
         const id = Number(mesId);
         const mes = chat[id];
         if (!mes || mes.is_user || mes.is_system) return;
-        if (tagSideMessage(id, type) || isSideMessage(mes)) return; // 번외편은 기록도 점검도 하지 않는다
+        if (tagSideMessage(id, type) || isSideMessage(mes)) return; // 막간은 기록도 점검도 하지 않는다
         auditRecallEcho(mes); // 직전 주입 기억의 반영 여부 채점 (기록보다 먼저, 원본 감사표 기준)
         if (settings.replyCheck && type !== 'first_message' && type !== 'command') queueCheck(id);
         if (type !== 'first_message' && requiredStepsFor(id) === 0) {
@@ -8712,7 +8712,7 @@ function bindEvents() {
         localSyncedChat = null;
         resetEditorChat();
         $('#memoria_editor_log').empty();
-        applyBundleForChat(); // 이 채팅·캐릭터에 붙은 설정 묶음으로 갈아 끼운다
+        applyBundleForChat(); // 이 채팅·캐릭터에 붙은 설정 세트로 갈아 끼운다
         getStore();
         reconcileWithChat();
         renderAllPanels();
