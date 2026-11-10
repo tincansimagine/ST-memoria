@@ -24,3 +24,6 @@
     overflow-y: auto;
 }
 .fixture-dialog footer { flex-shrink: 0; }
+
+/* SillyTavern's own default: buttons shrink to their narrowest content unless the extension says otherwise */
+.menu_button { width: min-content; padding: 3px 5px; overflow-wrap: anywhere; word-break: break-all; }
