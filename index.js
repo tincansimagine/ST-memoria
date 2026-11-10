@@ -6753,8 +6753,8 @@ function renderSummariesPanel() {
     renderStoryView();
 }
 
-/** 고른 보기를 그린다. keep: 다시 그린 뒤 커서를 돌려놓을 입력칸 */
-function renderStoryView(keep = '') {
+/** 고른 보기를 그린다. resultsOnly: 도구 줄(검색칸)은 그대로 두고 결과만 다시 그린다 */
+function renderStoryView(resultsOnly = false) {
     const store = getStore();
     const $view = $('#memoria_story_view');
     if (!$view.length) return;
@@ -6768,6 +6768,7 @@ function renderStoryView(keep = '') {
             : '<button type="button" class="mmv-export" data-kind="md" title="마크다운 표 복사">MD</button><button type="button" class="mmv-export" data-kind="csv" title="CSV 저장">CSV</button>'}
     </div>`;
     let html = '';
+    let results = '';
     if (v.tab === 'flow') {
         const all = [
             ...store.arcSummaries.map(s => ({ ...s, level: 'arc' })),
@@ -6780,8 +6781,9 @@ function renderStoryView(keep = '') {
     } else if (v.tab === 'line') {
         const shown = new Set(filterTimelineRows(rows, v).map(r => r.id));
         const dim = new Set(rows.filter(r => !shown.has(r.id)).map(r => r.id));
+        results = railHtml(layoutTimelineGraph(rows, { by: v.by, maxLanes: 4 }), { dim, open: v.open });
         html = rows.length
-            ? `${tools()}${railHtml(layoutTimelineGraph(rows, { by: v.by, maxLanes: 4 }), { dim, open: v.open })}`
+            ? `${tools()}<div class="mmv-results">${results}</div>`
             : '<div class="memoria__empty">아직 그릴 사건이 없습니다. 턴이 기록되면 채워집니다.</div>';
     } else if (v.tab === 'bonds') {
         const bonds = bondViewRows(store);
@@ -6791,13 +6793,16 @@ function renderStoryView(keep = '') {
             : '<div class="memoria__empty">관계선이 아직 없습니다. 관계가 움직이는 장면이 나오면 그려집니다.</div>';
     } else {
         const history = statusHistory();
-        html = `${tools()}${tableHtml(filterTimelineRows(rows, v), v)}${history.length ? `<details class="memoria__details"><summary>상태창 기록 ${history.length}</summary>${statusListHtml(history)}</details>` : ''}`;
+        results = `${tableHtml(filterTimelineRows(rows, v), v)}${history.length ? `<details class="memoria__details"><summary>상태창 기록 ${history.length}</summary>${statusListHtml(history)}</details>` : ''}`;
+        html = `${tools()}<div class="mmv-results">${results}</div>`;
     }
+    // 검색어를 치는 중에는 결과만 갈아 끼운다. 입력칸까지 새로 그리면 한글 조합이 끊겨
+    // "윤해준"이 "ㅇㅠㄴㅎㅐ…"로 풀린다.
+    // 뒤에서 기록이 끝나 화면을 통째로 다시 그릴 때도, 검색칸에 글을 쓰는 중이면 결과만 바꾼다
+    if (!resultsOnly && $view.attr('data-view') === v.tab && $view.find('.mmv-query').is(':focus')) resultsOnly = true;
+    const $results = resultsOnly ? $view.find('.mmv-results') : $();
+    if ($results.length) { $results.html(results); return; }
     $view.attr('data-view', v.tab).html(html);
-    if (keep) {
-        const el = $view.find(keep)[0];
-        if (el) { el.focus(); if (el.setSelectionRange) el.setSelectionRange(el.value.length, el.value.length); }
-    }
 }
 
 /** 세계 탭의 작은 관계도 */
@@ -6816,7 +6821,7 @@ function bindStoryView() {
         $(this).addClass('is-active');
         renderStoryView();
     });
-    $root.on('input', '#memoria_story_view .mmv-query', function () { storyView.query = String($(this).val() || ''); renderStoryView('.mmv-query'); });
+    $root.on('input', '#memoria_story_view .mmv-query', function () { storyView.query = String($(this).val() || ''); renderStoryView(true); });
     $root.on('change', '#memoria_story_view .mmv-stars-min', function () { storyView.minStars = Number($(this).val()) || 0; renderStoryView(); });
     $root.on('click', '#memoria_story_view .mmv-seg button', function () { storyView.by = String($(this).data('by')); renderStoryView(); });
     $root.on('click keydown', '#memoria_story_view .mmv-stop', function (e) {
