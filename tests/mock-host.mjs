@@ -40,9 +40,13 @@ for (let i = 0; i < 18; i++) {
     chat.push({ is_user: true, mes: i === 17 ? '아리아, 등대에서 받은 은빛 반지 기억나?' : `아리아, ${subjects[i]} 이야기를 해줘.`, name: name1 });
     chat.push({ is_user: false, mes: `아리아는 ${subjects[i]}에 관해 이야기했다. "다시 돌아오겠다고 약속했잖아요." 여행의 기록에 남길 만한 순간이었다.`, name: name2 });
 }
-const turns = subjects.map((s, i) => ({ id: `turn${i}`, mesId: i * 2 + 1, turnIndex: i + 1, mesHash: getStringHash(chat[i * 2 + 1].mes) >>> 0, summary: `아리아와 여행자는 ${s}에 관해 대화했다.`, elapsedDays: 0.1 }));
+const places = ['항구', '항구', '등대', '등대', '서쪽 숲', '서쪽 숲', '북문', '도서관', '기차역', '등대', '정원', '정원', '마을 광장', '마을 광장', '해안', '해안', '산장', '등대'];
+const weights = [0.5, 0.9, 0.4, 0.3, 0.6, 0.8, 0.3, 0.7, 0.4, 0.35, 0.5, 0.3, 0.6, 0.45, 0.85, 0.5, 0.4, 0.95];
+for (let i = 0; i < 18; i += 3) chat[i * 2 + 1].mes = `[ ${i % 2 ? '오후 8:15' : '오전 7:30'} · ${Math.floor(i / 6) + 1}일째 · ${places[i]} · ${i % 2 ? '눈발, -1°C' : '맑음, 4°C'} ]\n\n${chat[i * 2 + 1].mes}`;
+const turns = subjects.map((s, i) => ({ id: `turn${i}`, mesId: i * 2 + 1, turnIndex: i + 1, mesHash: getStringHash(chat[i * 2 + 1].mes) >>> 0, summary: `아리아와 여행자는 ${s}에 관해 대화했다.`, elapsedDays: 0.1,
+    importance: weights[i], when: `${Math.floor(i / 6) + 1}일째 ${['아침', '낮', '저녁', '밤', '새벽', '오후'][i % 6]}`, where: places[i] }));
 const memories = subjects.map((s, i) => ({ id: `memory${i}`, kind: i % 2 ? 'promise' : 'event', summary: `아리아와 여행자는 ${s}을 기억한다.`, mesId: i * 2 + 1, turnIndex: i + 1,
-    entities: [name2], tags: i < 2 ? ['은빛반지', '재회'] : [`여행${i}`], hints: [], visibility: 'public', owner: null, importance: 0.6, pinned: false }));
+    entities: i % 5 === 0 ? [name2, name1, '보라'] : i % 3 === 0 ? [name2, '선장'] : [name2, name1], tags: i < 2 ? ['은빛반지', '재회'] : [`여행${i}`], hints: [], visibility: 'public', owner: null, importance: weights[i], pinned: false }));
 memories.push({ id: 'private-memory', kind: 'secret', summary: '아리아만 편지의 발신인이 보라라는 사실을 안다.', mesId: 11, turnIndex: 6, entities: [name2], tags: ['편지'], visibility: 'secret', owner: name2, pinned: true, importance: 0.8 });
 memories.push({ id: 'player-memory', kind: 'impression', summary: '여행자는 돌아갈 고향을 그리워하면서도 아리아에게 말하지 않았다.', mesId: 11, turnIndex: 6, entities: [name1], tags: ['고향'], visibility: 'private', owner: name1, pinned: true, importance: 0.8 });
 memories.push({ id: 'bora-memory', kind: 'secret', summary: '보라만 등대 창고의 열쇠가 어디에 있는지 안다.', mesId: 13, turnIndex: 7, entities: ['보라'], tags: ['열쇠'], visibility: 'secret', owner: '보라', pinned: true, importance: 0.8 });
@@ -58,9 +62,13 @@ export const chat_metadata = { memoria: { version: 1, lexiconRev: 5, turnCounter
     bonds: [{ id: 'bond1', from: name2, to: name1, manual: false, disabled: false, log: [
         { turn: 1, stage: '경계하는 낯선 손님', basis: '등대 문을 반만 열고 이름을 물었다', calls: '손님', unsaid: '' },
         { turn: 8, stage: '마지못한 신뢰', basis: '창고 열쇠를 맡겼다', calls: '여행자 씨, 존댓말', unsaid: '' },
-        { turn: 16, stage: '떠나보내기 싫은 사람', basis: '반지를 받고 한참 말이 없었다', calls: '여행자 씨, 존댓말', unsaid: '가지 말라는 말' }] }],
-    chunkSummaries: [{ id: 'chapter', fromTurn: 1, toTurn: 8, text: '여행자는 아리아를 만나 함께 해안을 걸었다. 등대에서 반지를 건네며 돌아오겠다고 약속했다.' }],
-    arcSummaries: [], milestones: [], items: [], dossier: [] } };
+        { turn: 16, stage: '떠나보내기 싫은 사람', basis: '반지를 받고 한참 말이 없었다', calls: '여행자 씨, 존댓말', unsaid: '가지 말라는 말' }] },
+        { id: 'bond2', from: name1, to: name2, manual: false, disabled: false, log: [{ turn: 2, stage: '호기심', basis: '등대에 다시 찾아갔다', calls: '아리아 씨', unsaid: '' }, { turn: 16, stage: '돌아오고 싶은 곳', basis: '반지를 건넸다', calls: '아리아', unsaid: '' }] },
+        { id: 'bond3', from: name2, to: '보라', manual: false, disabled: false, log: [{ turn: 6, stage: '멀어진 옛 동료', basis: '편지를 뜯지 않고 서랍에 넣었다', calls: '보라', unsaid: '왜 떠났는지' }] },
+        { id: 'bond4', from: '보라', to: name1, manual: false, disabled: false, log: [{ turn: 12, stage: '경계', basis: '이름을 묻지 않았다', calls: '', unsaid: '' }] }],
+    chunkSummaries: [{ id: 'chapter', fromTurn: 1, toTurn: 8, text: '여행자는 아리아를 만나 함께 해안을 걸었다. 등대에서 반지를 건네며 돌아오겠다고 약속했다.' },
+        { id: 'chapter2', fromTurn: 9, toTurn: 16, text: 'WHEN: 2일째 낮 ~ 3일째 새벽 · 기차역, 정원, 해안\nPLOT:\n- 여행자가 새벽 기차표를 끊었지만 타지 않았다.\n- 아리아가 정원 우물에서 낡은 나침반을 건져 건넸다. "길 잃지 말라고요."\n- 해안에서 일출을 보며 여행자가 은빛 반지를 건넸다.\nSHIFTS: 아리아 → 여행자: 떠나보내기 싫은 사람 · 나침반은 여행자에게\nOPEN: 보라에게 전할 편지 · 닫힌 북문 너머' }],
+    arcSummaries: [], milestones: [{ id: 'ms1', title: '등대의 약속', summary: '돌아오겠다고 약속했다', participants: [name2, name1], grade: 'major', turnIndex: 2 }, { id: 'ms2', title: '은빛 반지', summary: '해안에서 반지를 건넸다', participants: [name2, name1], grade: 'major', turnIndex: 15 }], items: [], dossier: [] } };
 
 const fixtureStorage = new Map();
 if (largeLibrary) fixtureStorage.set('memoria.libraryIndex.v1', JSON.stringify(largeLibrarySnapshot()));

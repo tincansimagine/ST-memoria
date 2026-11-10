@@ -3,6 +3,8 @@ import { readFile } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import * as engine from '../archive-engine.mjs';
 import * as craft from '../craft-engine.mjs';
+import * as scene from '../scene-engine.mjs';
+import * as view from '../story-view.mjs';
 
 export async function runtime() {
     const raw = await readFile(new URL('../index.js', import.meta.url), 'utf8');
@@ -11,7 +13,7 @@ export async function runtime() {
     const prompts = [];
     const fakeElement = new Proxy({ length: 0 }, { get: (obj, key) => key in obj ? obj[key] : () => fakeElement });
     const context = vm.createContext({
-        ...engine, ...craft, console, structuredClone, TextEncoder, TextDecoder, Uint8Array, Float32Array, Map, Set,
+        ...engine, ...craft, ...scene, ...view, console, structuredClone, TextEncoder, TextDecoder, Uint8Array, Float32Array, Map, Set,
         btoa, atob, AbortController, URL, setTimeout, clearTimeout,
         chat: [], chat_metadata: {}, extension_settings: {}, name1: '여행자', name2: '아리아', selected_group: null,
         characters: [], power_user: {}, oai_settings: {},
