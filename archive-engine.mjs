@@ -111,7 +111,7 @@ export function validateArchive(value) {
         }
         if (shelf === 'characters') for (const key of ['lines', 'growth']) {
             if (row[key] != null && (!Array.isArray(row[key]) || row[key].some(x => !x || typeof x.text !== 'string'))) {
-                throw new Error('인물의 대사 샘플·변화 기록 형식이 올바르지 않습니다.');
+                throw new Error('인물의 남긴 말·변화 기록 형식이 올바르지 않습니다.');
             }
         }
         if (shelf === 'bonds' && (typeof row.from !== 'string' || typeof row.to !== 'string' || !Array.isArray(row.log)
@@ -160,8 +160,8 @@ export function archiveChanges(before, after) {
     const describe = (shelf, item) => {
         switch (shelf) {
             case 'characters': return [item.name, ...['role', 'age', 'occupation', 'appearance', 'voice'].map((key, i) => item[key] ? `${['역할', '나이', '직업', '외모', '말투'][i]}: ${item[key]}` : ''),
-                item.core ? `핵심 캐해: ${item.core}` : '', (item.growth || []).length ? `이야기 속 변화: ${item.growth.map(g => g.text).join(' / ')}` : '',
-                (item.lines || []).length ? `대사 샘플: ${item.lines.map(l => l.text).join(' / ')}` : '',
+                item.core ? `바탕: ${item.core}` : '', (item.growth || []).length ? `달라진 점: ${item.growth.map(g => g.text).join(' / ')}` : '',
+                (item.lines || []).length ? `남긴 말: ${item.lines.map(l => l.text).join(' / ')}` : '',
                 `별칭: ${(item.aliases || []).join(', ')}`, `특성: ${(item.traits || []).join(', ')}`,
                 `관계: ${(item.relationships || []).map(r => `${r.target} — ${r.relation}`).join(', ')}`, `고정: ${!!item.locked} · 비활성: ${!!item.disabled}`].filter(Boolean).join('\n');
             case 'bonds': { const now = (item.log || [])[(item.log || []).length - 1] || {}; return `${item.from} → ${item.to}: ${now.stage || ''}\n${[now.basis, now.calls ? `부르는 말: ${now.calls}` : '', now.unsaid ? `말하지 못한 것: ${now.unsaid}` : ''].filter(Boolean).join(' · ')}`; }

@@ -1007,7 +1007,7 @@
 }
 
 /* ============================================================
-   v2.0 — 설정 찾기 · 설정 세트 · 관계선 · 사서 일지 · 금지어
+   v2.0 — 설정 찾기 · 설정 세트 · 관계선 · 사서 일지 · 삼갈 표현
    ============================================================ */
 .memoria__config-tools { display: grid; gap: 10px; margin-bottom: 14px; }
 .memoria__search { display: flex; align-items: center; gap: 8px; padding: 0 10px; border: 1px solid var(--mm-border); border-radius: 8px; background: var(--mm-soft); }
