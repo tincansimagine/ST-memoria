@@ -94,7 +94,7 @@ test('reply-check issues must quote the reply; unverifiable evidence is set asid
 test('story views render pictures: pulse bars, flow cards, graph dots, table rows and a relationship map', async () => {
     const view = await import('../story-view.mjs');
     const pulse = view.pulseSvg([{ turnIndex: 1, importance: 0.9, summary: '<b>약속</b>' }, { turnIndex: 2, importance: 0.2 }, { turnIndex: 3 }], { spans: [{ fromTurn: 1, toTurn: 2, level: 'chunk' }], marks: [1] });
-    assert.equal((pulse.match(/<rect /g) || []).length, 3);
+    assert.equal((pulse.match(/class="mmv-pulse-fill"/g) || []).length, 3);
     assert.match(pulse, /mmv-pulse-bar--a is-peak" data-turn="1"/);
     assert.match(pulse, /mmv-pulse-bar--raw" data-turn="3"/);
     assert.match(pulse, /mmv-pulse-star/);
@@ -107,16 +107,22 @@ test('story views render pictures: pulse bars, flow cards, graph dots, table row
     assert.match(flow, /memoria-summary-regen[\s\S]*memoria-summary-edit[\s\S]*memoria-summary-delete/);
 
     const rows = buildTimelineRows(store);
-    const graph = view.graphHtml(layoutTimelineGraph(rows), { dim: new Set(['c']), picked: 'b' });
-    assert.equal((graph.match(/<g class="mmv-pt/g) || []).length, 4);
-    assert.match(graph, /is-dim" data-id="c"/);
-    assert.match(graph, /is-picked" data-id="b"/);
-    assert.match(view.tableHtml(rows, { sort: 'importance', desc: true }), /data-sort="importance" class="is-sortable is-sorted">중요도 ▼/);
-    assert.match(view.detailHtml(rows[1]), /data-mes="3">#3</);
+    const rail = view.railHtml(layoutTimelineGraph(rows, { maxLanes: 2 }), { dim: new Set(['c']), open: 'b' });
+    assert.equal((rail.match(/<li class="mmv-stop/g) || []).length, 4);
+    assert.equal((rail.match(/class="mmv-day"/g) || []).length, 2, 'one divider per story day');
+    assert.match(rail, /is-dim" data-id="c"/);
+    assert.match(rail, /is-open" data-id="b"/);
+    assert.match(rail, /mmv-link" style="--mmv-from:0;--mmv-span:2"/, 'people in the same event are joined');
+    assert.match(view.tableHtml(rows, { sort: 'importance', desc: true }), /data-sort="importance" class="is-sortable is-sorted">★ ▼/);
+    assert.match(view.heroHtml({ place: '등대', when: '3일째', present: ['아리아'], tiles: [{ value: 18, label: '턴' }] }), /<strong>등대<\/strong>[\s\S]*mmv-who">아리아<[\s\S]*<b>18<\/b><span>턴</);
+    const many = view.pulseSvg(Array.from({ length: 400 }, (_, i) => ({ turnIndex: i + 1, importance: i === 123 ? 1 : 0.2 })), { marks: [124] });
+    assert.ok((many.match(/class="mmv-pulse-bar/g) || []).length <= 90, 'long chats are bucketed so the picture still fits a phone');
+    assert.match(many, /is-peak" data-turn="124"/, 'a bucket shows its heaviest turn');
 
     const map = view.bondMapSvg([{ id: 'x', from: '아리아', to: '여행자', stage: '마지못한 신뢰' }, { id: 'y', from: '여행자', to: '아리아', stage: '호기심' }], { picked: 'x' });
     assert.equal((map.match(/class="mmv-person/g) || []).length, 2);
     assert.match(map, /mmv-edge is-picked" data-id="x"/);
     assert.equal(view.bondMapSvg([]), '');
-    assert.match(view.bondStepsHtml({ from: 'A', to: 'B', log: [{ stage: '경계' }, { stage: '경계' }, { stage: '신뢰', unsaid: '고마움' }] }), /--mmv-step:0[\s\S]*--mmv-step:1[\s\S]*말하지 못한 것 · 고마움/);
+    assert.notEqual(map.match(/marker id="([^"]+)"/)[1], view.bondMapSvg([{ id: 'x', from: 'A', to: 'B', stage: 's' }]).match(/marker id="([^"]+)"/)[1], 'each map owns its arrowhead');
+    assert.match(view.bondCardsHtml([{ id: 'x', from: 'A', to: 'B', log: [{ stage: '경계' }, { stage: '경계' }, { stage: '신뢰', unsaid: '고마움' }] }], { picked: 'x' }), /mmv-bond is-picked[\s\S]*--mmv-step:0[\s\S]*--mmv-step:1[\s\S]*말하지 못한 것 · 고마움/);
 });
