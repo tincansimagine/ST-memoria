@@ -350,6 +350,10 @@
                             <input type="number" id="memoria_preserve_recent" min="1" max="500" step="1">
                         </div>
                         <div class="memoria__field">
+                            <label for="memoria_record_batch" title="이 턴 수만큼 모아서 사서 호출 한 번으로 기록합니다 (1 = 답장마다). 클수록 비용이 줄고, 인물·관계·상태 갱신은 그만큼 늦게 반영됩니다. 그사이 대화는 원문으로 그대로 보입니다.">묶어 기록 (턴 수)</label>
+                            <input type="number" id="memoria_record_batch" min="1" max="12" step="1">
+                        </div>
+                        <div class="memoria__field">
                             <label for="memoria_record_delay" title="응답 뒤로 이야기가 N턴 더 진행된 뒤에야 기록합니다 (0 = 바로)">기록 지연 (턴 수)</label>
                             <input type="number" id="memoria_record_delay" min="0" max="20" step="1">
                         </div>

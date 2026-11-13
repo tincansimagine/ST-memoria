@@ -403,3 +403,70 @@ test('the ledger carries only live, relevant threads and items, and keeps OPEN o
     assert.match(packet, /OPEN: 지금 미해결/);
     assert.doesNotMatch(packet, /옛 미해결/);
 });
+
+test('batched recording: several exchanges cost one librarian call, yet every turn keeps its own digest and memories', async () => {
+    const a = await app();
+    const chat = a.context.chat;
+    const lines = ['아리아가 문을 열었다. "늦었네요."', '아리아가 창고 열쇠를 건넸다.', '둘은 등대 계단을 올랐다.', '아리아가 편지를 서랍에 넣었다.'];
+    lines.forEach((l, i) => chat.push({ is_user: true, mes: `${i + 1}번째 행동`, name: '여행자' }, { is_user: false, mes: `${l} 바람이 불었고 파도 소리가 들렸다.`, name: '아리아' }));
+    const settings = a.getSettings();
+    assert.equal(settings.recordBatch, 4);
+
+    // 묶음이 차기 전에는 사서를 부르지 않는다
+    assert.deepEqual([...a.run('pendingSettledMesIds')()], [1, 3, 5, 7]);
+    chat.length = 6;
+    assert.equal(a.run('commitPendingBatch')(), null);
+    lines.slice(3).forEach((l, i) => chat.push({ is_user: true, mes: '4번째 행동', name: '여행자' }, { is_user: false, mes: `${l} 바람이 불었고 파도 소리가 들렸다.`, name: '아리아' }));
+
+    let calls = 0;
+    let system = '';
+    let body = '';
+    a.context.generateRaw = async ({ prompt, systemPrompt }) => {
+        calls++; system = systemPrompt; body = prompt[0].content;
+        return JSON.stringify({
+            digests: [1, 2, 3, 4].map(n => ({ n, digest: `${n}번째 교환의 요약.`, weight: n === 2 ? 0.9 : 0.4, time_passed: n === 3 ? '1d' : '0' })),
+            memories: [
+                { n: 2, kind: 'event', summary: '아리아가 여행자에게 창고 열쇠를 맡겼다', importance: 0.8, entities: ['아리아', '여행자'] },
+                { n: 4, kind: 'secret', summary: '아리아가 편지를 숨겼다', importance: 0.6, visibility: 'secret', owner: '아리아' },
+                { kind: 'fact', summary: '번호 없는 기억은 마지막 턴에 매단다', importance: 0.4 },
+            ],
+            status: [{ entity: 'scene', slot: 'location', value: '등대 꼭대기' }],
+            bonds: [{ from: '아리아', to: '여행자', stage: '마지못한 신뢰', basis: '열쇠를 맡겼다' }],
+            cast: [{ name: '아리아', core: '약속을 무겁게 여긴다', line: '늦었네요.', traits: [] }],
+        });
+    };
+    await a.run('commitPendingBatch')();
+    assert.equal(calls, 1, 'four exchanges, one call');
+    assert.match(system, /BATCH FILING: the file below holds 4 consecutive exchanges/);
+    assert.match(body, /<exchange n="1">[\s\S]*<exchange n="4">/);
+
+    const store = a.getStore();
+    assert.deepEqual([...store.turns.map(t => t.summary)], [1, 2, 3, 4].map(n => `${n}번째 교환의 요약.`));
+    assert.equal(store.turns[1].importance, 0.9);
+    assert.equal(store.turns[2].elapsedDays, 1);
+    assert.ok(store.turns.every(t => !t.failed));
+    const of = (text) => store.memories.find(m => m.summary.includes(text));
+    assert.equal(of('창고 열쇠를 맡겼다').mesId, 3);
+    assert.equal(of('편지를 숨겼다').mesId, 7);
+    assert.equal(of('번호 없는').mesId, 7);
+    assert.equal(store.memories.filter(m => (m.tags || []).includes('episode_raw')).length, 4, 'each turn keeps its source evidence');
+    assert.equal(store.bonds[0].log[0].turn, 4, 'run-level records hang on the last turn');
+    assert.equal(store.characters[0].lines[0].text, '늦었네요.');
+    assert.equal(store.turns[3].where, '등대 꼭대기');
+    assert.deepEqual([...a.run('pendingSettledMesIds')()], []);
+
+    // 한 턴만 되돌려도 그 턴의 기억만 사라진다
+    a.invalidateTurnByMesId(3);
+    assert.equal(of('창고 열쇠를 맡겼다'), undefined);
+    assert.ok(of('편지를 숨겼다'));
+});
+
+test('batched recording: an unparsable or changed run is not half-filed', async () => {
+    const a = await app();
+    const chat = a.context.chat;
+    for (let i = 0; i < 2; i++) chat.push({ is_user: true, mes: '행동', name: '여행자' }, { is_user: false, mes: `아리아가 ${i}번째로 대답했다. 바람이 불었고 파도 소리가 들렸다.`, name: '아리아' });
+    a.context.generateRaw = async () => { chat[3].mes = '아리아의 대답이 통째로 고쳐졌다. 전혀 다른 장면이 되었다.'; return JSON.stringify({ digests: [{ n: 1, digest: '첫 요약.' }, { n: 2, digest: '둘째 요약.' }] }); };
+    assert.equal(await a.run('commitTurns')([1, 3]), false);
+    assert.equal(a.getStore().turns.length, 0, 'a run that changed underfoot is dropped whole and re-batched later');
+    assert.equal(a.getStore().memories.length, 0);
+});

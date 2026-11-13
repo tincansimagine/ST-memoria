@@ -278,6 +278,7 @@ const LANG_DIRECTIVES = {
 const DEFAULT_SETTINGS = Object.freeze({
     enabled: true,
     autoRecord: true,
+    recordBatch: 4,           // 묶어 기록 — 이 턴 수만큼 모아 사서 호출 한 번으로 기록 (1 = 답장마다). 호출마다 붙는 지시문·참고 자료를 한 번만 낸다
     recordDelay: 0,           // 기록 지연 — 응답 뒤에 내가 N번 더 답을 보낸 뒤에야 기록 (0 = 바로). 그리팅은 항상 첫 답 뒤
     profileId: '',            // '' = 현재 연결된 API로 조용히 생성
     injectDepth: 1,
@@ -357,6 +358,11 @@ const DEFAULT_SETTINGS = Object.freeze({
 function getSettings() {
     if (!extension_settings[MODULE_NAME]) {
         extension_settings[MODULE_NAME] = structuredClone(DEFAULT_SETTINGS);
+        // 처음 설치한 경우에만: 요약된 옛 메시지를 숨긴다 (최근 20개는 원문 그대로).
+        // 숨기지 않으면 채팅이 길어질수록 매 답변의 프롬프트가 끝없이 커진다 — 기억을 쌓는 의미가 비용에서 사라진다.
+        // 이미 쓰던 사람의 설정은 건드리지 않는다.
+        extension_settings[MODULE_NAME].autoHide = true;
+        extension_settings[MODULE_NAME].preserveRecent = 20;
     }
     const s = extension_settings[MODULE_NAME];
     // 얕은 기본값 보충 (업데이트로 새 키가 생겨도 안전)
@@ -2148,7 +2154,7 @@ function validLine(line, userText, assistantText) {
     return bare.length >= 4 ? validExcerpt(bare, userText, assistantText) : null;
 }
 
-function sanitizeExtraction(raw, userText, assistantText) {
+function sanitizeExtraction(raw, userText, assistantText, { memoryCap = 12 } = {}) {
     const out = {
         turnSummary: clipStr(raw?.digest ?? raw?.turn_summary, 700),
         importance: clamp01(raw?.weight ?? raw?.importance, 0.4),
@@ -2156,12 +2162,13 @@ function sanitizeExtraction(raw, userText, assistantText) {
         memories: [], worldRules: [], entityStates: [], locks: [], characters: [], milestones: [], items: [], bonds: [],
     };
 
-    for (const m of (Array.isArray(raw?.memories) ? raw.memories : []).slice(0, 12)) {
+    for (const m of (Array.isArray(raw?.memories) ? raw.memories : []).slice(0, memoryCap)) {
         const summary = clipStr(m?.summary, 400);
         if (!summary) continue;
         out.memories.push({
             kind: normKind(m?.kind),
             summary,
+            n: Number.isInteger(Number(m?.n)) ? Number(m.n) : null, // 묶어 기록할 때: 몇 번째 교환에서 나온 기억인지
             excerpt: validExcerpt(m?.quote ?? m?.excerpt, userText, assistantText),
             importance: clamp01(m?.importance, 0.5),
             entities: (Array.isArray(m?.entities) ? m.entities : []).map(e => cleanStr(e, 60)).filter(Boolean).slice(0, 6),
@@ -2882,49 +2889,69 @@ function pruneMemories(store) {
  * 완결된 (user, assistant) 턴 하나를 기록한다.
  * 같은 mesId 턴이 이미 있으면(리롤/스와이프/편집) 파생 기록을 지우고 같은 turnIndex로 재기록.
  */
-async function commitTurn(mesId, { silent = true, force = false, retry = 1 } = {}) {
+function commitTurn(mesId, opts) {
+    return commitTurns([mesId], opts);
+}
+
+/**
+ * 턴 기록. mesIds가 하나면 예전처럼 그 교환 하나를, 여럿이면 이어진 교환들을 사서 호출 한 번으로 기록한다.
+ *
+ * 묶어 기록하는 이유는 비용이다. 사서 호출에는 긴 지시문과 참고 자료(서약·인물 명단·관계선·최근 기록)가
+ * 매번 붙는데, 답장마다 부르면 그 고정 비용을 답장 수만큼 낸다. 묶으면 한 번만 낸다.
+ * 기록 구조는 그대로다: 턴마다 요약 한 줄과 원문 증거가 남고, 기억은 나온 턴에 매달린다.
+ * 상태·캐논·서약·인물·관계선은 묶음의 끝 시점 값으로 한 번만 적어 마지막 턴에 매단다.
+ */
+async function commitTurns(mesIds, { silent = true, force = false, retry = 1 } = {}) {
     const settings = getSettings();
     // 답변을 생성하는 중이면 끝날 때까지 기다린다 — 기다리는 사이 채팅이 바뀌었으면 이 기록은 버린다
     const queuedChat = getCurrentChatId();
     await waitForChatIdle('턴 기록');
     if (getCurrentChatId() !== queuedChat) return false;
     const store = getStore();
-    const assistantMes = chat[mesId];
-    if (!assistantMes || assistantMes.is_user) return false;
-    // 숨김(is_system) 메시지는 기본적으로 건너뛰되, 자동 숨김으로 가려진 기존 턴의 재기록(force)은 허용
-    if (assistantMes.is_system && !force) return false;
-    if (isSideMessage(assistantMes)) return false; // 막간은 이야기가 아니다
-
-    const userMes = findPrecedingUserMessage(mesId);
-    // 사서에게는 화면에 보이는 이야기만 보여준다 — 다른 확장의 숨은 패킷·상태창 잔해 차단
-    const userText = visibleProse(userMes?.mes);
-    const assistantText = visibleProse(assistantMes.mes);
-    if (!assistantText.trim()) return false;
-
-    const newHash = mesHashOf(assistantMes);
-    let turn = store.turns.find(t => t.mesId === mesId);
-    if (turn && turn.mesHash === newHash && !turn.failed) return false; // 이미 같은 내용으로 기록됨
-
-    if (turn) {
-        removeDerivedForTurn(store, turn.turnIndex);
-    } else {
-        turn = { id: uuidv4(), mesId, mesHash: 0, turnIndex: ++store.turnCounter, summary: '', importance: 0.4 };
-        store.turns.push(turn);
+    const units = [];
+    for (const id of [...new Set(mesIds.map(Number))].sort((x, y) => x - y)) {
+        const mes = chat[id];
+        if (!mes || mes.is_user) continue;
+        // 숨김(is_system) 메시지는 기본적으로 건너뛰되, 자동 숨김으로 가려진 기존 턴의 재기록(force)은 허용
+        if (mes.is_system && !force) continue;
+        if (isSideMessage(mes)) continue; // 막간은 이야기가 아니다
+        const userMes = findPrecedingUserMessage(id);
+        // 사서에게는 화면에 보이는 이야기만 보여준다 — 다른 확장의 숨은 패킷·상태창 잔해 차단
+        const text = visibleProse(mes.mes);
+        if (!text.trim()) continue;
+        const hash = mesHashOf(mes);
+        const existing = store.turns.find(t => t.mesId === id);
+        if (existing && existing.mesHash === hash && !existing.failed) continue; // 이미 같은 내용으로 기록됨
+        units.push({ mesId: id, mes, userText: visibleProse(userMes?.mes), text, hash, existing,
+            userLabel: userMes?.name || name1 || 'User', charLabel: mes.name || name2 || 'Assistant' });
     }
-    turn.mesHash = newHash;
+    if (!units.length) return false;
+    for (const u of units) {
+        if (u.existing) removeDerivedForTurn(store, u.existing.turnIndex);
+        else store.turns.push(u.existing = { id: uuidv4(), mesId: u.mesId, mesHash: 0, turnIndex: ++store.turnCounter, summary: '', importance: 0.4 });
+        u.turn = u.existing;
+        u.turn.mesHash = u.hash;
+    }
     renumberTurns(store); // 중간 편집·재기록으로 순서가 어긋났으면 채팅 순서대로 되메김
+
+    const batch = units.length > 1;
+    const lastUnit = units[units.length - 1];
+    const turn = lastUnit.turn;           // 묶음 전체에 걸친 기록(상태·서약·인물…)이 매달리는 턴
+    const mesId = lastUnit.mesId;
+    const assistantMes = lastUnit.mes;
+    const userText = units.map(u => u.userText).join('\n');
+    const assistantText = units.map(u => u.text).join('\n');
+    const newHash = lastUnit.hash;
+    const { userLabel, charLabel } = lastUnit;
 
     // 최근 턴 참고 자료 (기록 품질용, 기록 대상 아님)
     const recent = store.turns
-        .filter(t => t.turnIndex < turn.turnIndex && t.summary)
+        .filter(t => t.turnIndex < units[0].turn.turnIndex && t.summary)
         .sort((a, b) => b.turnIndex - a.turnIndex)
         .slice(0, 3)
         .reverse()
         .map(t => `[t${t.turnIndex}] ${t.summary}`)
         .join('\n');
-
-    const userLabel = userMes?.name || name1 || 'User';
-    const charLabel = assistantMes.name || name2 || 'Assistant';
 
     // 활성 서약 목록 — 사서가 이번 턴에 해소된 서약을 판정할 수 있게 꼬리표를 붙여 전달
     const openPledges = store.locks.filter(l => l.status === 'active').slice(0, 12);
@@ -2966,16 +2993,24 @@ async function commitTurn(mesId, { silent = true, force = false, retry = 1 } = {
         castLine,
         bondLines.length ? `Bonds on file (current stage — refile one only if this exchange moved it):\n${bondLines.join('\n')}\n` : '',
         recent ? `Already shelved (do not refile) — recent turn digests:\n${recent}\n` : '',
-        'The exchange to shelve:',
-        `<user name="${userLabel}">\n${userText.slice(0, 4000)}\n</user>`,
-        `<assistant name="${charLabel}">\n${assistantText.slice(0, 6000)}\n</assistant>`,
+        ...(batch
+            ? [`The run of ${units.length} consecutive exchanges to shelve, oldest first:`,
+                ...units.map((u, i) => `<exchange n="${i + 1}">\n<user name="${u.userLabel}">\n${u.userText.slice(0, 3000)}\n</user>\n<assistant name="${u.charLabel}">\n${u.text.slice(0, 6000)}\n</assistant>\n</exchange>`)]
+            : ['The exchange to shelve:',
+                `<user name="${userLabel}">\n${userText.slice(0, 4000)}\n</user>`,
+                `<assistant name="${charLabel}">\n${assistantText.slice(0, 6000)}\n</assistant>`]),
     ].filter(Boolean).join('\n');
+    const memoryCap = batch ? Math.min(16, 6 + units.length * 2) : 12;
+    const batchDirective = batch
+        ? `\n\nBATCH FILING: the file below holds ${units.length} consecutive exchanges, tagged <exchange n="1"> to <exchange n="${units.length}">. Shelve the whole run in ONE object, exactly as you would a single exchange, with these changes. (1) Instead of "digest", "weight" and "time_passed", give an array "digests" with one entry for EVERY exchange, in order: {"n":1,"digest":"1-2 sentence factual summary of that exchange","weight":0.0,"time_passed":"0"}. (2) Give every memory an "n" — the number of the exchange it comes from. (3) status, canon, bonds, pledges and cast describe how things stand at the END of the run: if a value changed twice, file only where it ended up, and file a bond only if the run as a whole moved it. (4) A cast "line" may come from any exchange in the run. Caps for the whole run: ${memoryCap} memories, 6 canon, 10 status, 5 pledges, 4 cast, 4 bonds — a longer run is not a reason to file trivia. Wherever this card says "this exchange", read "this run".`
+        : '';
+    const digests = new Map(); // 묶어 기록할 때: 교환 번호 → 그 턴의 요약·무게·흐른 시간
 
     let extracted = null;
     try {
         llmBusy = true;
         updateStatusUI('기록 중…');
-        const sysPrompt = `${settings.prompts.archivist}${archivistTrackingDirective()}${pledgeDirective}\n\n${languageDirective()}`;
+        const sysPrompt = `${settings.prompts.archivist}${archivistTrackingDirective()}${pledgeDirective}${batchDirective}\n\n${languageDirective()}`;
         // 파싱 실패·API 오류(색인/시계 재계산 직후 혼잡 포함) 대비: 간격을 두고 최대 3회 시도
         for (let attempt = 0; attempt < 3 && !extracted; attempt++) {
             if (attempt > 0) await new Promise(r => setTimeout(r, attempt * 2500)); // 순간 혼잡·레이트리밋을 흘려보낸다
@@ -2983,20 +3018,31 @@ async function commitTurn(mesId, { silent = true, force = false, retry = 1 } = {
             try {
                 const response = await callAuxLLM(sysPrompt + nudge, userPrompt);
                 const parsed = parseJsonLoose(response);
-                if (parsed) extracted = sanitizeExtraction(parsed, userText, assistantText);
+                if (parsed) {
+                    extracted = sanitizeExtraction(parsed, userText, assistantText, { memoryCap });
+                    digests.clear();
+                    for (const d of (batch && Array.isArray(parsed.digests) ? parsed.digests : [])) {
+                        const n = Number(d?.n);
+                        const summary = clipStr(d?.digest ?? d?.summary, 700);
+                        if (Number.isInteger(n) && n >= 1 && n <= units.length && summary) {
+                            digests.set(n, { summary, importance: clamp01(d?.weight ?? d?.importance, 0.4), elapsedDays: parseDurationDays(d?.time_passed) });
+                        }
+                    }
+                    // 턴 요약이 하나도 없는 묶음 응답은 형식을 어긴 것이다 — 다시 요청한다
+                    if (batch && !digests.size) { extracted = null; console.warn(`[${MODULE_NAME}] 묶음 응답에 digests가 없음 (시도 ${attempt + 1}/3)`); }
+                }
                 else console.warn(`[${MODULE_NAME}] 사서 응답 파싱 실패 (시도 ${attempt + 1}/3)`);
             } catch (e) {
                 console.error(`[${MODULE_NAME}] 사서 호출 실패 (시도 ${attempt + 1}/3):`, e);
             }
         }
         if (!extracted && !silent) toastr.error('기억 기록에 실패했습니다. (모델 응답 오류)', 'Memoria');
-        if (!extracted) logActivity('error', `#${mesId} 턴 기록 실패 — 모델 응답을 읽지 못했어요 (도구 → 색인으로 재시도)`);
+        if (!extracted) logActivity('error', `${batch ? `#${units[0].mesId}~#${mesId}` : `#${mesId}`} 턴 기록 실패 — 모델 응답을 읽지 못했어요 (도구 → 색인으로 재시도)`);
     } finally {
         llmBusy = false;
     }
 
-    turn.failed = !extracted || (!extracted.turnSummary && !extracted.memories.length);
-
+    const answered = Boolean(extracted);
     if (!extracted) {
         // LLM 실패 시에도 원문 발췌 기억은 남긴다 (fail-open)
         extracted = {
@@ -3008,14 +3054,26 @@ async function commitTurn(mesId, { silent = true, force = false, retry = 1 } = {
     // LLM 호출 중 메시지가 바뀌었으면 stale 결과를 버린다.
     // 삭제·교체(재생성)면 reconcile이 턴을 정리하므로 조용히 물러나고,
     // 내용만 바뀐 경우(편집·번역/에셋 확장의 후처리)는 실패로 찍지 말고 새 내용으로 재기록을 건다.
-    const currentMes = chat[mesId];
-    if (!currentMes || currentMes.is_user) {
+    const gone = units.some(u => !chat[u.mesId] || chat[u.mesId].is_user);
+    const edited = !gone && units.some(u => mesHashOf(chat[u.mesId]) !== u.hash);
+    if (batch && (gone || edited)) {
+        // 묶음 가운데 하나라도 달라졌으면 이 응답은 어느 글에 대한 것인지 믿을 수 없다 — 통째로 물리고 다음 기회에 다시 묶는다
+        console.debug(`[${MODULE_NAME}] 묶음 commit 폐기 (#${units[0].mesId}~#${mesId} 중 변경됨)`);
+        const mine = new Set(units.map(u => u.turn));
+        for (const u of units) removeDerivedForTurn(store, u.turn.turnIndex);
+        store.turns = store.turns.filter(t => !mine.has(t));
+        renumberTurns(store);
+        persistStore();
+        updateStatusUI();
+        return false;
+    }
+    if (gone) {
         console.debug(`[${MODULE_NAME}] commit 폐기 (mes ${mesId} 삭제/교체됨)`);
         persistStore();
         updateStatusUI();
         return false;
     }
-    if (mesHashOf(currentMes) !== newHash) {
+    if (edited) {
         console.debug(`[${MODULE_NAME}] commit 폐기 (mes ${mesId} 내용 변경됨) — 재기록 ${retry > 0 ? '예약' : '포기'}`);
         if (retry > 0) {
             queueCommit(mesId, { silent: true, force, retry: retry - 1 });
@@ -3027,30 +3085,37 @@ async function commitTurn(mesId, { silent = true, force = false, retry = 1 } = {
         return false;
     }
 
-    turn.summary = extracted.turnSummary;
-    turn.importance = extracted.importance;
-    turn.elapsedDays = settings.storyClock ? (extracted.elapsedDays || 0) : 0;
-
-    // 원문 증거 기억(항상 저장) — LLM 없이도 회상 가능하게.
+    // 턴마다: 요약 한 줄, 무게, 흐른 시간, 그리고 원문 증거 기억(항상 저장 — LLM 없이도 회상 가능하게).
     // 요약 자리에는 다이제스트(없으면 첫 문장)만 넣고, 원문 발췌는 인용 칸에만 둔다.
     // 사서가 다이제스트에 원문을 그대로 복사해 온 경우(부분 문자열 일치)도 첫 문장으로 대체.
-    const rawEpisode = cleanStr(assistantText, 240);
-    const digestIsCopy = extracted.turnSummary
-        && extracted.turnSummary.length > 120
-        && cleanStr(assistantText, 100000).includes(extracted.turnSummary);
-    const episodeSummary = (extracted.turnSummary && !digestIsCopy) ? extracted.turnSummary : firstSentence(assistantText);
-    if (digestIsCopy) turn.summary = episodeSummary;
-    const rows = [{
-        kind: 'event', summary: episodeSummary, excerpt: rawEpisode === episodeSummary ? null : rawEpisode,
-        importance: Math.max(0.25, extracted.importance - 0.1), entities: [charLabel], tags: ['episode_raw'],
-        visibility: 'public', owner: null, _episode: true,
-    }, ...extracted.memories];
+    const rows = [];
+    units.forEach((u, i) => {
+        const d = batch ? digests.get(i + 1) : { summary: extracted.turnSummary, importance: extracted.importance, elapsedDays: extracted.elapsedDays };
+        const mine = extracted.memories.filter(m => (batch ? (m.n === i + 1 || (i === units.length - 1 && !(m.n >= 1 && m.n <= units.length))) : true));
+        u.turn.failed = !answered || (!d?.summary && !mine.length);
+        u.turn.summary = d?.summary || '';
+        u.turn.importance = d?.importance ?? 0.3;
+        u.turn.elapsedDays = settings.storyClock ? (d?.elapsedDays || 0) : 0;
+        const rawEpisode = cleanStr(u.text, 240);
+        const digestIsCopy = u.turn.summary && u.turn.summary.length > 120 && cleanStr(u.text, 100000).includes(u.turn.summary);
+        const episodeSummary = (u.turn.summary && !digestIsCopy) ? u.turn.summary : firstSentence(u.text);
+        if (digestIsCopy) u.turn.summary = episodeSummary;
+        rows.push({
+            unit: u, kind: 'event', summary: episodeSummary, excerpt: rawEpisode === episodeSummary ? null : rawEpisode,
+            importance: Math.max(0.25, u.turn.importance - 0.1), entities: [u.charLabel], tags: ['episode_raw'],
+            visibility: 'public', owner: null, _episode: true,
+        }, ...mine.map(m => ({ ...m, unit: u })));
+        // 이 턴 시점의 작중 시간·장소 — 답변에 상태창이 있으면 그대로 (없으면 아래에서 묶음 끝의 장면으로 채운다)
+        const ownBar = messageStatusBars(u.mes).slice(-1)[0];
+        u.turn.when = ownBar?.when || null;
+        u.turn.where = ownBar?.place || null;
+    });
 
     for (const m of rows) {
         store.memories.push({
             id: uuidv4(),
-            turnIndex: turn.turnIndex,
-            mesId,
+            turnIndex: m.unit.turn.turnIndex,
+            mesId: m.unit.mesId,
             kind: m.kind,
             summary: m.summary,
             excerpt: m.excerpt || null,
@@ -3074,12 +3139,10 @@ async function commitTurn(mesId, { silent = true, force = false, retry = 1 } = {
     for (const r of extracted.worldRules) upsertWorldRule(store, r, turn.turnIndex);
     for (const s of extracted.entityStates) upsertEntityState(store, s, turn.turnIndex);
     for (const l of extracted.locks) upsertLock(store, l, turn.turnIndex);
-    // 이 턴이 끝난 시점의 작중 시간·장소를 턴에 찍어 둔다 — 요약이 "언제·어디서"를 지어내지 않고 받아 적게
-    // 답변에 상태창이 있으면 그쪽이 더 정확하다 (모델이 적은 그대로)
+    // 묶음이 끝난 시점의 작중 시간·장소를 마지막 턴에 찍어 둔다 — 요약이 "언제·어디서"를 지어내지 않고 받아 적게
     const sceneAt = getSceneSnapshot(store);
-    const ownBar = messageStatusBars(assistantMes).slice(-1)[0];
-    turn.when = ownBar?.when || [sceneAt.date, sceneAt.time].filter(Boolean).join(' ') || null;
-    turn.where = ownBar?.place || sceneAt.location || null;
+    turn.when = turn.when || [sceneAt.date, sceneAt.time].filter(Boolean).join(' ') || null;
+    turn.where = turn.where || sceneAt.location || null;
 
     // 사서가 해소됐다고 판정한 서약 처리 (스와이프 시 되돌릴 수 있게 턴 기록)
     // 수기 서약은 사서가 직접 닫지 못한다 — 대신 "해소된 듯" 의견만 붙여 사용자가 ✔로 확정
@@ -3107,7 +3170,9 @@ async function commitTurn(mesId, { silent = true, force = false, retry = 1 } = {
     }
 
     pruneMemories(store);
-    if (!turn.failed) logActivity('record', `#${mesId} 턴 기록 — 기억 ${rows.length}개`);
+    if (answered) logActivity('record', batch
+        ? `#${units[0].mesId}~#${mesId} 턴 ${units.length}개를 호출 한 번으로 기록 — 기억 ${rows.length}개`
+        : `#${mesId} 턴 기록 — 기억 ${rows.length}개`);
     // 요약·정리는 급하지 않다 — 그사이 새 답변을 생성하기 시작했으면 끝난 뒤에 한다
     persistStore();
     await waitForChatIdle('요약·서고 정리');
@@ -3188,6 +3253,8 @@ function isSettledForRecord(mesId) {
 function commitSettledTurns() {
     const settings = getSettings();
     if (!settings.enabled || !settings.autoRecord || !getCurrentChatId()) return;
+    // 묶어 기록: 확정된 미기록 턴이 묶음 크기만큼 쌓였을 때만 사서를 부른다
+    if (recordBatchSize() > 1) { commitPendingBatch()?.then(() => updateInjection({ quiet: true })); return; }
     const store = getStore();
     const horizon = Math.max(1, recordDelayTurns()) + 3;
     let users = 0;
@@ -3209,6 +3276,47 @@ function commitSettledTurns() {
         else replies++;
         if (Math.max(users, replies) > horizon) break;
     }
+}
+
+function recordBatchSize() {
+    return Math.max(1, Math.min(12, Math.round(Number(getSettings().recordBatch) || 1)));
+}
+
+/**
+ * 아직 기록되지 않은 확정된 응답들 (오래된 것부터). 채팅 끝에서 거슬러 올라가며 이미 기록된 턴을 만나면 멈춘다 —
+ * 그보다 오래된 미기록 구간은 도구 탭 색인이 맡는다 (긴 채팅을 처음 열었다고 전체를 기록하기 시작하지 않게).
+ */
+function pendingSettledMesIds(limit = 24) {
+    const store = getStore();
+    const out = [];
+    for (let i = chat.length - 1; i >= 0 && out.length < limit; i--) {
+        const m = chat[i];
+        if (!m || m.is_user || m.is_system || isSideMessage(m)) continue;
+        const t = store.turns.find(x => x.mesId === i);
+        if (t && !t.failed && t.mesHash === mesHashOf(m)) break;
+        if (t && !t.failed) continue; // 기록 중이거나 고쳐진 턴 — 그쪽 흐름이 맡는다
+        if (isSettledForRecord(i)) out.push(i);
+    }
+    return out.reverse();
+}
+
+/** 묶음이 찼으면 기록한다. flush: 덜 찼어도 지금 있는 만큼 기록 */
+function commitPendingBatch({ flush = false, silent = true } = {}) {
+    const settings = getSettings();
+    if (!settings.enabled || !getCurrentChatId()) return null;
+    const size = recordBatchSize();
+    const pending = pendingSettledMesIds(Math.max(size * 2, 12));
+    if (!pending.length || (!flush && pending.length < size)) return null;
+    return queueBatch(pending.slice(0, Math.max(size, flush ? 12 : size)), { silent });
+}
+
+function queueBatch(mesIds, opts) {
+    pendingCommits++;
+    commitQueue = commitQueue
+        .then(() => commitTurns(mesIds, opts))
+        .catch(e => console.error(`[${MODULE_NAME}] commit 오류:`, e))
+        .finally(() => { pendingCommits = Math.max(0, pendingCommits - 1); });
+    return commitQueue;
 }
 
 function queueCommit(mesId, opts) {
@@ -5435,12 +5543,15 @@ async function bulkIndexChat({ from = 0, to = Infinity, includeHidden = false } 
     const total = targets.length;
     let done = 0;
 
-    for (const mesId of targets) {
+    // 색인도 묶어서: 이어진 턴을 묶음 크기만큼 한 번에 기록한다 (긴 채팅을 처음 색인할 때 호출 수가 그만큼 준다)
+    const size = recordBatchSize();
+    for (let i = 0; i < targets.length; i += size) {
         if (bulkIndexAbort) break;
-        $('#memoria_bulk_progress').text(`색인 중… ${done + 1}/${total}`);
+        const group = targets.slice(i, i + size);
+        $('#memoria_bulk_progress').text(`색인 중… ${Math.min(done + group.length, total)}/${total}`);
         // 기록 큐를 통해 실행 — 색인 중 도착하는 자동 기록과 직렬화되어 store·API 경합이 없다
-        await queueCommit(mesId, { silent: true, force: true });
-        done++;
+        await queueBatch(group, { silent: true, force: true });
+        done += group.length;
     }
 
     $('#memoria_bulk_index').prop('disabled', false);
@@ -6989,6 +7100,7 @@ function renderSettingsPanel() {
     $('#memoria_preserve_recent').val(s.preserveRecent);
     $('#memoria_depth').val(s.injectDepth);
     $('#memoria_record_delay').val(s.recordDelay ?? 0);
+    $('#memoria_record_batch').val(s.recordBatch ?? 4);
     $('#memoria_inject_position').val(s.injectPosition || 'chat');
     $('#memoria_budget').val(s.tokenBudget);
     $('#memoria_topk').val(s.topK);
@@ -7447,8 +7559,10 @@ function bindUI() {
             if (chat[i] && !chat[i].is_user && !chat[i].is_system) { lastAssistant = i; break; }
         }
         if (lastAssistant < 0) return toastr.warning('기록할 어시스턴트 메시지가 없습니다.', 'Memoria');
-        toastr.info('마지막 턴을 기록합니다…', 'Memoria');
-        await queueCommit(lastAssistant, { silent: false });
+        // 묶어 기록 중이면 덜 찬 묶음을 지금 기록한다
+        const flushed = recordBatchSize() > 1 ? commitPendingBatch({ flush: true, silent: false }) : null;
+        toastr.info(flushed ? '밀린 턴을 지금 기록합니다…' : '마지막 턴을 기록합니다…', 'Memoria');
+        await (flushed || queueCommit(lastAssistant, { silent: false }));
         await updateInjection();
         renderAllPanels();
     });
@@ -8219,6 +8333,7 @@ function bindUI() {
     numBind('#memoria_reasoning_headroom', 'reasoningHeadroom', 0, 32768);
     numBind('#memoria_preserve_recent', 'preserveRecent', 1, 500);
     numBind('#memoria_record_delay', 'recordDelay', 0, 20);
+    numBind('#memoria_record_batch', 'recordBatch', 1, 12);
     numBind('#memoria_consolidate_every', 'consolidateEvery', 0, 200);
     numBind('#memoria_arc_consolidate_every', 'arcConsolidateEvery', 0, 500);
     numBind('#memoria_recall_wait', 'recallWaitSec', 0, 60);
@@ -8676,7 +8791,7 @@ function bindEvents() {
         if (tagSideMessage(id, type) || isSideMessage(mes)) return; // 막간은 기록도 점검도 하지 않는다
         auditRecallEcho(mes); // 직전 주입 기억의 반영 여부 채점 (기록보다 먼저, 원본 감사표 기준)
         if (settings.replyCheck && type !== 'first_message' && type !== 'command') queueCheck(id);
-        if (type !== 'first_message' && requiredStepsFor(id) === 0) {
+        if (recordBatchSize() === 1 && type !== 'first_message' && requiredStepsFor(id) === 0) {
             queueCommit(id).then(() => updateInjection({ quiet: true }));
         } else {
             // 지연 기록 — 이 응답은 아직 확정 전이다. 그사이 확정된 옛 응답이 있으면 그것만 기록한다
@@ -8715,9 +8830,11 @@ function bindEvents() {
         const id = Number(mesId);
         const mes = chat[id];
         if (mes && !mes.is_user && !mes.is_system && getSettings().autoRecord) {
+            const wasRecorded = getStore().turns.some(t => t.mesId === id);
             invalidateTurnByMesId(id);
-            // 아직 확정 전인 응답(기록 지연·그리팅)은 고쳐도 지금 기록하지 않는다 — 확정되면 그때 기록된다
-            if (isSettledForRecord(id)) queueCommit(id).then(() => updateInjection({ quiet: true }));
+            // 아직 확정 전인 응답(기록 지연·그리팅)은 고쳐도 지금 기록하지 않는다 — 확정되면 그때 기록된다.
+            // 묶어 기록 중에 아직 기록 전인 응답을 고친 것도 마찬가지: 묶음이 찰 때 새 글로 기록된다.
+            if (isSettledForRecord(id) && (wasRecorded || recordBatchSize() === 1)) queueCommit(id).then(() => updateInjection({ quiet: true }));
             else updateInjection({ quiet: true });
         } else {
             reconcileWithChat();
