@@ -1405,13 +1405,13 @@ body[data-memoria-paper="dark"] :is(#memoria_settings.memoria, .memoria-library,
 #memoria_settings .memoria__hint { padding: 10px 12px 0; border: 0; border-top: 1px solid var(--ink-line); border-radius: 0; background: none; font-size: .83em; line-height: 1.7; color: var(--dim); }
 #memoria_settings .memoria__hint b { color: var(--text); }
 #memoria_settings code { padding: 1px 5px; border: 1px solid var(--ink-line); border-radius: 0; background: var(--surface2); color: var(--text); font-size: .92em; }
-#memoria_settings .memoria__section details { border: 1px dashed var(--ink-line); border-radius: 0; background: none; padding: 0 14px; }
-#memoria_settings .memoria__section details > summary { display: flex; align-items: center; gap: 8px; padding: 11px 0; cursor: pointer; font-weight: 600; font-size: .92em; color: var(--dim); list-style: none; background: none; border-radius: 0; }
-#memoria_settings .memoria__section details > summary::-webkit-details-marker { display: none; }
-#memoria_settings .memoria__section details > summary::before { content: "+"; width: 14px; text-align: center; color: var(--accent); font-weight: 800; }
-#memoria_settings .memoria__section details[open] > summary::before { content: "–"; }
-#memoria_settings .memoria__section details[open] { padding-bottom: 14px; }
-#memoria_settings .memoria__section details[open] > summary { color: var(--text); }
+#memoria_settings .memoria__section details:not(.mmv-card) { border: 1px dashed var(--ink-line); border-radius: 0; background: none; padding: 0 14px; }
+#memoria_settings .memoria__section details:not(.mmv-card) > summary { display: flex; align-items: center; gap: 8px; padding: 11px 0; cursor: pointer; font-weight: 600; font-size: .92em; color: var(--dim); list-style: none; background: none; border-radius: 0; }
+#memoria_settings .memoria__section details:not(.mmv-card) > summary::-webkit-details-marker { display: none; }
+#memoria_settings .memoria__section details:not(.mmv-card) > summary::before { content: "+"; width: 14px; text-align: center; color: var(--accent); font-weight: 800; }
+#memoria_settings .memoria__section details:not(.mmv-card)[open] > summary::before { content: "–"; }
+#memoria_settings .memoria__section details:not(.mmv-card)[open] { padding-bottom: 14px; }
+#memoria_settings .memoria__section details:not(.mmv-card)[open] > summary { color: var(--text); }
 #memoria_settings .memoria__diagnostic-warning { padding: 9px 12px; border: 1px solid var(--accent); border-radius: 0; background: color-mix(in srgb, var(--accent) 9%, var(--surface)); font-size: .87em; }
 #memoria_settings .memoria__token-badge { border: 0; background: none; padding: 0; font-size: .78em; color: var(--faint); font-variant-numeric: tabular-nums; }
 #memoria_settings .memoria__empty { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 20px 14px; border: 1px dashed var(--ink-line); border-radius: 0; background: none; color: var(--dim); font-size: .88em; text-align: center; }
@@ -1578,3 +1578,21 @@ body[data-memoria-paper="dark"] :is(#memoria_settings.memoria, .memoria-library,
 }
 #memoria_settings .memoria__status .memoria__status-actions span { display: inline; margin: 0; font-size: inherit; color: inherit; }
 #memoria_settings .memoria__section :is(.memoria__char-list, .memoria__row-list, .memoria__mem-list, [id$="_list"]) { max-height: none; overflow: visible; }
+
+/* 이야기 탭의 요약 카드는 펼침(details)이지만 "+/–" 펼침 상자 규칙을 받지 않는다 — 자기 배치를 쓴다 */
+#memoria_settings .mmv-flow .mmv-card { padding: 0; }
+#memoria_settings .mmv-card > summary { display: grid; gap: 6px; padding: 11px 12px; list-style: none; color: var(--text); font-size: 1em; font-weight: 400; }
+#memoria_settings .mmv-card > summary::before { content: none; }
+#memoria_settings .mmv-card-top { display: flex; align-items: center; gap: 8px; min-width: 0; flex-wrap: wrap; }
+#memoria_settings .mmv-card-top .memoria__mem-actions { margin-left: auto; gap: 0; }
+#memoria_settings .mmv-when { font-weight: 700; line-height: 1.5; overflow-wrap: anywhere; }
+#memoria_settings .mmv-views button { border: 0; margin: 0; min-height: 36px; }
+#memoria_settings .mmv-views { gap: 2px; }
+/* 구역 머리의 아이콘 버튼들: 흩어지지 않게 한 줄로 모은다 */
+#memoria_settings .memoria__section-head { justify-content: flex-start; }
+#memoria_settings .memoria__section-head > .memoria__compact-actions { margin-left: auto; }
+#memoria_settings .memoria__section-head > .memoria__token-badge { flex: 1 1 100%; order: 2; }
+#memoria_settings .memoria__section-head > .memoria__icon-btn { order: 3; margin: 0 2px 0 -6px; }
+#memoria_settings .inline-drawer-content textarea.memoria__preview { font: 400 12.5px/1.55 ui-monospace, "SF Mono", Consolas, monospace; }
+/* 다른 확장·테마가 버튼에 거는 테두리가 서고 안의 작은 버튼에 묻지 않게 */
+#memoria_settings .memoria__kindchip, #memoria_settings .memoria__stats > button { box-shadow: none; }
