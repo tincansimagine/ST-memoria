@@ -40,7 +40,7 @@ import { ARGUMENT_TYPE, SlashCommandArgument } from "../../../slash-commands/Sla
 import { MacrosParser } from "../../../../scripts/macros.js";
 import { NARRATOR_PERSPECTIVE, isSharedPerspective, hasChatPerspective, resolvePerspective, findAssociations, sameKnowledgeScope, archiveSnapshot, validateArchive, addCheckpoint, archiveChanges, packetSections } from './archive-engine.mjs';
 import { showArchiveLibrary } from './library-ui.mjs';
-import { withDeadline, parsePhraseList, stripPhrases, hasPhrase, findRepeatedPhrases, pickBundleValues, resolveBundleName, switchBundle, saveBundle, deleteBundle, renameBundle, exportBundle, parseBundleFile, diffStableEntries, shouldRefreeze, createActivityLog, findRivalExtensions, splitClosedLine, sleepStaleThreads, pickPledges, stripOpenLines, THREAD_KINDS, recallCooldown, pushRecallHistory, isEndedValue, ungroundedFigures } from './craft-engine.mjs';
+import { withDeadline, parsePhraseList, stripPhrases, hasPhrase, findRepeatedPhrases, pickBundleValues, resolveBundleName, switchBundle, saveBundle, deleteBundle, renameBundle, exportBundle, parseBundleFile, diffStableEntries, shouldRefreeze, createActivityLog, findRivalExtensions, splitClosedLine, sleepStaleThreads, pickPledges, stripOpenLines, THREAD_KINDS, recallCooldown, pushRecallHistory, isEndedValue, ungroundedFigures, roughTokens, noteUsage, usageTotals } from './craft-engine.mjs';
 import { findStatusBars, statusOneLine, isPauseDirective, isPauseMessage, buildTimelineRows, filterTimelineRows, timelineMarkdown, timelineCsv, layoutTimelineGraph, verifyIssues } from './scene-engine.mjs';
 import { heroHtml, pulseSvg, flowHtml, railHtml, tableHtml, bondMapSvg, bondCardsHtml, statusListHtml } from './story-view.mjs';
 
@@ -1671,7 +1671,42 @@ function profileForTask(task) {
  * task: 'record' 턴 기록(사서) · 'summary' 요약·연대기·서고 정리 · 'light' 검사·연출·질문 같은 가벼운 판단.
  * 받아 적기와 가벼운 판단에 같은 값의 모델을 쓸 이유가 없다 — 작업별로 연결(또는 모델)을 달리 둘 수 있다.
  */
-async function callAuxLLM(systemPrompt, userPrompt, { maxTokens, task = 'record' } = {}) {
+async function callAuxLLM(systemPrompt, userPrompt, opts = {}) {
+    let reply = '';
+    try {
+        reply = await callAuxLLMRaw(systemPrompt, userPrompt, opts);
+        return reply;
+    } finally {
+        // 실패한 호출도 읽은 만큼은 나갔다 — 함께 센다
+        recordUsage(opts.task || 'record', `${systemPrompt}\n${userPrompt}`, reply);
+    }
+}
+
+/** 오늘 쓴 양 — 브라우저에 남겨 새로 고쳐도 이어 센다 */
+const USAGE_KEY = 'memoria_usage';
+let usageToday = null;
+function loadUsage() {
+    if (usageToday) return usageToday;
+    try { usageToday = JSON.parse(globalThis.localStorage?.getItem(USAGE_KEY) || 'null'); } catch { usageToday = null; }
+    return usageToday;
+}
+function recordUsage(task, input, output) {
+    const day = new Date().toLocaleDateString('sv-SE'); // YYYY-MM-DD (현지 날짜)
+    usageToday = noteUsage(loadUsage(), task, input, output, day);
+    try { globalThis.localStorage?.setItem(USAGE_KEY, JSON.stringify(usageToday)); } catch { /* 저장 못 해도 세는 데는 지장 없다 */ }
+}
+const koCount = (n) => (n >= 10000 ? `${(n / 10000).toFixed(1)}만` : n.toLocaleString());
+function usageLine() {
+    const u = loadUsage();
+    if (!u || u.day !== new Date().toLocaleDateString('sv-SE')) return '';
+    const t = usageTotals(u);
+    if (!t.calls) return '';
+    const names = { record: '기록', summary: '요약·정리', light: '가벼운 작업' };
+    const by = Object.entries(u.tasks).map(([k, r]) => `${names[k] || k} ${r.calls}회`).join(' · ');
+    return `오늘 서고가 쓴 양 — 호출 ${t.calls}회 (${by}) · 읽은 양 약 ${koCount(t.in)}토큰 · 쓴 양 약 ${koCount(t.out)}토큰 (글자 수로 어림)`;
+}
+
+async function callAuxLLMRaw(systemPrompt, userPrompt, { maxTokens, task = 'record' } = {}) {
     const settings = getSettings();
     const tokens = maxTokens || settings.responseTokens;
 
@@ -3252,6 +3287,20 @@ async function commitTurns(mesIds, { silent = true, force = false, retry = 1 } =
     }
     await attachApiEmbeddings(store.memories.slice(-rows.length));
 
+    // 숫자 검수: 상태·캐논은 "지금 값"으로 계속 실리는 자리라, 지어낸 숫자가 들어가면 그 뒤로 사실 행세를 한다.
+    // 값에 든 숫자가 이번 원문·참고 자료·그 칸의 이전 값 어디에도 없으면 적지 않는다 (이전 값이 그대로 남는다).
+    // 장면의 날짜·시각은 예외다 — "12일째"처럼 흐른 시간을 더해 적는 것이 정상이다.
+    if (answered) {
+        const base = `${userText}\n${assistantText}\n${refBlock}\n${recent}`;
+        const invented = (value, prior) => ungroundedFigures(value, `${base}\n${prior || ''}`).length > 0;
+        const before = extracted.worldRules.length + extracted.entityStates.length;
+        extracted.worldRules = extracted.worldRules.filter(r => !invented(r.value,
+            store.worldRules.find(x => x.scope === r.scope && x.key === r.key)?.value));
+        extracted.entityStates = extracted.entityStates.filter(s => String(s.entity).toLowerCase() === 'scene' || !invented(s.value,
+            store.entityStates.find(x => entityKey(x.entity) === entityKey(s.entity) && canonSlot(x.slot) === canonSlot(s.slot))?.value));
+        const dropped = before - extracted.worldRules.length - extracted.entityStates.length;
+        if (dropped) logActivity('record', `원문에 없는 숫자가 든 상태·캐논 ${dropped}개는 적지 않았어요 (이전 값을 그대로 둡니다)`);
+    }
     for (const r of extracted.worldRules) upsertWorldRule(store, r, turn.turnIndex);
     for (const s of extracted.entityStates) upsertEntityState(store, s, turn.turnIndex);
     for (const l of extracted.locks) upsertLock(store, l, turn.turnIndex);
@@ -3595,18 +3644,34 @@ async function maybeSummarizeChunk(store, { flushAll = false, onProgress = null,
             const sysPrompt = `${settings.prompts.chunk}${threadDirective}${staleDirective}\n\n${languageDirective()}`;
             let reply = splitClosedLine(await callAuxLLM(sysPrompt, userPrompt, { task: 'summary', maxTokens: auxTokens(4000) }));
             text = cleanMultiline(sanitizeRecordOutput(reply.text), 2000);
-            // 숫자 검수: 요약에 나온 숫자가 넘겨준 자료 어디에도 없으면 지어낸 것이다. 그럴 때만 한 번 다시 쓰게 하고,
-            // 덜 틀린 쪽을 남긴다. 숫자가 다 맞으면 호출은 늘지 않는다.
+            // 검수(모델을 따로 부르지 않는다):
+            //  · 숫자 — 요약에 나온 숫자가 넘겨준 자료 어디에도 없으면 지어낸 것이다.
+            //  · 빠진 전환점 — ★ 표시한 중대한 턴이 요약에 흔적도 없으면 빠뜨린 것이다.
+            // 문제가 있을 때만 무엇이 틀렸는지 짚어 한 번 다시 쓰게 하고, 덜 틀린 쪽을 남긴다. 문제없으면 호출은 늘지 않는다.
+            const pivotal = store.turns.filter(t => t.turnIndex >= fromTurn && t.turnIndex <= toTurn && t.summary && (t.importance ?? 0) >= 0.75);
+            // 요약 언어를 도중에 바꿨으면 턴 기록과 요약의 말이 달라 글자로 견줄 수 없다 — 전체가 어느 정도 겹칠 때만 본다
+            const comparable = (rec) => textOverlap(parts.join(' '), rec) >= 0.3;
+            const missedIn = (rec) => (comparable(rec) ? pivotal.filter(t => textOverlap(t.summary, rec) < 0.2) : []);
             let loose = text ? ungroundedFigures(text, userPrompt) : [];
-            if (loose.length) {
-                const again = splitClosedLine(await callAuxLLM(sysPrompt, `${userPrompt}\n\n(Your previous record contained figures that appear nowhere in the material above: ${loose.slice(0, 12).join(', ')}. Write the record again. Every number, date and amount must be copied from the material; where the material gives no figure, write none.)`, { task: 'summary', maxTokens: auxTokens(4000) }));
+            let missed = text ? missedIn(text) : [];
+            if (loose.length || missed.length) {
+                const notes = [
+                    loose.length ? `it contained figures that appear nowhere in the material above (${loose.slice(0, 12).join(', ')}) — every number, date and amount must be copied from the material, and where the material gives no figure, write none` : '',
+                    missed.length ? `it left out pivotal turns marked ★ — each must have its own bullet: ${missed.slice(0, 4).map(t => `"${cleanStr(t.summary, 160)}"`).join(' / ')}` : '',
+                ].filter(Boolean).join('; and ');
+                const again = splitClosedLine(await callAuxLLM(sysPrompt, `${userPrompt}\n\n(Your previous record had problems: ${notes}. Write the record again in the same structure.)`, { task: 'summary', maxTokens: auxTokens(4000) }));
                 const retext = cleanMultiline(sanitizeRecordOutput(again.text), 2000);
-                const reloose = retext ? ungroundedFigures(retext, userPrompt) : loose;
-                if (retext && reloose.length < loose.length) { reply = again; text = retext; loose = reloose; }
-                logActivity(loose.length ? 'error' : 'summary', loose.length
-                    ? `t${fromTurn}–t${toTurn} 요약에 원문에서 찾지 못한 숫자가 남았어요: ${loose.slice(0, 6).join(', ')} (이야기 탭에서 확인해 주세요)`
-                    : `t${fromTurn}–t${toTurn} 요약에 원문에 없는 숫자가 있어 다시 썼어요`);
+                if (retext) {
+                    const reloose = ungroundedFigures(retext, userPrompt);
+                    const remissed = missedIn(retext);
+                    if (reloose.length + remissed.length < loose.length + missed.length) { reply = again; text = retext; loose = reloose; missed = remissed; }
+                }
+                const left = [loose.length ? `원문에서 찾지 못한 숫자 ${loose.slice(0, 6).join(', ')}` : '', missed.length ? `빠진 전환점 ${missed.length}개` : ''].filter(Boolean).join(' · ');
+                logActivity(left ? 'error' : 'summary', left
+                    ? `t${fromTurn}–t${toTurn} 요약에 문제가 남았어요: ${left} (이야기 탭에서 확인해 주세요)`
+                    : `t${fromTurn}–t${toTurn} 요약에서 틀린 숫자·빠진 전환점을 발견해 다시 썼어요`);
             }
+            if (missed.length) loose = [...loose, ...missed.map(t => `★t${t.turnIndex}`)];
             unverified = loose;
             if (text) {
                 let closed = 0;
@@ -5802,6 +5867,18 @@ async function bulkIndexChat({ from = 0, to = Infinity, includeHidden = false } 
         return;
     }
 
+    // 시작하기 전에 얼마나 들지 어림해 알려 준다 — 긴 채팅을 처음 색인하면 생각보다 많이 든다
+    {
+        const size = recordBatchSize();
+        const calls = Math.ceil(targets.length / size);
+        const fixed = roughTokens(settings.prompts.archivist) + 600; // 지시문 + 참고 자료(어림)
+        const body = targets.reduce((a, i) => a + roughTokens(visibleProse(chat[i]?.mes).slice(0, 6000)) + roughTokens(visibleProse(findPrecedingUserMessage(i)?.mes).slice(0, 3000)), 0);
+        const sums = Math.floor(targets.length / Math.max(3, settings.chunkTurns));
+        const note = `색인 ${targets.length}턴 — 사서 호출 약 ${calls}회${sums ? ` + 요약 약 ${sums}회` : ''}, 읽을 양 약 ${koCount(calls * fixed + body)}토큰 (어림)`;
+        logActivity('record', note);
+        if (calls >= 3) toastr.info(`${note}. 도중에 멈출 수 있습니다.`, 'Memoria');
+    }
+
     bulkIndexAbort = false;
     $('#memoria_bulk_index').prop('disabled', true);
     $('#memoria_bulk_cancel').show();
@@ -6922,6 +6999,8 @@ function renderActivityLog() {
     const list = $('#memoria_activity_list');
     if (!list.length || !list.is(':visible')) return;
     list.empty();
+    const used = usageLine();
+    if (used) list.append($('<div class="memoria__row memoria__activity memoria__usage"><i class="fa-solid fa-coins"></i></div>').append($('<span class="memoria__row-text">').text(used)));
     const rows = activityLog.list();
     if (!rows.length) {
         list.append('<div class="memoria__empty">아직 기록이 없습니다. 회상·기록·요약처럼 저절로 일어난 일이 여기에 남습니다.</div>');

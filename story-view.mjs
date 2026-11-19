@@ -113,7 +113,7 @@ export function flowHtml(nodes) {
             <span class="mmv-node-dot" aria-hidden="true"></span>
             <details class="mmv-card memoria__summary-card" data-id="${esc(n.id)}" data-level="${esc(n.level)}"${n.open ? ' open' : ''}>
                 <summary>
-                    <span class="mmv-card-top"><span class="mmv-tag mmv-tag--${level}">${LEVEL_LABEL[level]}</span><small>${range}</small>${n.unverified?.length ? `<small class="mmv-check" title="요약에 원문에서 찾지 못한 숫자가 있습니다: ${esc(n.unverified.join(', '))} — 내용을 확인하고 고치거나 다시 만들어 주세요">⚠ 숫자 확인</small>` : ''}<span class="memoria__mem-actions">${actions}</span></span>
+                    <span class="mmv-card-top"><span class="mmv-tag mmv-tag--${level}">${LEVEL_LABEL[level]}</span><small>${range}</small>${n.unverified?.length ? `<small class="mmv-check" title="요약에서 확인이 필요한 곳: ${esc(n.unverified.join(', '))} (숫자는 원문에서 찾지 못한 것, ★는 요약에 빠진 중대한 턴) — 내용을 확인하고 고치거나 다시 만들어 주세요">⚠ 확인 필요</small>` : ''}<span class="memoria__mem-actions">${actions}</span></span>
                     <span class="mmv-when">${esc(title)}</span>
                 </summary>
                 ${beats ? `<ul class="mmv-beats">${beats}</ul>` : ''}
