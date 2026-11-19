@@ -7778,6 +7778,41 @@ function maskBannedInPrompt(data) {
  * 설정 찾기 · 함께 쓰는 확장 안내
  * ============================================================ */
 
+/**
+ * 설정·도구 탭의 섹션을 접었다 펼 수 있게 한다 — 설정이 한 화면에 끝없이 이어지면 휴대폰에서는 찾을 수가 없다.
+ * 처음에는 맨 위 섹션만 펴 두고, 펴고 접은 것은 브라우저에 기억한다. 설정 찾기를 쓰는 동안에는 전부 펼쳐 보인다.
+ */
+const FOLD_KEY = 'memoria_folds';
+function bindFoldableSections() {
+    let saved = null;
+    try { saved = JSON.parse(globalThis.localStorage?.getItem(FOLD_KEY) || 'null'); } catch { /* 처음 */ }
+    const open = new Set(Array.isArray(saved) ? saved : []);
+    const remember = () => { try { globalThis.localStorage?.setItem(FOLD_KEY, JSON.stringify([...open])); } catch { /* 기억 못 해도 동작에는 지장 없다 */ } };
+    $('#memoria_settings .memoria__panel[data-panel="config"], #memoria_settings .memoria__panel[data-panel="tools"]').each(function () {
+        const panel = $(this).data('panel');
+        $(this).children('.memoria__section').each(function (i) {
+            const $head = $(this).children('.memoria__section-head').first();
+            const title = $head.find('h4').first().text().trim();
+            if (!$head.length || !title) return;
+            const key = `${panel}:${title}`;
+            const isOpen = saved ? open.has(key) : (panel === 'config' && i === 0);
+            if (isOpen) open.add(key);
+            $(this).addClass('is-foldable').toggleClass('is-collapsed', !isOpen);
+            $head.attr({ role: 'button', tabindex: 0, 'aria-expanded': String(isOpen) });
+            const toggle = () => {
+                const collapsed = !$(this).hasClass('is-collapsed');
+                $(this).toggleClass('is-collapsed', collapsed);
+                $head.attr('aria-expanded', String(!collapsed));
+                if (collapsed) open.delete(key); else open.add(key);
+                remember();
+                if (!collapsed) renderAllPanels(); // 숨어 있던 목록(사서 일지 등)을 펴는 순간 채운다
+            };
+            $head.on('click', (e) => { if (!$(e.target).closest('.menu_button, button, input, select, a, label').length) toggle(); });
+            $head.on('keydown', (e) => { if ((e.key === 'Enter' || e.key === ' ') && e.target === $head[0]) { e.preventDefault(); toggle(); } });
+        });
+    });
+}
+
 function bindSettingsSearch() {
     const $input = $('#memoria_settings_search');
     if (!$input.length) return;
@@ -8761,6 +8796,7 @@ function bindUI() {
     flagBind('#memoria_style_guard', 'styleGuard');
     flagBind('#memoria_recall_quotes', 'recallQuotes');
     flagBind('#memoria_recall_cooldown', 'recallCooldown');
+    bindFoldableSections();
     flagBind('#memoria_ban_in_chat', 'banInChat', { reinject: false });
     flagBind('#memoria_ban_tell', 'banTell');
     $('#memoria_banned_phrases').on('change', function () {
