@@ -197,7 +197,7 @@ test('a summary with an invented figure is rewritten once, and flagged only if i
     a.context.generateRaw = async ({ prompt }) => { asked.push(prompt[0].content); return replies[asked.length - 1]; };
     assert.equal(await a.run('maybeSummarizeChunk')(store), 1);
     assert.equal(asked.length, 2);
-    assert.match(asked[1], /appear nowhere in the material above: 1500/);
+    assert.match(asked[1], /appear nowhere in the material above \(1500\)/);
     assert.match(store.chunkSummaries[0].text, /1200골드/);
     assert.equal(store.chunkSummaries[0].unverified, undefined);
 
@@ -263,4 +263,48 @@ test('light tasks and summaries can use their own model', async () => {
     assert.deepEqual(sent.map(b => [b.model, b.reasoning_effort ?? null]),
         [['main', 'low'], ['main', 'low'], ['cheap', 'low'], ['cheap', null], ['cheap', null]],
         'a model that rejects the reasoning setting is retried without it, and not asked again');
+});
+
+test('a summary that drops a pivotal turn is rewritten once with the turn named', async () => {
+    const a = await app();
+    const store = a.getStore();
+    const settings = a.getSettings();
+    settings.chunkTurns = 3; settings.consolidateEvery = 0; settings.arcConsolidateEvery = 0;
+    store.turnCounter = 3;
+    store.turns = [
+        { id: 't1', mesId: 1, mesHash: 1, turnIndex: 1, summary: '두 사람이 시장을 구경했다.', importance: 0.4 },
+        { id: 't2', mesId: 2, mesHash: 2, turnIndex: 2, summary: '보라가 아리아에게 편지의 발신인이 자신이라고 고백했다.', importance: 0.9 },
+        { id: 't3', mesId: 3, mesHash: 3, turnIndex: 3, summary: '저녁을 먹고 숙소로 돌아왔다.', importance: 0.4 },
+    ];
+    const replies = ['PLOT:\n- 두 사람이 시장을 구경하고 저녁을 먹은 뒤 숙소로 돌아왔다.', 'PLOT:\n- 시장을 구경했다.\n- 보라가 아리아에게 편지의 발신인이 자신이라고 고백했다.\n- 숙소로 돌아왔다.'];
+    const asked = [];
+    a.context.generateRaw = async ({ prompt }) => { asked.push(prompt[0].content); return replies[asked.length - 1]; };
+    await a.run('maybeSummarizeChunk')(store);
+    assert.equal(asked.length, 2);
+    assert.match(asked[1], /left out pivotal turns marked ★[\s\S]*발신인이 자신이라고 고백/);
+    assert.match(store.chunkSummaries[0].text, /고백했다/);
+    assert.equal(store.chunkSummaries[0].unverified, undefined);
+});
+
+test('a status value with an invented figure is not filed; the scene clock and grounded figures are', async () => {
+    const a = await app();
+    const chat = a.context.chat;
+    chat.push({ is_user: true, mes: '상점에 들어갔다', name: '여행자' }, { is_user: false, mes: '아리아는 지갑에서 은화 30닢을 꺼내 계산대에 올려놓았다. 주인은 고개를 끄덕였다.', name: '아리아' });
+    a.context.generateRaw = async () => JSON.stringify({ digest: '아리아가 은화를 냈다.', memories: [],
+        status: [{ entity: '아리아', slot: 'money', value: '은화 470닢 남음' }, { entity: '아리아', slot: 'paid', value: '은화 30닢' }, { entity: 'scene', slot: 'date', value: '12일째' }] });
+    a.getSettings().recordBatch = 1;
+    a.getSettings().chunkTurns = 50;
+    assert.equal(await a.run('commitTurns')([1]), true);
+    const slots = [...a.getStore().entityStates.map(s => `${s.entity}.${s.slot}`)].sort();
+    assert.deepEqual(slots, ['scene.date', '아리아.paid']);
+});
+
+test('usage is counted per task and resets with the day', async () => {
+    const { noteUsage, usageTotals, roughTokens } = await import('../craft-engine.mjs');
+    assert.equal(roughTokens('가나다 abcd'), 4);
+    let u = noteUsage(null, 'record', '가'.repeat(100), '나'.repeat(10), '2026-01-01');
+    u = noteUsage(u, 'light', 'abcd'.repeat(10), '', '2026-01-01');
+    assert.deepEqual(usageTotals(u), { calls: 2, in: 110, out: 10 });
+    u = noteUsage(u, 'record', '가', '나', '2026-01-02');
+    assert.deepEqual(usageTotals(u), { calls: 1, in: 1, out: 1 });
 });

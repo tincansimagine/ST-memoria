@@ -483,3 +483,32 @@ export function ungroundedFigures(text, source) {
     // 한 자리 숫자는 세어서 적은 것일 수 있다("두 사람" → "2명") — 두 자리 이상과 소수만 본다
     return [...new Set(digits(text))].filter(n => n.length >= 2 && !have.has(n));
 }
+
+/* ------------------------------------------------------------
+ * 쓴 만큼 보기 — 기억을 쌓는 데 오늘 얼마나 썼는지
+ *
+ * 기억 확장의 비용은 눈에 안 보이는 곳에서 나간다. 어떤 작업이 몇 번 불렸고 얼마나 읽고 썼는지를
+ * 날짜별로 세어 두면, 묶어 기록이나 작업별 모델 같은 설정이 실제로 효과가 있었는지 볼 수 있다.
+ * 토큰 수는 글자 수로 어림한다 (한글·한자·가나는 글자당 약 1토큰, 그 밖은 4글자당 1토큰).
+ * ------------------------------------------------------------ */
+
+export function roughTokens(text) {
+    const s = String(text ?? '');
+    const wide = (s.match(/[\u1100-\u11ff\u3040-\u30ff\u3130-\u318f\u3400-\u9fff\uac00-\ud7af]/g) || []).length;
+    return Math.round(wide + (s.length - wide) / 4);
+}
+
+/** usage: { day, tasks: { record: { calls, in, out }, ... } } — 날짜가 바뀌면 새로 센다. 반환: 갱신된 usage */
+export function noteUsage(usage, task, input, output, day) {
+    const next = usage && usage.day === day ? usage : { day, tasks: {} };
+    const row = next.tasks[task] || (next.tasks[task] = { calls: 0, in: 0, out: 0 });
+    row.calls += 1;
+    row.in += roughTokens(input);
+    row.out += roughTokens(output);
+    return next;
+}
+
+export function usageTotals(usage) {
+    const rows = Object.entries(usage?.tasks || {});
+    return rows.reduce((a, [, r]) => ({ calls: a.calls + r.calls, in: a.in + r.in, out: a.out + r.out }), { calls: 0, in: 0, out: 0 });
+}
