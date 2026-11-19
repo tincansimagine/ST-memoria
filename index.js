@@ -40,7 +40,7 @@ import { ARGUMENT_TYPE, SlashCommandArgument } from "../../../slash-commands/Sla
 import { MacrosParser } from "../../../../scripts/macros.js";
 import { NARRATOR_PERSPECTIVE, isSharedPerspective, hasChatPerspective, resolvePerspective, findAssociations, sameKnowledgeScope, archiveSnapshot, validateArchive, addCheckpoint, archiveChanges, packetSections } from './archive-engine.mjs';
 import { showArchiveLibrary } from './library-ui.mjs';
-import { withDeadline, parsePhraseList, stripPhrases, hasPhrase, findRepeatedPhrases, pickBundleValues, resolveBundleName, switchBundle, saveBundle, deleteBundle, renameBundle, exportBundle, parseBundleFile, diffStableEntries, shouldRefreeze, createActivityLog, findRivalExtensions, splitClosedLine, sleepStaleThreads, pickPledges, stripOpenLines, THREAD_KINDS } from './craft-engine.mjs';
+import { withDeadline, parsePhraseList, stripPhrases, hasPhrase, findRepeatedPhrases, pickBundleValues, resolveBundleName, switchBundle, saveBundle, deleteBundle, renameBundle, exportBundle, parseBundleFile, diffStableEntries, shouldRefreeze, createActivityLog, findRivalExtensions, splitClosedLine, sleepStaleThreads, pickPledges, stripOpenLines, THREAD_KINDS, recallCooldown, pushRecallHistory, isEndedValue } from './craft-engine.mjs';
 import { findStatusBars, statusOneLine, isPauseDirective, isPauseMessage, buildTimelineRows, filterTimelineRows, timelineMarkdown, timelineCsv, layoutTimelineGraph, verifyIssues } from './scene-engine.mjs';
 import { heroHtml, pulseSvg, flowHtml, railHtml, tableHtml, bondMapSvg, bondCardsHtml, statusListHtml } from './story-view.mjs';
 
@@ -327,6 +327,7 @@ const DEFAULT_SETTINGS = Object.freeze({
     splitInjection: false,    // 고정 장부 — 안정 구간을 얼려 따로 주입하고 매 턴 바뀌는 것만 최근 대화 옆에 (프롬프트 캐시)
     stableRefreshTurns: 24,   // 고정 장부를 이 턴 수마다 새로 뜬다 (0 = 달라진 줄이 넘칠 때만)
     styleGuard: true,         // "기록은 사실만 — 문체는 지금 대화를 따른다" 지시
+    recallCooldown: true,     // 회상 쉬어가기 — 앞선 답변들에 연달아 실린 기억은 순서를 미룬다 (직접 꺼내면 그대로 나온다)
     recallQuotes: true,       // 회상에 옛 원문 대사 인용을 싣는다 (옛 말투가 돌아오면 끈다)
     voiceSamples: 2,          // 장면 속 인물마다 실을 실제 남긴 말 수 (0 = 싣지 않음)
     bannedPhrases: '',        // 삼갈 표현·반복 표현 (줄바꿈·쉼표 구분) — 장부에서 걷어낸다
@@ -2192,6 +2193,12 @@ function sanitizeExtraction(raw, userText, assistantText, { memoryCap = 12 } = {
             return tag;
         }).filter(Boolean).slice(0, 8);
 
+    // 지나간 기억: 프롬프트에 준 [m1] 꼬리표 가운데 이번 교환으로 더는 맞지 않게 된 것.
+    // "지금은 어떤지" 한 구절이 없는 항목은 받지 않는다 — 근거 없이 기억을 물리지 않는다.
+    out.outdated = (Array.isArray(raw?.outdated) ? raw.outdated : [])
+        .map(o => ({ tag: String(o?.tag || '').trim().toLowerCase(), now: cleanStr(o?.now, 160) }))
+        .filter(o => /^m\d{1,2}$/.test(o.tag) && o.now).slice(0, 6);
+
     const rawCanon = Array.isArray(raw?.canon) ? raw.canon : (Array.isArray(raw?.world_rules) ? raw.world_rules : []);
     for (const r of rawCanon.slice(0, 8)) {
         const key = toSnake(r?.key);
@@ -2355,8 +2362,12 @@ function removeDerivedForTurn(store, turnIndex) {
     const turnId = store.turns.find(t => t.turnIndex === turnIndex)?.id;
     store.memories = store.memories.filter(m => m.pinned || m.manual
         || (m.turnIndex !== turnIndex && !(m.sources || []).some(s => s.turnId === turnId)));
+    // 이 턴이 "지나간 일"로 물렸던 기억·상태·물건은 다시 살아난다
+    for (const m of store.memories) if (m.retired?.turn === turnIndex) delete m.retired;
+    for (const it of (store.items || [])) if (it.dormant === turnIndex) delete it.dormant;
     store.worldRules = rollbackOrDrop(store.worldRules, turnIndex);
-    store.entityStates = rollbackOrDrop(store.entityStates, turnIndex);
+    store.entityStates = rollbackOrDrop(store.entityStates, turnIndex)
+        .map(s => (s.expired === turnIndex ? { ...s, expired: undefined } : s));
     // 스와이프 롤백은 "그 턴에 처음 생긴" 서약만 지운다 — 옛 서약이 이 턴에 재발행돼
     // turnIndex만 갱신된 경우까지 지우면 오래 지켜온 서약이 통째로 증발한다
     store.locks = store.locks.flatMap(l => {
@@ -2558,7 +2569,8 @@ function upsertEntityState(store, state, turnIndex) {
     const cur = store.entityStates[idx];
     const createdTurn = cur.createdTurn ?? cur.turnIndex; // 처음 생긴 턴 보존 — 스와이프 롤백 증발 방지
     if ((cur.turnIndex || 0) > turnIndex) return; // 최신성 보호
-    if (cur.value === state.value) { cur.turnIndex = turnIndex; cur.createdTurn = createdTurn; return; }
+    // 다시 적혔다는 것은 아직 살아 있는 상태라는 뜻 — "지나간 상태" 표시를 걷는다
+    if (cur.value === state.value) { cur.turnIndex = turnIndex; cur.createdTurn = createdTurn; delete cur.expired; return; }
     if ((cur.turnIndex || 0) === turnIndex) {
         // 같은 턴 안의 중복 항목 — 값만 갱신하고 이전값 이력은 유지
         store.entityStates[idx] = { id: cur.id, ...state, turnIndex, createdTurn, prev: cur.prev ?? null, prevTurn: cur.prevTurn ?? null };
@@ -2860,6 +2872,42 @@ function upsertItem(store, it, turnIndex) {
     if (it.holder) existing.holder = it.holder;
     if (it.status) existing.status = it.status;
     existing.updatedTurn = turnIndex;
+    delete existing.dormant; // 다시 등장한 물건은 깨운다
+}
+
+/* 이야기가 흘러가면 더는 맞지 않게 될 수 있는 종류 — 일어난 일(event)·속마음(impression)은 지나가도 사실이다 */
+const STANDING_KINDS = new Set(['fact', 'preference', 'promise', 'goal', 'item', 'place', 'relationship']);
+
+/**
+ * 이 글(방금 끝난 교환)이 다루는 옛 "지금도 그런 것" 기억을 고른다 — 사서의 지나간 기억 점검에 올릴 후보.
+ * 글과 실제로 겹치는 것만 올린다: 무관한 기억까지 보여 주면 토큰만 쓰고 오판이 는다.
+ */
+function standingMemoriesNear(store, text, beforeTurn, cap = 8) {
+    const hay = String(text || '').toLowerCase();
+    if (hay.length < 20) return [];
+    const words = new Set(hay.match(/[\p{L}\p{N}]{2,}/gu) || []);
+    const flat = hay.replace(/[^\p{L}\p{N}]+/gu, '');
+    const grams = new Set();
+    for (let i = 0; i < flat.length - 1; i++) grams.add(flat.slice(i, i + 2));
+    const cover = (t) => {
+        const low = String(t || '').toLowerCase();
+        const w = [...new Set(low.match(/[\p{L}\p{N}]{2,}/gu) || [])];
+        const f = low.replace(/[^\p{L}\p{N}]+/gu, '');
+        const g = new Set();
+        for (let i = 0; i < f.length - 1; i++) g.add(f.slice(i, i + 2));
+        const byWord = w.length ? w.filter(x => words.has(x)).length / w.length : 0;
+        const byGram = g.size >= 8 ? [...g].filter(x => grams.has(x)).length / g.size : 0;
+        return Math.max(byWord, byGram);
+    };
+    return store.memories
+        .filter(m => STANDING_KINDS.has(m.kind) && !m.retired && !m.disabled && !m.manual && !m.pinned
+            && (m.turnIndex || 0) > 0 && m.turnIndex < beforeTurn && !(m.tags || []).includes('episode_raw'))
+        .map(m => ({ m, near: cover(m.summary), named: (m.entities || []).some(e => String(e).length >= 2 && hay.includes(String(e).toLowerCase())) }))
+        // 이름만 같다고 올리지 않는다 — 내용이 닿아야 한다 (이름이 겹치면 문턱을 조금 낮춘다)
+        .filter(x => x.near >= (x.named ? 0.34 : 0.5))
+        .sort((a, b) => (b.near + (b.m.shown || 0) * 0.02) - (a.near + (a.m.shown || 0) * 0.02))
+        .slice(0, cap)
+        .map(x => x.m);
 }
 
 function pruneMemories(store) {
@@ -2965,6 +3013,19 @@ async function commitTurns(mesIds, { silent = true, force = false, retry = 1 } =
         ? '\n\nPLEDGE CHECK: the file below lists open pledges with tags like [p1]. If this exchange clearly settles one ON-SCREEN (the secret is revealed, the promise is kept, the thread is closed), include a top-level array "settled" naming the tag and, in one clause, how it was settled, e.g. "settled":[{"tag":"p1","how":"Mina read the letter aloud at dinner"}]. Only what actually happened — never predict, never guess.'
         : '';
 
+    // 지나간 기억 점검 — 이번 교환과 같은 사람·물건을 다루는 옛 기억을 꼬리표와 함께 보여 주고,
+    // 이 교환으로 더는 맞지 않게 된 것을 함께 묻는다 (호출을 따로 쓰지 않는다).
+    // 잃어버린 물건, 이미 치른 약속, 뒤집힌 사실이 "지금도 그런 것"처럼 계속 회상되는 일을 막는다.
+    const shelfTagMap = new Map();
+    const shelfLines = standingMemoriesNear(store, `${userText}\n${assistantText}`, units[0].turn.turnIndex).map((m, i) => {
+        const tag = `m${i + 1}`;
+        shelfTagMap.set(tag, m);
+        return `[${tag}] (${m.kind}) ${m.summary}`;
+    });
+    const shelfDirective = shelfLines.length
+        ? '\n\nSHELF CHECK: the file below lists earlier memories with tags like [m1] that touch the same people or things. If this exchange shows ON-SCREEN that one no longer holds — the object was used up, lost, handed over or destroyed; the plan was carried out or dropped; the fact was overturned; the taste or the tie changed — include a top-level array "outdated" naming the tag and, in one clause, what is true instead, e.g. "outdated":[{"tag":"m2","now":"Mina threw the key into the river"}]. A memory that is merely not mentioned, or still true, is NOT outdated. What happened stays happened: only a standing matter can go out of date. Most exchanges outdate nothing.'
+        : '';
+
     // 도감 명단 — 사서가 "누가 아직 카드가 없는지"를 추측하지 않고 알 수 있게 한다.
     // 명단에 없는 등장인물(주역 포함)은 이번 턴에 바로 카드를 연다.
     // 비활성 카드도 명단에 올린다 — 사용자가 치운 인물을 사서가 새 카드로 되살리지 못하게.
@@ -2990,6 +3051,7 @@ async function commitTurns(mesIds, { silent = true, force = false, retry = 1 } =
     const userPrompt = [
         refBlock,
         pledgeLines.length ? `Open pledges on file:\n${pledgeLines.join('\n')}\n` : '',
+        shelfLines.length ? `Earlier memories on file (for the shelf check — do not refile):\n${shelfLines.join('\n')}\n` : '',
         castLine,
         bondLines.length ? `Bonds on file (current stage — refile one only if this exchange moved it):\n${bondLines.join('\n')}\n` : '',
         recent ? `Already shelved (do not refile) — recent turn digests:\n${recent}\n` : '',
@@ -2999,6 +3061,8 @@ async function commitTurns(mesIds, { silent = true, force = false, retry = 1 } =
             : ['The exchange to shelve:',
                 `<user name="${userLabel}">\n${userText.slice(0, 4000)}\n</user>`,
                 `<assistant name="${charLabel}">\n${assistantText.slice(0, 6000)}\n</assistant>`]),
+        // 긴 원문을 읽고 나면 출력 언어 지시가 흐려진다 — 맨 끝에서 한 번 더 짚는다 (자동일 때는 생략)
+        settings.summaryLanguage && settings.summaryLanguage !== 'auto' ? `\n(${languageDirective()})` : '',
     ].filter(Boolean).join('\n');
     const memoryCap = batch ? Math.min(16, 6 + units.length * 2) : 12;
     const batchDirective = batch
@@ -3010,7 +3074,7 @@ async function commitTurns(mesIds, { silent = true, force = false, retry = 1 } =
     try {
         llmBusy = true;
         updateStatusUI('기록 중…');
-        const sysPrompt = `${settings.prompts.archivist}${archivistTrackingDirective()}${pledgeDirective}${batchDirective}\n\n${languageDirective()}`;
+        const sysPrompt = `${settings.prompts.archivist}${archivistTrackingDirective()}${pledgeDirective}${shelfDirective}${batchDirective}\n\n${languageDirective()}`;
         // 파싱 실패·API 오류(색인/시계 재계산 직후 혼잡 포함) 대비: 간격을 두고 최대 3회 시도
         for (let attempt = 0; attempt < 3 && !extracted; attempt++) {
             if (attempt > 0) await new Promise(r => setTimeout(r, attempt * 2500)); // 순간 혼잡·레이트리밋을 흘려보낸다
@@ -3158,6 +3222,16 @@ async function commitTurns(mesIds, { silent = true, force = false, retry = 1 } =
             lock.resolution = extracted.settledHow?.[tag] || null; // 어떻게 풀렸는지 (복선 회수의 기록)
         }
     }
+    // 사서가 "더는 맞지 않는다"고 본 옛 기억을 물린다 — 지우지 않는다: 평소 회상에서만 빠지고,
+    // 그 일을 직접 꺼내거나 옛일을 되짚을 때는 "지금은 이렇다"는 꼬리표와 함께 다시 나온다.
+    let retiredNow = 0;
+    for (const o of (extracted.outdated || [])) {
+        const m = shelfTagMap.get(o.tag);
+        if (!m || m.retired || !store.memories.includes(m)) continue;
+        m.retired = { turn: turn.turnIndex, now: o.now };
+        retiredNow++;
+    }
+    if (retiredNow) logActivity('record', `지나간 기억 ${retiredNow}개를 물렸어요 (기억 탭에서 되살릴 수 있어요)`);
     for (const b of (extracted.bonds || [])) upsertBond(store, b, turn.turnIndex);
     if (settings.characterTracking) {
         for (const c of (extracted.characters || [])) upsertCharacter(store, c, turn.turnIndex);
@@ -3395,6 +3469,8 @@ async function maybeFoldEras(store) {
 }
 
 /** 요약에 넘기는 턴 기록의 꼬리표 — 순서(tN), 결정적 턴 표시(★), 작중 시간·장소 */
+const SETTLED_AT_SUMMARY = '요약 때 정리됨';
+
 function digestTag(t) {
     const bits = [`t${t.turnIndex}${(t.importance ?? 0) >= 0.75 ? ' ★' : ''}`];
     if (t.when) bits.push(cleanStr(t.when, 60));
@@ -3441,11 +3517,29 @@ async function maybeSummarizeChunk(store, { flushAll = false, onProgress = null,
         const threadDirective = threads.length
             ? '\n\nTHREAD CHECK: after the record, add ONE final line "CLOSED: o2, o5" naming every listed open thread that these turns (or the earlier records shown) have clearly settled, answered, carried out, abandoned, or made pointless. A thread nobody will plausibly return to — a passing errand, a small question already overtaken by events — counts as closed. Write "CLOSED: none" when all are still live. This line is filing metadata, not part of the record.'
             : '';
+        // 낡은 기록 점검: 같은 호출에 얹어, 이 구간 이전부터 그대로 서 있는 상태·물건·자주 불려 나온 기억 가운데
+        // 이 구간이 보여 준 일로 더는 맞지 않게 된 것을 묻는다. 호출을 따로 쓰지 않는다.
+        const staleTags = new Map();
+        const tagStale = (prefix, rows, line) => rows.map((x, i) => { const tag = `${prefix}${i + 1}`; staleTags.set(tag, x); return `[${tag}] ${line(x)}`; });
+        const staleLines = [
+            ...tagStale('s', store.entityStates.filter(x => x.claim !== 'belief' && x.expired == null && !isVolatileSlot(x.slot) && !isEndedValue(x.value)
+                && String(x.entity || '').toLowerCase() !== 'scene' && (x.turnIndex || 0) < fromTurn)
+                .sort((a, b) => (a.turnIndex || 0) - (b.turnIndex || 0)).slice(0, 8), x => `status — ${x.entity}.${x.slot} = ${x.value}`),
+            ...tagStale('i', (settings.itemTracking ? store.items : []).filter(x => !x.disabled && !x.manual && x.dormant == null && (x.updatedTurn || 0) < fromTurn)
+                .sort((a, b) => (a.updatedTurn || 0) - (b.updatedTurn || 0)).slice(0, 4), x => `item — ${x.name}${x.holder ? ` (held by ${x.holder})` : ''}${x.status ? ` [${x.status}]` : ''}`),
+            ...tagStale('m', store.memories.filter(x => STANDING_KINDS.has(x.kind) && !x.retired && !x.disabled && !x.manual && !x.pinned
+                && (x.shown || 0) >= 3 && (x.turnIndex || 0) > 0 && x.turnIndex < fromTurn)
+                .sort((a, b) => (b.shown || 0) - (a.shown || 0)).slice(0, 6), x => `memory (${x.kind}) — ${x.summary}`),
+        ];
+        const staleBlock = staleLines.length ? `Standing records on file:\n${staleLines.join('\n')}\n` : '';
+        const staleDirective = staleLines.length
+            ? '\n\nSTALE CHECK: the file also lists standing records tagged like [s1], [i2], [m3] — a status value, an item, a remembered fact — all written before these turns. After the record, add ONE final line "STALE: s1, m3" naming every listed record that these turns show is no longer true or no longer matters: healed, left behind, used up, handed over, overturned, carried out. Not being mentioned is NOT a reason — name a record only when the turns show the change. Write "STALE: none" when nothing changed. This line is filing metadata, not part of the record.'
+            : '';
         try {
             const refBlock = await buildReferenceBlock({ lean: true });
-            const userPrompt = [refBlock, previousSummariesForContext(store), threadBlock, `Turn digests to weave:\n${parts.join('\n')}`]
+            const userPrompt = [refBlock, previousSummariesForContext(store), threadBlock, staleBlock, `Turn digests to weave:\n${parts.join('\n')}`]
                 .filter(Boolean).join('\n');
-            const reply = splitClosedLine(await callAuxLLM(`${settings.prompts.chunk}${threadDirective}\n\n${languageDirective()}`, userPrompt, { maxTokens: auxTokens(4000) }));
+            const reply = splitClosedLine(await callAuxLLM(`${settings.prompts.chunk}${threadDirective}${staleDirective}\n\n${languageDirective()}`, userPrompt, { maxTokens: auxTokens(4000) }));
             text = cleanMultiline(sanitizeRecordOutput(reply.text), 2000);
             if (text) {
                 let closed = 0;
@@ -3456,10 +3550,20 @@ async function maybeSummarizeChunk(store, { flushAll = false, onProgress = null,
                     if (lock.manual) { lock.suggestResolved = true; lock.suggestTurn = toTurn; continue; }
                     lock.status = 'resolved';
                     lock.resolvedTurn = toTurn;
-                    lock.resolution = lock.resolution || '요약 때 정리됨';
+                    lock.resolution = lock.resolution || SETTLED_AT_SUMMARY;
                     closed++;
                 }
                 if (closed) logActivity('summary', `풀렸거나 의미가 없어진 떡밥 ${closed}개를 닫았어요`);
+                let aged = 0;
+                for (const tag of reply.stale || []) {
+                    const row = staleTags.get(tag);
+                    if (!row) continue;
+                    if (tag[0] === 's') row.expired = toTurn;
+                    else if (tag[0] === 'i') row.dormant = toTurn;
+                    else row.retired = { turn: toTurn, now: '' };
+                    aged++;
+                }
+                if (aged) logActivity('summary', `더는 맞지 않는 상태·물건·기억 ${aged}개를 주입에서 뺐어요 (서고에는 남아 있고, 되살릴 수 있어요)`);
             }
         } catch (e) {
             if (strict) throw e;
@@ -3957,6 +4061,24 @@ function knowsMemory(m, auth) {
     return (m.knowers || []).some(k => auth.has(String(k).toLowerCase()));
 }
 
+/**
+ * 사용자의 입력이 이 기억의 "내용"을 직접 꺼냈는가 — 이름만 겹치는 것은 치지 않는다.
+ * (같은 인물이 나온다는 이유만으로 지나간 기억·방금 실린 기억이 다시 올라오면 안 된다.)
+ * 이름을 뺀 낱말 가운데 둘 이상이 입력에 있어야 한다. 조사·어미가 붙는 말은 끝 글자를 떼고 견준다.
+ */
+function raisedDirectly(m, queryLower, names = []) {
+    const own = (m.entities || []).map(e => String(e).toLowerCase());
+    const isName = (t) => [...names, ...own].some(n => n.includes(t) || t.includes(n));
+    let hits = 0;
+    for (const t of new Set(String(m.summary || '').toLowerCase().match(/[\p{L}\p{N}]{2,}/gu) || [])) {
+        const latin = /^[a-z0-9]+$/.test(t);
+        if ((latin && t.length < 4) || isName(t)) continue;
+        const stem = !latin && t.length >= 3 ? t.slice(0, t.length - 1) : t;
+        if (queryLower.includes(stem) && ++hits >= 2) return true;
+    }
+    return false;
+}
+
 /** "우리 처음 만났을 때", "remember when" 같은 과거 회상형 질의 감지 */
 const PAST_QUERY_RE = /(처음|예전|옛날|그때|그 때|지난번|언제였|언제 였|기억나|기억 나|기억해|기억하|첫날|첫 만남|만났을 때|했었|였었|하던 때|remember when|back then|first met|first time|used to|at first|way back|昔|最初|あの時|あのとき|覚えて)/i;
 
@@ -3991,6 +4113,13 @@ async function retrieveMemories(queryText, recentUserTexts, sceneText = '') {
 
     // 서사 시계: 이야기 속에서 흐른 시간도 노화 축으로 (시간 스킵이 잦은 롤플레잉 대응)
     const storyAges = settings.storyClock ? buildStoryAgeMap(store) : null;
+
+    // 회상 쉬어가기: 앞선 답변들에 연달아 실렸던 기억은 점수를 깎는다 (지금 다시 쓰는 답변의 몫은 세지 않는다)
+    const coolHistory = settings.recallCooldown !== false ? recallHistoryFor(getCurrentChatId()) : [];
+    const knownNames = [name1, name2, ...(store.characters || []).flatMap(c => [c.name, ...(c.aliases || [])])]
+        .map(n => String(n || '').toLowerCase()).filter(n => n.length >= 2);
+    let coolBefore = chat.length - 1;
+    for (let i = chat.length - 1; i >= 0; i--) { if (chat[i]?.is_user && !isSideMessage(chat[i])) { coolBefore = i; break; } }
 
     // 장면 축도 의미 임베딩을 타야 한다. 롤플레잉 입력은 "응", "그래서?", 짧은 대사가 대부분이라
     // 질의 자체에는 신호가 거의 없고 직전 장면이 실질적인 질의 노릇을 한다 — 여기서 빠지면
@@ -4093,6 +4222,11 @@ async function retrieveMemories(queryText, recentUserTexts, sceneText = '') {
         if (cos < settings.minCosine && lex < 0.035 && !entityHit && !hintHit
             && !(presenceHit && cos >= settings.minCosine * 0.5)) continue;
 
+        // 지나간 기억(잃어버린 물건, 이미 치른 약속, 뒤집힌 사실)은 평소 회상에서 빠진다.
+        // 사용자가 그 일을 직접 꺼내거나 옛일을 되짚을 때만 후보가 되고, 주입될 때 "지금은 이렇다"가 붙는다.
+        const direct = hintHit || raisedDirectly(m, queryLower, knownNames);
+        if (m.retired && !pastQuery && !direct) continue;
+
         const age = Math.max(0, currentTurn - m.turnIndex);
         // 화석화: 턴 나이와 이야기 나이 중 더 오래됐다고 말하는 쪽을 따른다 (10년 스킵이면 직전 턴도 옛일)
         let fossil = fossilWeight(age, settings);
@@ -4101,17 +4235,20 @@ async function retrieveMemories(queryText, recentUserTexts, sceneText = '') {
         // 의도적 시간 스킵 뒤에도 핵심 과거가 회상 경쟁에서 밀리지 않게 바닥을 받친다
         if (m.importance >= 0.75) fossil = Math.max(fossil, 0.7);
         const recency = pastQuery ? 0.55 : Math.exp(-age / 18) * fossil;
-        const score = 0.62 * Math.max(0, cos) + 0.18 * lex + 0.12 * m.importance + 0.08 * recency
-            + (entityHit ? 0.08 : 0) + (hintHit ? 0.07 : 0) + (presenceHit ? 0.05 : 0);
+        const cool = coolHistory.length
+            ? recallCooldown(coolHistory, m.id, { before: coolBefore, direct: direct || pastQuery, echoed: (m.echoes || 0) > 0 && !(m.coldRun > 0) })
+            : 1;
+        const score = (0.62 * Math.max(0, cos) + 0.18 * lex + 0.12 * m.importance + 0.08 * recency
+            + (entityHit ? 0.08 : 0) + (hintHit ? 0.07 : 0) + (presenceHit ? 0.05 : 0)) * cool * (m.retired ? 0.7 : 1);
         if (score < settings.minScore) continue;
         candidates.push({ m, score, vec });
-        trace.set(m.id, { reason: [entityHit && '인물 일치', hintHit && '검색 힌트', presenceHit && '현재 장면의 인물', lex >= 0.035 && '어휘 일치', cos >= settings.minCosine && '문맥 유사도'].filter(Boolean).join(' · ') || '관련성 점수', score, mode: 'direct' });
+        trace.set(m.id, { reason: [cool < 0.8 && '연달아 실려 순서를 미룸', m.retired && '지나간 기억', entityHit && '인물 일치', hintHit && '검색 힌트', presenceHit && '현재 장면의 인물', lex >= 0.035 && '어휘 일치', cos >= settings.minCosine && '문맥 유사도'].filter(Boolean).join(' · ') || '관련성 점수', score, mode: 'direct' });
     }
 
     candidates.sort((a, b) => b.score - a.score);
     if (settings.associativeRecall) {
         const seeds = candidates.filter(c => c.score >= Math.max(0.18, (candidates[0]?.score || 0) * 0.75)).slice(0, 3);
-        const links = findAssociations(eligible, seeds, {
+        const links = findAssociations(eligible.filter(m => !m.retired), seeds, {
             canonicalName: n => entityKey(canonEntityName(store, n)),
         });
         for (const link of links) {
@@ -4235,6 +4372,15 @@ async function pickRecalledChapter(store, query, sceneText) {
  * 회상 적중 학습 — 응답을 관련성 라벨로 쓰는 자기교정 루프
  * ============================================================ */
 
+/** 최근 답변들에 실린 회상 이력 — 채팅별, 메모리에만 둔다 (새로 고치면 처음부터: 깎임은 며칠 가는 사실이 아니다) */
+let recallHistory = { chatId: '', list: [] };
+function recallHistoryFor(chatId) {
+    return recallHistory.chatId === chatId ? recallHistory.list : [];
+}
+function noteRecallHistory(chatId, at, ids) {
+    recallHistory = { chatId, list: pushRecallHistory(recallHistoryFor(chatId), at, ids) };
+}
+
 /** 직전 주입에 실린 회상 기억 목록 (다음 응답에서 반영 여부를 채점) */
 let recallAudit = null; // { ids: string[], at: number }
 
@@ -4244,9 +4390,11 @@ let recallAudit = null; // { ids: string[], at: number }
  * 여러 번 실렸는데 계속 무시됨 → 미세 감쇠 (자리만 차지하는 회상)
  * 변화폭은 아주 작게, 상·하한을 두어 한두 턴의 우연이 서고를 흔들지 못하게 한다.
  */
-function auditRecallEcho(mes) {
+function auditRecallEcho(mes, mesId = chat.indexOf(mes)) {
     const audit = recallAudit;
     recallAudit = null; // 1회 소모
+    // 이 답변에 실렸던 회상을 이력에 적는다 — 다음 턴들의 "쉬어가기" 판단에 쓴다 (빈 묶음도 한 턴으로 센다)
+    if (audit && mesId >= 0) noteRecallHistory(getCurrentChatId(), mesId, audit.ids);
     if (!audit || !audit.ids.length) return;
     if (Date.now() - audit.at > 30 * 60 * 1000) return; // 낡은 감사표는 폐기
     const replyLower = visibleProse(mes?.mes).toLowerCase();
@@ -4295,6 +4443,15 @@ const outdatedRecallNotes = new Map();
 function markOutdatedRecall(memories, store) {
     outdatedRecallNotes.clear();
     if (!memories.length) return;
+    // 그 뒤 이야기: 회상된 기억이 걸어 둔 약속·떡밥이 이미 풀렸으면 그 사실을 붙인다 —
+    // 붙이지 않으면 "같이 보러 가자"던 옛 장면이 아직 남은 약속처럼 읽힌다
+    const settled = (store.locks || []).filter(l => l.status === 'resolved' && l.resolvedTurn);
+    for (const m of settled.length ? memories : []) {
+        if (m.retired) continue;
+        const hit = settled.find(l => l.resolvedTurn > (m.turnIndex || 0)
+            && ((l.createdTurn ?? l.turnIndex) === m.turnIndex ? textOverlap(m.summary, l.summary) >= 0.3 : textOverlap(m.summary, l.summary) >= 0.6));
+        if (hit) outdatedRecallNotes.set(m.id, `this has since been settled${hit.resolution && hit.resolution !== SETTLED_AT_SUMMARY ? `: ${hit.resolution}` : ''}`);
+    }
     // 이전값 이력이 있는 최근 변경만 검사 (비용 통제)
     const changes = store.entityStates
         .filter(s => s.prev != null && String(s.prev).length >= 2 && s.claim !== 'belief')
@@ -4313,7 +4470,7 @@ function markOutdatedRecall(memories, store) {
                 || (m.entities || []).some(e => String(e).toLowerCase() === entLower)
                 || text.includes(entLower);
             if (!aboutEntity) continue;
-            outdatedRecallNotes.set(m.id, `${s.entity}.${s.slot} is now: ${s.value}`);
+            if (!outdatedRecallNotes.has(m.id)) outdatedRecallNotes.set(m.id, `${s.entity}.${s.slot} is now: ${s.value}`);
             break;
         }
     }
@@ -4336,7 +4493,9 @@ function formatMemoryLine(m, withExcerpt, storyAges = null, turnNow = 0, banned 
     const quote = (withExcerpt && !isEpisode && quoteFresh && m.excerpt && m.excerpt.length <= 160
         && !(banned?.length && hasPhrase(m.excerpt, banned))) ? m.excerpt : null;
     const excerpt = quote ? ` — "${quote}"` : '';
-    const dated = outdatedRecallNotes.has(m.id) ? ` [as of then — ${outdatedRecallNotes.get(m.id)}]` : '';
+    const dated = m.retired
+        ? ` [no longer current${m.retired.now ? ` — now: ${m.retired.now}` : ''}]`
+        : outdatedRecallNotes.has(m.id) ? ` [as of then — ${outdatedRecallNotes.get(m.id)}]` : '';
     // 서사 시계: 이야기 속에서 하루 이상 지난 기억은 얼마나 옛일인지 표기
     const storyDays = storyAges?.get(m.turnIndex) ?? 0;
     const ago = storyDays >= 1 ? ` · ~${humanizeStoryDays(storyDays)} ago in-story` : '';
@@ -4491,17 +4650,6 @@ async function buildPacketSections(query, supervisorPlan) {
         const k = String(s.entity || '').toLowerCase();
         moveAnchor.set(k, Math.max(moveAnchor.get(k) || 0, s.turnIndex || 0));
     }
-    const states = store.entityStates
-        .filter(s => !(scene.any && String(s.entity || '').toLowerCase() === 'scene' && sceneSlots.includes(String(s.slot || '').toLowerCase())))
-        // 휘발성 슬롯(활동·복장·기분 등)은 장면이 지나거나 당사자가 이동하면 무효 —
-        // 이전 장면·이전 자리 것과 오래된 것은 주입 제외 (저장소에는 남음)
-        .filter(s => {
-            if (!isVolatileSlot(s.slot) || s.claim === 'belief') return true;
-            const anchor = Math.max(sceneAnchorTurn, moveAnchor.get(String(s.entity || '').toLowerCase()) || 0);
-            if ((s.turnIndex || 0) < anchor) return false;
-            return (store.turnCounter - (s.turnIndex || 0)) <= 16;
-        })
-        .slice(-10);
     // 장면 우선: 최근 메시지에 이름(별칭 포함)이 등장한 인물을 먼저 싣는다 —
     // 대인원 채팅에서 "지금 장면에 있는" 인물이 상한(10명)에 잘려 나가지 않게
     // 숨은 패킷 속 이름이 "장면에 있다"로 오인되지 않게 걷어낸 본문으로 판정
@@ -4511,6 +4659,38 @@ async function buildPacketSections(query, supervisorPlan) {
     const sceneHay = `${recentSceneText}\n${filedPresent}`;
     const inScene = (c) => sceneHay.includes(String(c.name).toLowerCase())
         || (c.aliases || []).some(a => a.length >= 2 && sceneHay.includes(String(a).toLowerCase()));
+    // 상태 보드: 지금 장면과 닿는 것부터, 그다음 최근에 바뀐 것. 예전에는 저장 순서의 끝 10개를 실어
+    // 장면과 무관한 인물의 묵은 상태가 자리를 차지하고 정작 눈앞 인물의 상태가 밀려났다.
+    const stateInScene = (s) => {
+        const name = String(s.entity || '').toLowerCase();
+        if (name === 'scene') return true;
+        if (name.length >= 2 && sceneHay.includes(name)) return true;
+        const card = store.characters.find(c => entityKey(c.name) === entityKey(s.entity));
+        return Boolean(card && inScene(card));
+    };
+    const states = store.entityStates
+        .filter(s => !(scene.any && String(s.entity || '').toLowerCase() === 'scene' && sceneSlots.includes(String(s.slot || '').toLowerCase())))
+        .filter((s) => {
+            const age = store.turnCounter - (s.turnIndex || 0);
+            if (s.claim === 'belief') return true;
+            // 요약 때 "더는 맞지 않는다"고 본 상태 — 다시 적히면 살아난다
+            if (s.expired != null) return false;
+            // "다 나았다 · 빈손 · 없음"은 바뀐 직후에만 알려 주면 된다 — 계속 실으면 없는 것을 자꾸 떠올리게 한다
+            if (isEndedValue(s.value)) return age <= 6;
+            if (isVolatileSlot(s.slot)) {
+                // 휘발성 슬롯(활동·복장·기분 등)은 장면이 지나거나 당사자가 이동하면 무효 —
+                // 이전 장면·이전 자리 것과 오래된 것은 주입 제외 (저장소에는 남음)
+                const anchor = Math.max(sceneAnchorTurn, moveAnchor.get(String(s.entity || '').toLowerCase()) || 0);
+                if ((s.turnIndex || 0) < anchor) return false;
+                return age <= 16;
+            }
+            // 오래 그대로인 상태는 그 인물이 장면에 있을 때만 — 자리에 없는 사람의 옛 상태는 다시 등장할 때 돌아온다
+            return age <= 40 || stateInScene(s);
+        })
+        .map(s => ({ s, scene: stateInScene(s) ? 1 : 0 }))
+        .sort((a, b) => (b.scene - a.scene) || ((b.s.turnIndex || 0) - (a.s.turnIndex || 0)))
+        .slice(0, 12)
+        .map(x => x.s);
     const characters = store.characters
         .filter(c => !c.disabled)
         .map(c => ({ c, scene: inScene(c) ? 1 : 0 }))
@@ -4539,6 +4719,8 @@ async function buildPacketSections(query, supervisorPlan) {
     const itemEnded = (it) => /lost|broken|destroyed|gone|discarded|consumed|잃|부서|파괴|버림|버려|소모|사라/i.test(String(it.status || ''));
     const items = store.items.filter(i => !i.disabled).filter((it) => {
         const age = store.turnCounter - (it.updatedTurn || it.firstTurn || 0);
+        // 요약 때 "더는 의미 없다"고 본 물건은 본문에 다시 나올 때만
+        if (it.dormant != null) return sceneHay.includes(String(it.name).toLowerCase());
         if (itemEnded(it)) return age <= 12;
         return age <= 30 || sceneHay.includes(String(it.name).toLowerCase()) || (it.holder && sceneNames.has(entityKey(it.holder)));
     }).slice(-6);
@@ -4576,9 +4758,13 @@ async function buildPacketSections(query, supervisorPlan) {
     // 같은 사건이 두 섹션에 두 번 실려 토큰을 낭비하고, 한쪽만 갱신될 때 모순이 생기는 것 방지.
     // 단, 인용문이 있는 기억은 전환점에 없는 정보(원문 대사)를 담고 있으므로 남긴다.
     const milestoneTexts = milestones.map(m => `${m.title || ''} ${m.summary || ''}`);
+    // 요약 중복 제거: 함께 실리는 챕터 요약(연대기보다 자세한 층)이 이미 그 턴을 다루고 내용도 담고 있으면
+    // 같은 일을 회상으로 한 번 더 싣지 않는다 — 두 번 실린 일은 모델이 "특별히 중요한 일"로 읽고 자꾸 꺼낸다.
+    const chapterCovers = (m) => summaries.some(c => c.level === 'chunk' && !c.carried
+        && m.turnIndex >= c.fromTurn && m.turnIndex <= c.toTurn && textOverlap(m.summary, c.text) >= 0.8);
     const publicRecallDeduped = publicRecall.filter(m =>
-        m.pinned || (m.excerpt && m.excerpt.length <= 160)
-        || !milestoneTexts.some(t => textOverlap(m.summary, t) >= 0.6));
+        m.pinned || (m.excerpt && m.excerpt.length <= 160 && !(m.tags || []).includes('episode_raw'))
+        || !(milestoneTexts.some(t => textOverlap(m.summary, t) >= 0.6) || chapterCovers(m)));
 
     return { bonds, voices, banned, styleGuard: settings.styleGuard !== false, recallQuotes: settings.recallQuotes !== false, banTell: settings.banTell === true,
         publicRecall: publicRecallDeduped, protectedRecall, hiddenProtected, locks, rules, scene, states, characters, milestones, items, summaries, supervisorPlan, narratorMode, turnNow: store.turnCounter, storyAges, storyTotalDays, sources: await pickDossierExcerpts(query, recallContext), recallCandidates, trace };
@@ -4755,8 +4941,8 @@ function renderPacket(parts, { withExcerpts = true, excerptLimit = Infinity, rec
         const hasDistant = parts.storyAges
             && recall.some(m => (parts.storyAges.get(m.turnIndex) ?? 0) >= 30);
         lines.push(hasDistant
-            ? '## Recalled Moments (relevant to now — entries marked "ago in-story" are the distant past: material for memory, comparison, or how things have changed since, never the present scene)'
-            : '## Recalled Moments (relevant to now)');
+            ? '## Recalled Moments (relevant to now — background only: most replies need none of these on the page, and a moment already brought up once is not brought up again. Entries marked "ago in-story" are the distant past, never the present scene)'
+            : '## Recalled Moments (relevant to now — background only: most replies need none of these on the page, and a moment already brought up once is not brought up again)');
         // 인용은 상위 회상부터 채운다 — 예산이 빠듯할 때 전부 떼는 대신 가장 잘 맞는 몇 줄만 남긴다.
         // 요약 한 줄만 실린 회상은 장부 한가운데서 존재감을 잃는다: 원문 대사가 붙어 있어야 모델이 집는다.
         recall.forEach((m, i) => lines.push(formatMemoryLine(m, quotesOn && i < excerptLimit, parts.storyAges, parts.turnNow, banned)));
@@ -5221,7 +5407,10 @@ function renumberTurns(store) {
     };
 
     for (const t of store.turns) t.turnIndex = map.get(t.turnIndex) ?? 0;
-    for (const m of store.memories) m.turnIndex = remap(m.turnIndex);
+    for (const m of store.memories) {
+        m.turnIndex = remap(m.turnIndex);
+        if (m.retired?.turn != null) m.retired.turn = remap(m.retired.turn);
+    }
     for (const r of store.worldRules) {
         r.turnIndex = remap(r.turnIndex);
         if (r.prevTurn != null) r.prevTurn = remap(r.prevTurn);
@@ -5231,6 +5420,7 @@ function renumberTurns(store) {
         s.turnIndex = remap(s.turnIndex);
         if (s.prevTurn != null) s.prevTurn = remap(s.prevTurn);
         if (s.createdTurn != null) s.createdTurn = remap(s.createdTurn);
+        if (s.expired != null) s.expired = remap(s.expired);
     }
     for (const l of store.locks) {
         l.turnIndex = remap(l.turnIndex);
@@ -5251,6 +5441,7 @@ function renumberTurns(store) {
     for (const it of store.items) {
         it.firstTurn = remap(it.firstTurn);
         it.updatedTurn = remap(it.updatedTurn);
+        if (it.dormant != null) it.dormant = remap(it.dormant);
     }
     for (const s of store.chunkSummaries) {
         if (s.carried) continue; // 이전 채팅에서 인계된 요약의 범위는 이 채팅의 축이 아님
@@ -6487,12 +6678,13 @@ function renderMemoriesPanel() {
         const visNorm = normVisibility(m.visibility);
         const visIcon = visNorm === 'secret' ? 'fa-user-secret' : visNorm === 'private' ? 'fa-lock' : 'fa-globe';
         const card = $(`
-            <div class="memoria__mem-card${m.disabled ? ' is-disabled' : ''}${m.pinned ? ' is-pinned' : ''}" data-id="${m.id}">
+            <div class="memoria__mem-card${m.disabled || m.retired ? ' is-disabled' : ''}${m.pinned ? ' is-pinned' : ''}" data-id="${m.id}">
                 <div class="memoria__mem-head">
                     <span class="memoria__badge memoria__badge--${m.kind}">${KIND_LABELS[m.kind] || m.kind}</span>
                     <span class="memoria__mem-turn" title="채팅 메시지 번호">${(m.mesId ?? -1) >= 0 ? `#${m.mesId}` : '수동'}</span>
                     <i class="fa-solid ${visIcon} memoria__mem-vis" title="${visNorm}${m.owner ? ` (소유: ${escapeHtml(m.owner)})` : ''}"></i>
                     <span class="memoria__mem-imp" title="중요도">${fmtPct(m.importance)}</span>
+                    ${m.retired ? `<span class="memoria__badge memoria-mem-revive" role="button" tabindex="0" title="이야기가 흘러 더는 맞지 않게 된 기억입니다. 평소 회상에서는 빠지고, 그 일을 직접 꺼낼 때만 '지금은 이렇다'는 표시와 함께 나옵니다.${m.retired.now ? ` 지금: ${escapeHtml(m.retired.now)}` : ''} — 누르면 되살립니다">지나감 ↺</span>` : ''}
                     <span class="memoria__mem-actions">
                         <button type="button" class="memoria-source memoria__source-button" data-id="${escapeHtml(m.id)}" title="대화 원문 확인" aria-label="대화 원문 확인"><i class="fa-solid fa-book-open"></i></button>
                         <i class="fa-solid fa-thumbtack memoria-mem-pin" title="${m.pinned ? '고정 해제' : '예산 안에서 우선 주입(고정)'}"></i>
@@ -6685,8 +6877,8 @@ function renderItemsPanel() {
     }
     for (const it of [...store.items].sort((a, b) => (b.updatedTurn || 0) - (a.updatedTurn || 0))) {
         list.append($(`
-            <div class="memoria__row${it.disabled ? ' is-resolved' : ''}" data-id="${it.id}">
-                <span class="memoria__row-text"><b>${escapeHtml(it.name)}</b>${it.holder ? ` <small>(${escapeHtml(it.holder)})</small>` : ''}${it.meaning ? ` — ${escapeHtml(it.meaning)}` : ''}${it.status ? ` <small>[${escapeHtml(it.status)}]</small>` : ''}</span>
+            <div class="memoria__row${it.disabled ? ' is-resolved' : ''}${it.dormant != null ? ' is-dormant' : ''}" data-id="${it.id}">
+                <span class="memoria__row-text">${it.dormant != null ? '<span class="memoria__badge memoria-item-revive" role="button" tabindex="0" title="이야기에서 더는 의미가 없어져 주입에서 뺐습니다. 본문에 다시 나오면 돌아옵니다 — 누르면 바로 되살립니다">지나감 ↺</span> ' : ''}<b>${escapeHtml(it.name)}</b>${it.holder ? ` <small>(${escapeHtml(it.holder)})</small>` : ''}${it.meaning ? ` — ${escapeHtml(it.meaning)}` : ''}${it.status ? ` <small>[${escapeHtml(it.status)}]</small>` : ''}</span>
                 <i class="fa-solid ${it.disabled ? 'fa-eye-slash' : 'fa-eye'} memoria-item-toggle" title="${it.disabled ? '주입에 포함' : '주입에서 제외'}"></i>
                 <i class="fa-solid fa-trash memoria-item-delete" title="삭제"></i>
             </div>
@@ -6756,8 +6948,8 @@ function renderStatePanel() {
     for (const s of store.entityStates) {
         const prevBit = s.prev != null ? ` <small class="memoria__prev">(이전: ${escapeHtml(String(s.prev))})</small>` : '';
         $states.append($(`
-            <div class="memoria__row" data-id="${s.id}">
-                <span class="memoria__row-text"><b>${escapeHtml(s.entity)}.${escapeHtml(s.slot)}</b> = ${escapeHtml(s.value)}${prevBit} <small>(${s.claim === 'belief' ? `믿음${s.owner ? `:${escapeHtml(s.owner)}` : ''}` : '객관'} · t${s.turnIndex})</small></span>
+            <div class="memoria__row${s.expired != null ? ' is-dormant' : ''}" data-id="${s.id}">
+                <span class="memoria__row-text">${s.expired != null ? '<span class="memoria__badge memoria-state-revive" role="button" tabindex="0" title="요약할 때 더는 맞지 않는 상태로 보아 주입에서 뺐습니다. 이야기에서 다시 적히면 돌아옵니다 — 누르면 바로 되살립니다">지나감 ↺</span> ' : ''}<b>${escapeHtml(s.entity)}.${escapeHtml(s.slot)}</b> = ${escapeHtml(s.value)}${prevBit} <small>(${s.claim === 'belief' ? `믿음${s.owner ? `:${escapeHtml(s.owner)}` : ''}` : '객관'} · t${s.turnIndex})</small></span>
                 <i class="fa-solid fa-trash memoria-state-delete" title="삭제"></i>
             </div>
         `));
@@ -7083,6 +7275,7 @@ function renderSettingsPanel() {
     $('#memoria_split_injection').prop('checked', s.splitInjection === true);
     $('#memoria_style_guard').prop('checked', s.styleGuard !== false);
     $('#memoria_recall_quotes').prop('checked', s.recallQuotes !== false);
+    $('#memoria_recall_cooldown').prop('checked', s.recallCooldown !== false);
     $('#memoria_ban_in_chat').prop('checked', s.banInChat === true);
     $('#memoria_ban_tell').prop('checked', s.banTell === true);
     $('#memoria_status_mode').val(s.statusMode || 'auto');
@@ -7741,6 +7934,12 @@ function bindUI() {
         m.pinned = !m.pinned;
         persistStore(); renderMemoriesPanel(); updateInjection();
     });
+    $('#memoria_settings').on('click', '.memoria-mem-revive', function () {
+        const m = findMemory($(this).closest('.memoria__mem-card').data('id'));
+        if (!m) return;
+        delete m.retired;
+        persistStore(); renderMemoriesPanel(); updateInjection();
+    });
     $('#memoria_settings').on('click', '.memoria-mem-toggle', function () {
         const m = findMemory($(this).closest('.memoria__mem-card').data('id'));
         if (!m) return;
@@ -7886,6 +8085,18 @@ function bindUI() {
     });
 
     // ── 아이템 도감 / 이벤트 연표
+    $('#memoria_settings').on('click', '.memoria-item-revive', function () {
+        const it = getStore().items.find(x => x.id === $(this).closest('.memoria__row').data('id'));
+        if (!it) return;
+        delete it.dormant;
+        persistStore(); renderItemsPanel(); updateInjection();
+    });
+    $('#memoria_settings').on('click', '.memoria-state-revive', function () {
+        const st = getStore().entityStates.find(x => x.id === $(this).closest('.memoria__row').data('id'));
+        if (!st) return;
+        delete st.expired;
+        persistStore(); renderStatePanel(); updateInjection();
+    });
     $('#memoria_settings').on('click', '.memoria-item-toggle', function () {
         const store = getStore();
         const it = store.items.find(x => x.id === $(this).closest('.memoria__row').data('id'));
@@ -8358,6 +8569,7 @@ function bindUI() {
     flagBind('#memoria_split_injection', 'splitInjection');
     flagBind('#memoria_style_guard', 'styleGuard');
     flagBind('#memoria_recall_quotes', 'recallQuotes');
+    flagBind('#memoria_recall_cooldown', 'recallCooldown');
     flagBind('#memoria_ban_in_chat', 'banInChat', { reinject: false });
     flagBind('#memoria_ban_tell', 'banTell');
     $('#memoria_banned_phrases').on('change', function () {
@@ -8789,7 +9001,7 @@ function bindEvents() {
         const mes = chat[id];
         if (!mes || mes.is_user || mes.is_system) return;
         if (tagSideMessage(id, type) || isSideMessage(mes)) return; // 막간은 기록도 점검도 하지 않는다
-        auditRecallEcho(mes); // 직전 주입 기억의 반영 여부 채점 (기록보다 먼저, 원본 감사표 기준)
+        auditRecallEcho(mes, id); // 직전 주입 기억의 반영 여부 채점 (기록보다 먼저, 원본 감사표 기준)
         if (settings.replyCheck && type !== 'first_message' && type !== 'command') queueCheck(id);
         if (recordBatchSize() === 1 && type !== 'first_message' && requiredStepsFor(id) === 0) {
             queueCommit(id).then(() => updateInjection({ quiet: true }));
