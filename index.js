@@ -329,7 +329,7 @@ const DEFAULT_SETTINGS = Object.freeze({
     splitInjection: false,    // 고정 장부 — 안정 구간을 얼려 따로 주입하고 매 턴 바뀌는 것만 최근 대화 옆에 (프롬프트 캐시)
     stableRefreshTurns: 24,   // 고정 장부를 이 턴 수마다 새로 뜬다 (0 = 달라진 줄이 넘칠 때만)
     styleGuard: true,         // "기록은 사실만 — 문체는 지금 대화를 따른다" 지시
-    uiPaper: 'auto',          // 서고 종이 — auto(실리태번 테마의 밝기를 따름) | light | dark
+    uiPaper: 'auto',          // 서고 지면 — auto(실리태번 테마의 밝기를 따름) | light | dark
     recallCooldown: true,     // 회상 쉬어가기 — 앞선 답변들에 연달아 실린 기억은 순서를 미룬다 (직접 꺼내면 그대로 나온다)
     recallQuotes: true,       // 회상에 옛 원문 대사 인용을 싣는다 (옛 말투가 돌아오면 끈다)
     voiceSamples: 2,          // 장면 속 인물마다 실을 실제 남긴 말 수 (0 = 싣지 않음)
@@ -6752,10 +6752,19 @@ function updateStatusUI(activity) {
     else if (llmBusy || pendingCommits > 0) text = '기록 중…';
     else text = '대기 중';
     $('#memoria_status_state').text(text);
+    $('#memoria_lamp').toggleClass('is-off', !settings.enabled || !chatOpen).toggleClass('is-busy', Boolean(activity) || llmBusy || pendingCommits > 0);
     const failed = store.turns.filter(t => t.failed).length;
     $('#memoria_status_counts').text(chatOpen
-        ? `${store.turns.length}턴 · 기억 ${store.memories.length} · 인물 ${store.characters.length} · 캐논 ${store.worldRules.length} · 상태 ${store.entityStates.length} · 서약 ${store.locks.filter(l => l.status === 'active').length} · 요약 ${store.chunkSummaries.length + store.arcSummaries.length}${failed ? ` · ⚠ 기록 실패 ${failed} (도구→색인으로 재시도)` : ''}`
+        ? (failed ? `기록 실패 ${failed}턴 — 도구 탭의 색인으로 다시 시도할 수 있어요` : lastPacketTokens ? `지난 주입 ≈ ${lastPacketTokens.toLocaleString()}토큰` : '이 채팅의 기억을 적고 있어요')
         : '캐릭터/채팅을 열면 이 채팅의 기억이 표시됩니다.');
+    // 숫자 띠 — 누르면 그 탭으로 간다
+    const tiles = chatOpen ? [
+        [store.turns.length, '턴', 'summaries'], [store.memories.length, '기억', 'memories'], [store.characters.length, '인물', 'world'],
+        [store.locks.filter(l => l.status === 'active').length, '서약', 'world'], [store.chunkSummaries.length + store.arcSummaries.length, '요약', 'summaries'],
+        ...(failed ? [[failed, '실패', 'tools', 'is-bad']] : []),
+    ] : [];
+    $('#memoria_stats').prop('hidden', !tiles.length).html(tiles.map(([n, label, tab, cls]) =>
+        `<button type="button" data-go="${tab}"${cls ? ` class="${cls}"` : ''}><b>${Number(n).toLocaleString()}</b><span>${label}</span></button>`).join(''));
 }
 
 function refreshPacketPreview() {
@@ -6821,80 +6830,55 @@ function renderMemoriesPanel() {
             || (m.tags || []).some(t => t.includes(search)));
     }
 
-    $('#memoria_memory_count').text(store.memories.length ? `${store.memories.length}개` : '');
     renderKindChips(kindFilter);
+    $('#memoria_memory_count').text(store.memories.length ? `전체 ${store.memories.length}개 가운데 ${items.length}개${items.length > 200 ? ' · 앞의 200개만 보여요' : ''}` : '');
     list.empty();
     if (!items.length) {
         list.append(`<div class="memoria__empty">${store.memories.length ? '찾는 기억이 없습니다.' : '아직 적힌 기억이 없습니다. 대화를 이어 가면 사서가 적어 둡니다.'}</div>`);
         return;
     }
 
-    // 장면(장소·때)별로 묶는다 — 기억은 흩어진 조각이 아니라 이야기의 어느 대목에 붙어 있다
-    const turnOf = new Map(store.turns.map(t => [t.turnIndex, t]));
-    const sceneOf = (m) => {
-        if ((m.turnIndex || 0) <= 0) return '직접 적은 기억';
-        const t = turnOf.get(m.turnIndex);
-        return [t?.where, t?.when].filter(Boolean).join(' · ');
-    };
-    let lastScene = null;
-    const action = (cls, icon, label) => `<button type="button" class="${cls}"><i class="fa-solid ${icon}" aria-hidden="true"></i><span>${label}</span></button>`;
     for (const m of items.slice(0, 200)) {
-        const scene = sceneOf(m);
-        if (scene !== lastScene) {
-            lastScene = scene;
-            if (scene) list.append($('<h5 class="memoria__mem-scene">').text(scene));
-        }
         const visNorm = normVisibility(m.visibility);
-        const flags = [
-            m.pinned ? '<span class="memoria__mem-flag is-pin"><i class="fa-solid fa-thumbtack" aria-hidden="true"></i>고정</span>' : '',
-            visNorm !== 'public' ? `<span class="memoria__mem-flag" title="${visNorm === 'secret' ? '감춘 일' : '속사정'}">${m.owner ? `${escapeHtml(m.owner)}만 앎` : visNorm === 'secret' ? '비밀' : '비공개'}</span>` : '',
-            m.retired ? `<span class="memoria__mem-flag memoria-mem-revive" role="button" tabindex="0" title="이야기가 흘러 더는 맞지 않게 된 기억입니다. 평소 회상에서는 빠지고, 그 일을 직접 꺼낼 때만 나옵니다 — 누르면 되살립니다">지나간 일</span>` : '',
-            m.disabled ? '<span class="memoria__mem-flag">꺼 둠</span>' : '',
-            `<span class="memoria__mem-flag" title="중요도">${fmtPct(m.importance)}</span>`,
-        ].join('');
-        const people = (m.entities || []).map(escapeHtml).join(' · ');
-        const tags = (m.tags || []).filter(t => t !== 'episode_raw').map(t => `#${escapeHtml(t)}`).join(' ');
+        const visIcon = visNorm === 'secret' ? 'fa-user-secret' : visNorm === 'private' ? 'fa-lock' : 'fa-globe';
         const card = $(`
-            <article class="memoria__mem-card${m.disabled || m.retired ? ' is-disabled' : ''}${m.pinned ? ' is-pinned' : ''}" data-id="${m.id}">
-                <span class="memoria__mem-turn" title="${(m.mesId ?? -1) >= 0 ? `채팅 메시지 #${m.mesId}` : '직접 적은 기억'}">${(m.turnIndex || 0) > 0 ? m.turnIndex : '—'}</span>
-                <div class="memoria__mem-body">
-                    <div class="memoria__mem-head">
-                        <span class="memoria__kind memoria__kind--${m.kind}">${KIND_LABELS[m.kind] || m.kind}</span>
-                        ${flags}
-                        <button type="button" class="memoria-mem-more" aria-label="이 기억 더보기" aria-expanded="false"><i class="fa-solid fa-ellipsis" aria-hidden="true"></i></button>
-                    </div>
-                    <div class="memoria__mem-summary">${escapeHtml(m.summary)}</div>
-                    ${m.retired?.now ? `<div class="memoria__mem-now">지금은 — ${escapeHtml(m.retired.now)}</div>` : ''}
-                    ${m.excerpt && !(m.tags || []).includes('episode_raw') ? `<div class="memoria__mem-excerpt">“${escapeHtml(m.excerpt)}”</div>` : ''}
-                    ${people || tags ? `<div class="memoria__mem-meta">${[people, tags].filter(Boolean).join('  ')}</div>` : ''}
-                    <div class="memoria__mem-actions" hidden>
-                        <button type="button" class="memoria-source" data-id="${escapeHtml(m.id)}"><i class="fa-solid fa-book-open" aria-hidden="true"></i><span>원문 보기</span></button>
-                        ${action('memoria-mem-pin', 'fa-thumbtack', m.pinned ? '고정 풀기' : '고정')}
-                        ${action('memoria-mem-edit', 'fa-pen', '고치기')}
-                        ${m.retired ? '' : action('memoria-mem-retire', 'fa-hourglass-end', '지나간 일로')}
-                        ${action('memoria-mem-toggle', m.disabled ? 'fa-eye' : 'fa-eye-slash', m.disabled ? '다시 켜기' : '꺼 두기')}
-                        ${action('memoria-mem-delete', 'fa-trash', '지우기')}
-                    </div>
+            <div class="memoria__mem-card${m.disabled || m.retired ? ' is-disabled' : ''}${m.pinned ? ' is-pinned' : ''}" data-id="${m.id}">
+                <div class="memoria__mem-head">
+                    <span class="memoria__badge memoria__badge--${m.kind}">${KIND_LABELS[m.kind] || m.kind}</span>
+                    <span class="memoria__mem-turn" title="채팅 메시지 번호">${(m.mesId ?? -1) >= 0 ? `#${m.mesId}` : '수동'}</span>
+                    <i class="fa-solid ${visIcon} memoria__mem-vis" title="${visNorm}${m.owner ? ` (소유: ${escapeHtml(m.owner)})` : ''}"></i>
+                    <span class="memoria__mem-imp" title="중요도"><i class="memoria__meter" aria-hidden="true"><i style="width:${Math.round(clamp01(m.importance, 0.5) * 100)}%"></i></i>${fmtPct(m.importance)}</span>
+                    ${m.retired ? `<span class="memoria__badge memoria-mem-revive" role="button" tabindex="0" title="이야기가 흘러 더는 맞지 않게 된 기억입니다. 평소 회상에서는 빠지고, 그 일을 직접 꺼낼 때만 '지금은 이렇다'는 표시와 함께 나옵니다.${m.retired.now ? ` 지금: ${escapeHtml(m.retired.now)}` : ''} — 누르면 되살립니다">지나감 ↺</span>` : ''}
+                    <span class="memoria__mem-actions">
+                        <button type="button" class="memoria-source memoria__source-button" data-id="${escapeHtml(m.id)}" title="대화 원문 확인" aria-label="대화 원문 확인"><i class="fa-solid fa-book-open"></i></button>
+                        ${m.retired ? '' : '<i class="fa-solid fa-hourglass-end memoria-mem-retire" title="지나간 일로 물리기 — 평소 회상에서 빼고, 이 일을 직접 꺼낼 때만 나오게 합니다"></i>'}
+                        <i class="fa-solid fa-thumbtack memoria-mem-pin" title="${m.pinned ? '고정 해제' : '예산 안에서 우선 주입(고정)'}"></i>
+                        <i class="fa-solid ${m.disabled ? 'fa-eye-slash' : 'fa-eye'} memoria-mem-toggle" title="${m.disabled ? '활성화' : '비활성화'}"></i>
+                        <i class="fa-solid fa-pen memoria-mem-edit" title="편집"></i>
+                        <i class="fa-solid fa-trash memoria-mem-delete" title="삭제"></i>
+                    </span>
                 </div>
-            </article>
+                <div class="memoria__mem-summary">${escapeHtml(m.summary)}</div>
+                ${m.excerpt ? `<div class="memoria__mem-excerpt">"${escapeHtml(m.excerpt)}"</div>` : ''}
+                ${(m.entities || []).length || (m.tags || []).length ? `<div class="memoria__mem-meta">${(m.entities || []).map(e => `<span class="memoria__chip">@${escapeHtml(e)}</span>`).join('')}${(m.tags || []).map(t => `<span class="memoria__chip memoria__chip--tag">#${escapeHtml(t)}</span>`).join('')}</div>` : ''}
+            </div>
         `);
         list.append(card);
     }
 }
 
-/** 종류 고르기 — 드롭다운 대신 가로로 미는 줄. 값은 숨겨 둔 select가 그대로 들고 있다 */
+/** 종류 고르기 — 있는 종류만, 개수와 함께. 다시 누르면 풀린다. 값은 숨겨 둔 select가 들고 있다 */
 function renderKindChips(current) {
     const $wrap = $('#memoria_kind_chips');
     if (!$wrap.length) return;
-    const store = getStore();
     const counts = {};
-    for (const m of store.memories) counts[m.kind] = (counts[m.kind] || 0) + 1;
+    for (const m of getStore().memories) counts[m.kind] = (counts[m.kind] || 0) + 1;
     $wrap.empty();
-    $('#memoria_memory_kind_filter option').each(function () {
-        const value = String($(this).val() || '');
-        if (value && !counts[value] && value !== current) return; // 하나도 없는 종류는 줄에 올리지 않는다
-        $wrap.append($('<button type="button" class="memoria__kind-chip">').attr({ 'data-kind': value, 'aria-pressed': String(value === current) }).text($(this).text()));
-    });
+    for (const kind of MEMORY_KINDS) {
+        if (!counts[kind]) continue;
+        $wrap.append($('<button type="button" class="memoria__kindchip">').attr({ 'data-kind': kind, 'aria-pressed': String(kind === current) })
+            .text(KIND_LABELS[kind] || kind).append($('<small>').text(counts[kind])));
+    }
 }
 
 function characterToEditText(c) {
@@ -6976,8 +6960,7 @@ function renderCharactersPanel() {
                     <strong class="memoria__char-name">${escapeHtml(c.name)}</strong>
                     ${c.provisional ? '<span class="memoria__badge memoria__badge--provisional" title="아직 이름이 밝혀지지 않은 인물 — 정체가 드러나면 자동 병합됩니다">미확인</span>' : ''}
                     ${c.locked ? '<span class="memoria__badge memoria__badge--locked" title="프로필 고정 — 사서가 이 카드의 이름·나이·외모·말투·특성을 바꾸지 못합니다 (관계만 계속 갱신)"><i class="fa-solid fa-lock"></i> 고정</span>' : ''}
-                    <button type="button" class="memoria-card-more" aria-label="더보기" aria-expanded="false"><i class="fa-solid fa-ellipsis" aria-hidden="true"></i></button>
-                    <span class="memoria__mem-actions" hidden>
+                    <span class="memoria__mem-actions">
                         <i class="fa-solid ${c.locked ? 'fa-lock' : 'fa-lock-open'} memoria-char-lock" title="${c.locked ? '프로필 고정 해제 — 사서가 다시 갱신합니다' : '프로필 고정 — 사서가 이 카드의 프로필을 바꾸지 못하게 잠급니다 (관계는 계속 갱신)'}"></i>
                         <i class="fa-solid ${c.disabled ? 'fa-eye-slash' : 'fa-eye'} memoria-char-toggle" title="${c.disabled ? '주입에 포함' : '주입·기록에서 제외 (사서가 이 인물을 다시 등록하지 않음)'}"></i>
                         <i class="fa-solid fa-code-merge memoria-char-merge" title="다른 카드를 이 카드로 병합"></i>
@@ -7024,8 +7007,7 @@ function renderBondsPanel() {
                 <div class="memoria__char-head">
                     <strong class="memoria__char-name">${escapeHtml(b.from)} <span class="memoria__bond-arrow">→</span> ${escapeHtml(b.to)}</strong>
                     <span class="memoria__badge memoria__badge--lock">${escapeHtml(now.stage)}</span>
-                    <button type="button" class="memoria-card-more" aria-label="더보기" aria-expanded="false"><i class="fa-solid fa-ellipsis" aria-hidden="true"></i></button>
-                    <span class="memoria__mem-actions" hidden>
+                    <span class="memoria__mem-actions">
                         <i class="fa-solid ${b.disabled ? 'fa-eye-slash' : 'fa-eye'} memoria-bond-toggle" title="${b.disabled ? '주입에 포함' : '주입·기록에서 제외 (사서가 이 줄을 다시 쓰지 않음)'}"></i>
                         <i class="fa-solid fa-pen memoria-bond-edit" title="지금 단계 고치기"></i>
                         <i class="fa-solid fa-trash memoria-bond-delete" title="삭제"></i>
@@ -7823,7 +7805,7 @@ function maskBannedInPrompt(data) {
  * ============================================================ */
 
 /**
- * 서고는 자기 색을 쓴다 (밝은 종이 / 어두운 종이). 어느 쪽을 쓸지만 실리태번 테마의 바탕 밝기에서 정한다.
+ * 서고는 자기 색을 쓴다 (밝은 지면 / 어두운 지면). 어느 쪽을 쓸지만 실리태번 테마의 바탕 밝기에서 정한다.
  * 팝업은 설정 패널 바깥에 그려지므로 body에 표시한다.
  */
 function applyPaper() {
@@ -7840,7 +7822,7 @@ function applyPaper() {
 }
 
 /**
- * 설정·도구·세계 탭의 섹션을 접었다 펼 수 있게 한다 — 한 화면에 끝없이 이어지면 휴대폰에서는 찾을 수가 없다.
+ * 설정·도구·세계 탭의 구역을 접었다 펼 수 있게 한다 — 한 화면에 끝없이 이어지면 휴대폰에서는 찾을 수가 없다.
  * 펴고 접은 것은 브라우저에 기억한다. 설정 찾기를 쓰는 동안에는 전부 펼쳐 보인다.
  */
 const FOLD_KEY = 'memoria_folds';
@@ -7849,14 +7831,14 @@ function bindFoldableSections() {
     try { saved = JSON.parse(globalThis.localStorage?.getItem(FOLD_KEY) || 'null'); } catch { /* 처음 */ }
     const open = new Set(Array.isArray(saved) ? saved : []);
     const remember = () => { try { globalThis.localStorage?.setItem(FOLD_KEY, JSON.stringify([...open])); } catch { /* 기억 못 해도 동작에는 지장 없다 */ } };
-    $('#memoria_settings .memoria__panel[data-panel="config"], #memoria_settings .memoria__panel[data-panel="tools"], #memoria_settings .memoria__panel[data-panel="world"]').each(function () {
+    $('#memoria_settings .memoria__panel[data-panel="config"], #memoria_settings .memoria__panel[data-panel="tools"]').each(function () {
         const panel = $(this).data('panel');
         $(this).children('.memoria__section').each(function (i) {
             const $head = $(this).children('.memoria__section-head').first();
             const title = $head.find('h4').first().text().trim();
             if (!$head.length || !title) return;
             const key = `${panel}:${title}`;
-            const isOpen = saved ? open.has(key) : (panel === 'world' ? i < 2 : panel === 'config' && i === 0);
+            const isOpen = saved ? open.has(key) : (panel === 'config' && i === 0);
             if (isOpen) open.add(key);
             $(this).addClass('is-foldable').toggleClass('is-collapsed', !isOpen);
             $head.attr({ role: 'button', tabindex: 0, 'aria-expanded': String(isOpen) });
@@ -8187,25 +8169,13 @@ function bindUI() {
     // ── 기억 브라우저
     $('#memoria_memory_search').on('input', renderMemoriesPanel);
     $('#memoria_memory_kind_filter').on('change', renderMemoriesPanel);
-    $('#memoria_settings').on('click', '.memoria__kind-chip', function () {
-        $('#memoria_memory_kind_filter').val(String($(this).data('kind') ?? '')).trigger('change');
+    $('#memoria_settings').on('click', '.memoria__kindchip', function () {
+        const kind = String($(this).data('kind') ?? '');
+        const $sel = $('#memoria_memory_kind_filter');
+        $sel.val($sel.val() === kind ? '' : kind).trigger('change');
     });
-    // 인물·관계 카드의 「⋯」
-    $('#memoria_settings').on('click', '.memoria-card-more', function () {
-        const $actions = $(this).next('.memoria__mem-actions');
-        const open = $actions.prop('hidden');
-        $actions.prop('hidden', !open);
-        $(this).attr('aria-expanded', String(open));
-    });
-    // 기억 한 줄의 「⋯」 — 누른 줄의 할 일만 펼친다 (카드마다 아이콘 여섯 개를 늘어놓지 않는다)
-    $('#memoria_settings').on('click', '.memoria-mem-more', function () {
-        const $card = $(this).closest('.memoria__mem-card');
-        const $actions = $card.find('.memoria__mem-actions');
-        const open = $actions.prop('hidden');
-        $('#memoria_memory_list .memoria__mem-actions').prop('hidden', true);
-        $('#memoria_memory_list .memoria-mem-more').attr('aria-expanded', 'false');
-        $actions.prop('hidden', !open);
-        $(this).attr('aria-expanded', String(open));
+    $('#memoria_settings').on('click', '#memoria_stats button', function () {
+        $(`#memoria_settings .memoria__tab[data-tab="${$(this).data('go')}"]`).trigger('click');
     });
 
     $('#memoria_settings').on('click', '.memoria-mem-pin', function () {
