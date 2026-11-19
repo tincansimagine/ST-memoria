@@ -1261,7 +1261,7 @@
 
 /* ============================================================
    서고의 얼굴 (v2.5)
-   흰 지면 + 포인트 색 하나. 가는 선과 끝점, 마름모 표식, 모서리 핸들. 누르는 것은 알약, 담는 것은 각진 면.
+   흰 지면 + 포인트 색 하나. 가는 선과 마름모 표식. 누르는 것은 알약, 담는 것은 각진 면.
    색은 서고가 정해 둔 두 벌(로즈 밀크 / 로즈 누아르)만 쓴다. 실리태번 테마 변수를 여기서 다시
    정의하므로 예전 규칙들도 전부 이 색을 따르고, 어떤 테마를 써도 이 패널은 같은 모습이다.
    ============================================================ */
@@ -1287,7 +1287,6 @@ body[data-memoria-paper="dark"] :is(#memoria_settings.memoria, .memoria-library,
     --faint: color-mix(in srgb, var(--dim) 62%, var(--bg));
     --ink: var(--text);
     --ink-line: color-mix(in srgb, var(--text) 22%, transparent);
-    --handles: linear-gradient(var(--ink), var(--ink)) 0 0 / 7px 7px no-repeat, linear-gradient(var(--ink), var(--ink)) 100% 0 / 7px 7px no-repeat, linear-gradient(var(--ink), var(--ink)) 0 100% / 7px 7px no-repeat, linear-gradient(var(--ink), var(--ink)) 100% 100% / 7px 7px no-repeat;
     --display: "Outfit", "Pretendard Variable", Pretendard, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
     --font: "Pretendard Variable", Pretendard, -apple-system, "Segoe UI", "Malgun Gothic", "Apple SD Gothic Neo", "Noto Sans KR", sans-serif;
     --ease: cubic-bezier(.25, .8, .3, 1);
@@ -1324,7 +1323,6 @@ body[data-memoria-paper="dark"] :is(#memoria_settings.memoria, .memoria-library,
     position: relative; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 12px 14px;
     border: 1px solid var(--ink); border-radius: 0; background: var(--surface);
 }
-#memoria_settings .memoria__status::before { content: ""; position: absolute; inset: -4px; background: var(--handles); pointer-events: none; }
 #memoria_settings .memoria__lamp { width: 11px; height: 11px; flex: none; background: var(--accent); transform: rotate(45deg); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent); }
 #memoria_settings .memoria__lamp.is-off { background: none; border: 1px solid var(--dim); box-shadow: none; }
 #memoria_settings .memoria__lamp.is-busy { animation: memoria-pulse 1s ease-in-out infinite; }
@@ -1487,7 +1485,6 @@ body[data-memoria-paper="dark"] :is(#memoria_settings.memoria, .memoria-library,
 #memoria_settings .memoria__mem-card.is-disabled, #memoria_settings .memoria__char-card.is-disabled { opacity: .5; }
 #memoria_settings .memoria__mem-card.is-pinned { border-color: var(--accent); box-shadow: inset 3px 0 0 var(--accent); }
 #memoria_settings .memoria__char-card.is-locked { border-color: var(--ink); }
-#memoria_settings .memoria__char-card.is-locked::before { content: ""; position: absolute; inset: -3px; background: var(--handles); background-size: 5px 5px; pointer-events: none; }
 #memoria_settings .memoria__mem-head { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; margin: 0; font-size: .9em; color: var(--dim); }
 #memoria_settings .memoria__mem-turn { font: 500 .82em var(--display); letter-spacing: .08em; color: var(--faint); white-space: nowrap; }
 #memoria_settings .memoria__mem-vis { font-size: .8em; color: var(--dim); opacity: 1; }
@@ -1539,7 +1536,6 @@ body[data-memoria-paper="dark"] :is(#memoria_settings.memoria, .memoria-library,
 
 /* ── 이야기 탭: 선과 마름모 ── */
 #memoria_settings .mmv-hero-now { border: 1px solid var(--ink); border-radius: 0; background: var(--surface); position: relative; }
-#memoria_settings .mmv-hero-now::before { content: ""; position: absolute; inset: -4px; background: var(--handles); pointer-events: none; }
 #memoria_settings .mmv-hero-label { font: 600 .68em var(--display); letter-spacing: .2em; color: var(--accent); }
 #memoria_settings .mmv-hero-now strong { font: 800 1.5em/1.2 var(--display); letter-spacing: -.02em; }
 #memoria_settings .mmv-tiles { gap: 0; border: 1px solid var(--ink); background: var(--surface); }
