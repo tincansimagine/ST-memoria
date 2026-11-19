@@ -20,14 +20,12 @@
                         <i class="fa-solid fa-arrows-rotate"></i>
                         <span>갱신</span>
                     </div>
+                    <button type="button" id="memoria_library_open" class="memoria__library-launcher" title="전체 서고 — 사용한 봇·채팅 찾기 · 한 번에 백업">
+                        <i class="fa-solid fa-book-open" aria-hidden="true"></i>
+                        <span>전체 서고</span>
+                    </button>
                 </div>
             </div>
-
-            <button type="button" id="memoria_library_open" class="memoria__library-launcher">
-                <i class="fa-solid fa-book-open" aria-hidden="true"></i>
-                <span><strong>전체 서고</strong><small>사용한 봇·채팅 찾기 · 한 번에 백업</small></span>
-                <span aria-hidden="true">→</span>
-            </button>
 
             <div class="memoria__tabs" role="tablist" aria-label="Memoria 설정">
                 <button class="memoria__tab is-active" type="button" data-tab="overview">
@@ -56,7 +54,7 @@
                     <div class="memoria__section-head">
                         <div>
                             <h4>주입 미리보기</h4>
-                            <p>다음 응답 생성 시 프롬프트에 들어갈 장기기억입니다. 직접 고친 뒤 <b>✏</b>를 누르면 다음 응답 1회에, <b>📌</b>를 누르면 해제할 때까지 계속 주입됩니다. <b>✨</b>는 사서가 기억·세계·요약을 보고 장부를 새로 써서 초안으로 보여줍니다.</p>
+                            <p>다음 응답 생성 시 프롬프트에 들어갈 장기기억입니다. 직접 고친 뒤 연필을 누르면 다음 응답 1회에, 압정을 누르면 해제할 때까지 계속 주입됩니다. 요술봉은 사서가 기억·세계·요약을 보고 장부를 새로 써서 초안으로 보여줍니다.</p>
                         </div>
                         <span id="memoria_packet_tokens" class="memoria__token-badge"></span>
                         <i class="fa-solid fa-wand-magic-sparkles memoria__icon-btn" id="memoria_packet_rewrite" title="사서가 기억·세계·요약을 보고 장부를 새로 씁니다 (초안 — 적용 전 확인)"></i>
@@ -107,26 +105,22 @@
                 <div class="memoria__section">
                     <div class="memoria__section-head">
                         <div>
-                            <h4>기억 브라우저</h4>
-                            <p>고정(📌)한 기억은 토큰 예산 안에서 우선 주입됩니다. 책 아이콘으로 대화 원문을 확인할 수 있습니다.</p>
+                            <h4>기억 <small id="memoria_memory_count"></small></h4>
                         </div>
                         <div class="memoria__compact-actions">
-                            <div class="menu_button" id="memoria_memory_add" title="기억 추가">
+                            <div class="menu_button memoria__text-btn" id="memoria_memory_add" title="기억을 직접 적습니다">
                                 <i class="fa-solid fa-plus"></i>
-                                <span>추가</span>
+                                <span>직접 적기</span>
                             </div>
                         </div>
                     </div>
                     <div class="memoria__toolbar">
-                        <div class="memoria__search">
-                            <i class="fa-solid fa-magnifying-glass"></i>
-                            <input type="text" id="memoria_memory_search" placeholder="요약·발췌·개체·태그 검색…">
-                        </div>
-                        <div class="memoria__search" title="이 채팅에서 회상하지 않을 말 (쉼표로 구분). 그 말이 들어간 기억과 옛 챕터는 회상으로 싣지 않습니다. 기억은 지워지지 않고, 채팅마다 따로 저장됩니다.">
-                            <i class="fa-solid fa-volume-xmark"></i>
-                            <input type="text" id="memoria_recall_mute" placeholder="회상하지 않을 말 (쉼표로 구분)">
-                        </div>
-                        <select id="memoria_memory_kind_filter" class="memoria__kind-select">
+                        <label class="memoria__search" for="memoria_memory_search">
+                            <i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i>
+                            <input type="search" id="memoria_memory_search" placeholder="내용, 인물, 태그로 찾기" autocomplete="off">
+                        </label>
+                        <div id="memoria_kind_chips" class="memoria__kinds" role="group" aria-label="종류로 고르기"></div>
+                        <select id="memoria_memory_kind_filter" class="memoria__kind-select" hidden aria-hidden="true" tabindex="-1">
                             <option value="">전체</option>
                             <option value="event">사건</option>
                             <option value="relationship">관계</option>
@@ -140,6 +134,11 @@
                             <option value="impression">인상</option>
                         </select>
                     </div>
+                    <details class="memoria__mute">
+                        <summary>이 채팅에서 회상하지 않을 말</summary>
+                        <p>쉼표로 구분해 적으면, 그 말이 든 기억과 옛 챕터는 이 채팅에서 회상으로 싣지 않습니다. 기억은 지워지지 않습니다.</p>
+                        <input type="text" id="memoria_recall_mute" placeholder="예: 은반지, 축제" autocomplete="off">
+                    </details>
                     <div id="memoria_memory_list" class="memoria__mem-list"></div>
                 </div>
             </section>
@@ -150,7 +149,7 @@
                     <div class="memoria__section-head">
                         <div>
                             <h4>인물 도감</h4>
-                            <p>대화에 등장한 인물의 프로필입니다. <b>바탕</b>(⚓)은 한 번 적히면 사서가 다시 쓰지 못하는 기준이고, 이야기 속에서 생긴 변화(🌱)와 실제로 한 대사(❝)는 따로 쌓입니다. ✏️로 모두 직접 고칠 수 있습니다.</p>
+                            <p>대화에 등장한 인물의 프로필입니다. <b>바탕</b>은 한 번 적히면 사서가 다시 쓰지 못하는 기준이고, 이야기 속에서 생긴 변화와 실제로 한 대사는 따로 쌓입니다. 모두 직접 고칠 수 있습니다.</p>
                         </div>
                         <div class="memoria__compact-actions">
                             <div class="menu_button" id="memoria_character_add" title="인물 추가">
@@ -281,6 +280,14 @@
                         <i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i>
                         <input type="search" id="memoria_settings_search" placeholder="설정 찾기 — 예: 숨김, 임베딩, 삼갈 표현" autocomplete="off">
                     </label>
+                    <div class="memoria__field memoria__paper-pick">
+                        <label for="memoria_ui_paper" title="서고 화면은 실리태번 테마와 상관없이 자기 색을 씁니다. 밝은 종이와 어두운 종이 가운데 무엇을 쓸지 고릅니다.">서고 종이</label>
+                        <select id="memoria_ui_paper">
+                            <option value="auto">테마 밝기에 맞추기</option>
+                            <option value="light">밝은 종이</option>
+                            <option value="dark">어두운 종이</option>
+                        </select>
+                    </div>
                     <div id="memoria_bundle_bar" class="memoria__bundle-bar">
                         <i class="fa-solid fa-layer-group" aria-hidden="true"></i>
                         <span id="memoria_bundle_state"><b>기본 설정</b></span>
@@ -378,7 +385,7 @@
                     </label>
                     <label class="memoria__toggle-row" for="memoria_lock_edited_chars">
                         <input type="checkbox" id="memoria_lock_edited_chars">
-                        <span><strong>직접 고친 인물 프로필 자동 고정</strong><small>인물 카드를 ✏️로 수정하면 자동으로 🔒 고정됩니다. 고정된 카드는 사서가 이름·나이·직업·외모·말투·특성을 바꾸지 못하고, 관계만 계속 갱신됩니다. (세계 탭에서 카드별로 직접 잠그거나 풀 수 있습니다)</small></span>
+                        <span><strong>직접 고친 인물 프로필 자동 고정</strong><small>인물 카드를 직접 수정하면 자동으로 고정됩니다. 고정된 카드는 사서가 이름·나이·직업·외모·말투·특성을 바꾸지 못하고, 관계만 계속 갱신됩니다. (세계 탭에서 카드별로 직접 잠그거나 풀 수 있습니다)</small></span>
                     </label>
                     <label class="memoria__toggle-row" for="memoria_event_tracking">
                         <input type="checkbox" id="memoria_event_tracking">

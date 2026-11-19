@@ -159,7 +159,7 @@ export function findRepeatedPhrases(replies, { minShare = 0.2, minReplies = 3, m
  */
 export const BUNDLE_EXCLUDED = Object.freeze([
     'enabled', 'customApi', 'embedApi', 'prompts', 'promptRev', 'promptOutdated', 'settingsRev',
-    'defaultPerspective', 'bundles', 'bundleByOwner', 'activeBundle', 'bundleBase', 'noticed',
+    'defaultPerspective', 'bundles', 'bundleByOwner', 'activeBundle', 'bundleBase', 'noticed', 'uiPaper',
 ]);
 
 const clone = (v) => (v === undefined ? undefined : JSON.parse(JSON.stringify(v)));
