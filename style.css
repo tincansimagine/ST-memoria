@@ -1253,3 +1253,5 @@
 .memoria__bundle-dialog .memoria__row > i { cursor: pointer; padding: 4px; }
 
 .memoria-mem-revive, .memoria-item-revive, .memoria-state-revive { cursor: pointer; }
+.mmv-check { color: #c98a1b; margin-left: 6px; }
+.memoria-mem-retire { cursor: pointer; }

@@ -467,3 +467,19 @@ export function stripOpenLines(text) {
     }
     return out.join('\n').trim();
 }
+
+/* ------------------------------------------------------------
+ * 요약 속 숫자 검수 — 원문에 없는 숫자는 지어낸 것이다
+ *
+ * 요약이 틀리는 자리는 대개 숫자다: 날짜, 금액, 나이, 횟수. 문장은 그럴듯한데 숫자만 바뀌어 있으면
+ * 사람도 모델도 알아채지 못하고, 그 뒤로는 그 숫자가 사실이 된다. 숫자는 글자 그대로 견줄 수 있으므로
+ * 모델을 다시 부르지 않고도 가려낼 수 있다.
+ * ------------------------------------------------------------ */
+
+/** text에 나오는 숫자 가운데 source 어디에도 없는 것 (쉼표는 무시: 1,200 = 1200) */
+export function ungroundedFigures(text, source) {
+    const digits = (t) => (String(t ?? '').replace(/(\d),(?=\d{3})/g, '$1').match(/\d+(?:\.\d+)?/g) || []);
+    const have = new Set(digits(source));
+    // 한 자리 숫자는 세어서 적은 것일 수 있다("두 사람" → "2명") — 두 자리 이상과 소수만 본다
+    return [...new Set(digits(text))].filter(n => n.length >= 2 && !have.has(n));
+}

@@ -177,3 +177,90 @@ test('a recalled promise that has since been kept says so', async () => {
     const packet = (await a.buildPacketWithinBudget('축제', null)).text;
     assert.match(packet, /축제에 같이 가자고 약속했다 \[as of then — this has since been settled: they went to the festival together\]/);
 });
+
+test('figures that appear nowhere in the source are caught; counted single digits are not', async () => {
+    const { ungroundedFigures } = await import('../craft-engine.mjs');
+    const source = '[t4 · 3월 12일] 보라가 1,200골드를 빌렸다. 두 사람이 남았다.';
+    assert.deepEqual(ungroundedFigures('- 3월 12일, 보라가 1200골드를 빌렸다. 2명이 남았다.', source), []);
+    assert.deepEqual(ungroundedFigures('- 3월 21일, 보라가 1,500골드를 빌렸다.', source), ['21', '1500']);
+});
+
+test('a summary with an invented figure is rewritten once, and flagged only if it stays wrong', async () => {
+    const a = await app();
+    const store = a.getStore();
+    const settings = a.getSettings();
+    settings.chunkTurns = 3; settings.consolidateEvery = 0; settings.arcConsolidateEvery = 0;
+    store.turnCounter = 3;
+    store.turns = [1, 2, 3].map(n => ({ id: `t${n}`, mesId: n, mesHash: n, turnIndex: n, summary: n === 2 ? '보라가 1200골드를 빌렸다.' : `${n}번째 일이 있었다.`, importance: 0.5 }));
+    const replies = ['PLOT:\n- 보라가 1500골드를 빌렸다.', 'PLOT:\n- 보라가 1200골드를 빌렸다.'];
+    const asked = [];
+    a.context.generateRaw = async ({ prompt }) => { asked.push(prompt[0].content); return replies[asked.length - 1]; };
+    assert.equal(await a.run('maybeSummarizeChunk')(store), 1);
+    assert.equal(asked.length, 2);
+    assert.match(asked[1], /appear nowhere in the material above: 1500/);
+    assert.match(store.chunkSummaries[0].text, /1200골드/);
+    assert.equal(store.chunkSummaries[0].unverified, undefined);
+
+    // 숫자가 다 맞으면 다시 부르지 않는다
+    store.turnCounter = 6;
+    store.turns.push(...[4, 5, 6].map(n => ({ id: `t${n}`, mesId: n, mesHash: n, turnIndex: n, summary: `${n}번째 일이 있었다.`, importance: 0.5 })));
+    asked.length = 0; replies[0] = 'PLOT:\n- 조용한 날들이 이어졌다.';
+    await a.run('maybeSummarizeChunk')(store);
+    assert.equal(asked.length, 1);
+});
+
+test('an unreadable batch is split and refiled, so one bad scene does not fail the run', async () => {
+    const a = await app();
+    const chat = a.context.chat;
+    for (let i = 0; i < 4; i++) chat.push({ is_user: true, mes: '행동', name: '여행자' }, { is_user: false, mes: `아리아가 ${i}번째로 대답했다. 바람이 불었고 파도 소리가 들렸다.${i === 2 ? ' 문제 장면.' : ''}`, name: '아리아' });
+    let calls = 0;
+    a.context.generateRaw = async ({ prompt }) => {
+        calls++;
+        const body = prompt[0].content;
+        if (body.includes('문제 장면')) return '죄송하지만 이 내용은 도와드릴 수 없습니다.';
+        const n = (body.match(/<exchange n=/g) || []).length;
+        return n ? JSON.stringify({ digests: Array.from({ length: n }, (_, i) => ({ n: i + 1, digest: `${i + 1}번째 요약.` })) })
+            : JSON.stringify({ digest: '한 턴 요약.', memories: [] });
+    };
+    a.run('setTimeout = (fn) => { fn(); return 0; }'); // 재시도 사이의 기다림을 건너뛴다
+    assert.equal(await a.run('commitTurns')([1, 3, 5, 7]), true);
+    const store = a.getStore();
+    assert.equal(store.turns.length, 4);
+    assert.deepEqual([...store.turns.map(t => Boolean(t.failed))], [false, false, true, false], 'only the scene the model refused is left to retry');
+    assert.ok(calls <= 12);
+});
+
+test('muted words keep matching memories out of recall without deleting them', async () => {
+    const a = await app();
+    const store = a.getStore();
+    store.turnCounter = 20;
+    a.context.chat.push({ is_user: true, mes: '항구', name: '여행자' });
+    store.memories.push(withVec(a, memory('crab', { summary: '항구 식당에서 조개구이를 먹었다', turnIndex: 3 })), withVec(a, memory('boat', { summary: '항구 부두에서 배를 탔다', turnIndex: 4 })));
+    const ids = async () => [...(await a.retrieveMemories('항구', [], '')).selected.map(m => m.id)].sort();
+    assert.deepEqual(await ids(), ['boat', 'crab']);
+    store.recallMute = ['조개구이'];
+    assert.deepEqual(await ids(), ['boat']);
+    assert.equal(store.memories.length, 2);
+});
+
+test('light tasks and summaries can use their own model', async () => {
+    const a = await app();
+    const settings = a.getSettings();
+    settings.apiMode = 'custom';
+    Object.assign(settings.customApi, { url: 'https://example.test/v1', model: 'main', lightModel: 'cheap', reasoningEffort: 'low' });
+    const sent = [];
+    a.context.fetch = async (url, init) => {
+        const body = JSON.parse(init.body);
+        sent.push(body);
+        if (body.reasoning_effort && body.model === 'cheap') return { ok: false, status: 400, statusText: 'Bad Request', json: async () => ({ error: { message: 'unknown field reasoning_effort' } }) };
+        return { ok: true, json: async () => ({ choices: [{ message: { content: 'OK' } }] }) };
+    };
+    const call = a.run('callAuxLLM');
+    await call('s', 'u', {});
+    await call('s', 'u', { task: 'summary' });
+    await call('s', 'u', { task: 'light' });
+    await call('s', 'u', { task: 'light' });
+    assert.deepEqual(sent.map(b => [b.model, b.reasoning_effort ?? null]),
+        [['main', 'low'], ['main', 'low'], ['cheap', 'low'], ['cheap', null], ['cheap', null]],
+        'a model that rejects the reasoning setting is retried without it, and not asked again');
+});
