@@ -1,7 +1,7 @@
 <div id="memoria_settings" class="memoria">
     <div class="inline-drawer">
         <div class="inline-drawer-toggle inline-drawer-header">
-            <b><i class="fa-solid fa-book-bookmark"></i> Memoria — 장기기억 서고 <span class="memoria__version">v2.2.0</span></b>
+            <b><i class="fa-solid fa-book-bookmark"></i> Memoria — 장기기억 서고 <span class="memoria__version">v2.3.0</span></b>
             <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
         </div>
         <div class="inline-drawer-content">
@@ -121,6 +121,10 @@
                         <div class="memoria__search">
                             <i class="fa-solid fa-magnifying-glass"></i>
                             <input type="text" id="memoria_memory_search" placeholder="요약·발췌·개체·태그 검색…">
+                        </div>
+                        <div class="memoria__search" title="이 채팅에서 회상하지 않을 말 (쉼표로 구분). 그 말이 들어간 기억과 옛 챕터는 회상으로 싣지 않습니다. 기억은 지워지지 않고, 채팅마다 따로 저장됩니다.">
+                            <i class="fa-solid fa-volume-xmark"></i>
+                            <input type="text" id="memoria_recall_mute" placeholder="회상하지 않을 말 (쉼표로 구분)">
                         </div>
                         <select id="memoria_memory_kind_filter" class="memoria__kind-select">
                             <option value="">전체</option>
@@ -411,6 +415,16 @@
                             <label for="memoria_profile">연결 프로필</label>
                             <select id="memoria_profile"></select>
                         </div>
+                        <div class="memoria__field-grid">
+                            <div class="memoria__field">
+                                <label for="memoria_profile_summary" title="요약·연대기·서고 정리에 쓸 연결. 턴 기록(사서)은 위 연결을 씁니다.">요약·정리용 연결</label>
+                                <select id="memoria_profile_summary"></select>
+                            </div>
+                            <div class="memoria__field">
+                                <label for="memoria_profile_light" title="연속성 검사·장면 연출·서고에 묻기·기록 고치기처럼 가벼운 판단에 쓸 연결. 답변마다 부르는 기능에는 싼 모델을 두면 비용이 크게 줄어듭니다.">가벼운 작업용 연결</label>
+                                <select id="memoria_profile_light"></select>
+                            </div>
+                        </div>
                     </div>
                     <div id="memoria_custom_api_block" style="display:none;">
                         <div class="memoria__field">
@@ -443,6 +457,25 @@
                         <div class="memoria__field">
                             <label for="memoria_custom_model" title="예: gpt-4o-mini (API 키 모드) 또는 gemini-2.5-pro (Vertex 모드)">모델</label>
                             <input type="text" id="memoria_custom_model" placeholder="gpt-4o-mini" autocomplete="off">
+                        </div>
+                        <div class="memoria__field-grid">
+                            <div class="memoria__field">
+                                <label for="memoria_custom_summary_model" title="요약·연대기·서고 정리에 쓸 모델. 비워 두면 위 모델을 씁니다.">요약·정리용 모델</label>
+                                <input type="text" id="memoria_custom_summary_model" placeholder="비우면 위 모델" autocomplete="off">
+                            </div>
+                            <div class="memoria__field">
+                                <label for="memoria_custom_light_model" title="연속성 검사·장면 연출·서고에 묻기처럼 가벼운 판단에 쓸 모델. 비워 두면 위 모델을 씁니다.">가벼운 작업용 모델</label>
+                                <input type="text" id="memoria_custom_light_model" placeholder="비우면 위 모델" autocomplete="off">
+                            </div>
+                        </div>
+                        <div class="memoria__field">
+                            <label for="memoria_custom_reasoning" title="기록·요약은 받아 적는 일이라 깊은 추론이 필요 없습니다. 추론 토큰은 출력 가격으로 나가므로 줄이면 그만큼 싸집니다. API 키 방식(OpenAI 호환)에서만 적용되고, 모델이 이 설정을 받지 않으면 자동으로 떼고 다시 보냅니다.">추론 줄이기</label>
+                            <select id="memoria_custom_reasoning">
+                                <option value="">모델 기본값 그대로</option>
+                                <option value="low">낮게 (low)</option>
+                                <option value="minimal">최소 (minimal)</option>
+                                <option value="none">끄기 (none)</option>
+                            </select>
                         </div>
                         <div class="memoria__field-grid">
                             <div class="memoria__field">

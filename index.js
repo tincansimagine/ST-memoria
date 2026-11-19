@@ -40,7 +40,7 @@ import { ARGUMENT_TYPE, SlashCommandArgument } from "../../../slash-commands/Sla
 import { MacrosParser } from "../../../../scripts/macros.js";
 import { NARRATOR_PERSPECTIVE, isSharedPerspective, hasChatPerspective, resolvePerspective, findAssociations, sameKnowledgeScope, archiveSnapshot, validateArchive, addCheckpoint, archiveChanges, packetSections } from './archive-engine.mjs';
 import { showArchiveLibrary } from './library-ui.mjs';
-import { withDeadline, parsePhraseList, stripPhrases, hasPhrase, findRepeatedPhrases, pickBundleValues, resolveBundleName, switchBundle, saveBundle, deleteBundle, renameBundle, exportBundle, parseBundleFile, diffStableEntries, shouldRefreeze, createActivityLog, findRivalExtensions, splitClosedLine, sleepStaleThreads, pickPledges, stripOpenLines, THREAD_KINDS, recallCooldown, pushRecallHistory, isEndedValue } from './craft-engine.mjs';
+import { withDeadline, parsePhraseList, stripPhrases, hasPhrase, findRepeatedPhrases, pickBundleValues, resolveBundleName, switchBundle, saveBundle, deleteBundle, renameBundle, exportBundle, parseBundleFile, diffStableEntries, shouldRefreeze, createActivityLog, findRivalExtensions, splitClosedLine, sleepStaleThreads, pickPledges, stripOpenLines, THREAD_KINDS, recallCooldown, pushRecallHistory, isEndedValue, ungroundedFigures } from './craft-engine.mjs';
 import { findStatusBars, statusOneLine, isPauseDirective, isPauseMessage, buildTimelineRows, filterTimelineRows, timelineMarkdown, timelineCsv, layoutTimelineGraph, verifyIssues } from './scene-engine.mjs';
 import { heroHtml, pulseSvg, flowHtml, railHtml, tableHtml, bondMapSvg, bondCardsHtml, statusListHtml } from './story-view.mjs';
 
@@ -281,6 +281,8 @@ const DEFAULT_SETTINGS = Object.freeze({
     recordBatch: 4,           // 묶어 기록 — 이 턴 수만큼 모아 사서 호출 한 번으로 기록 (1 = 답장마다). 호출마다 붙는 지시문·참고 자료를 한 번만 낸다
     recordDelay: 0,           // 기록 지연 — 응답 뒤에 내가 N번 더 답을 보낸 뒤에야 기록 (0 = 바로). 그리팅은 항상 첫 답 뒤
     profileId: '',            // '' = 현재 연결된 API로 조용히 생성
+    // 작업별 연결 — '' = 위 연결과 같게. summary: 요약·연대기·서고 정리 / light: 연속성 검사·장면 연출·서고에 묻기 같은 가벼운 판단
+    taskProfiles: { summary: '', light: '' },
     injectDepth: 1,
     injectPosition: 'chat',   // 'chat' = 채팅 내 깊이, 'before' = 메인 프롬프트 앞, 'after' = 메인 프롬프트 뒤
     tokenBudget: 8000,
@@ -314,7 +316,7 @@ const DEFAULT_SETTINGS = Object.freeze({
     // flexTier: 절감 티어(반값·지연 감수) — 'off' | 'openai'(본문 service_tier) | 'gemini'(헤더)
     // extraHeaders/extraBody: JSON 문자열 — 요청에 얹을 추가 헤더·본문 필드 (프록시 라우팅 등 고급용)
     // authMode: 'apikey' = url/key로 OpenAI 호환 호출, 'vertex' = 구글 서비스 계정 JSON으로 Vertex AI 직접 호출
-    customApi: { url: '', key: '', model: '', temperature: 0.7, timeoutSec: 90, flexTier: 'off', extraHeaders: '', extraBody: '', authMode: 'apikey', vertexJson: '', vertexLocation: 'us-central1' },
+    customApi: { url: '', key: '', model: '', summaryModel: '', lightModel: '', reasoningEffort: '', temperature: 0.7, timeoutSec: 90, flexTier: 'off', extraHeaders: '', extraBody: '', authMode: 'apikey', vertexJson: '', vertexLocation: 'us-central1' },
     // 의미 검색 소스: 'off' = 내장 해시만, 'local' = 실리태번 내장 임베딩(무료), 'api' = OpenAI 호환 임베딩 API
     // floor: API 코사인 바닥값 — 이 아래는 무관으로 보고 0으로 깎는다 (모델마다 분포가 달라 조정 가능)
     embedApi: { mode: 'off', enabled: false, url: '', key: '', model: '', floor: 0.35 },
@@ -376,6 +378,7 @@ function getSettings() {
     for (const [k, v] of Object.entries(DEFAULT_SETTINGS.customApi)) {
         if (typeof s.customApi[k] === 'undefined') s.customApi[k] = v;
     }
+    if (!s.taskProfiles || typeof s.taskProfiles !== 'object') s.taskProfiles = { summary: '', light: '' };
     // 구버전(mode 없음) → enabled 플래그를 mode로 승격
     if (typeof s.embedApi.mode === 'undefined') s.embedApi.mode = s.embedApi.enabled ? 'api' : 'off';
     for (const [k, v] of Object.entries(DEFAULT_SETTINGS.embedApi)) {
@@ -767,7 +770,7 @@ async function checkReply(mesId) {
     updateStatusUI('연속성 검사 중…');
     let result = null;
     try {
-        const { value, timedOut } = await withDeadline(callAuxLLM(REPLY_CHECK_PROMPT, userPrompt, { maxTokens: auxTokens(1500) }), 120000, null);
+        const { value, timedOut } = await withDeadline(callAuxLLM(REPLY_CHECK_PROMPT, userPrompt, { task: 'light', maxTokens: auxTokens(1500) }), 120000, null);
         if (timedOut) logActivity('error', `#${mesId} 연속성 검사이 2분 안에 끝나지 않아 건너뛰었어요`);
         else result = parseJsonLoose(value);
     } catch (e) {
@@ -1424,16 +1427,20 @@ function parseJsonObjectSetting(raw) {
 }
 
 /** 커스텀 OpenAI 호환 API 직접 호출 */
-async function callCustomApi(systemPrompt, userPrompt, tokens) {
+/** 추론 세기 지정을 거절한 모델 — 한 번 거절당하면 그 모델에는 다시 붙이지 않는다 (새로 고칠 때까지) */
+const reasoningRefused = new Set();
+
+async function callCustomApi(systemPrompt, userPrompt, tokens, model = '') {
     const cfg = getSettings().customApi;
     const url = normalizeCustomApiUrl(cfg.url);
-    if (!url || !cfg.model) throw new Error('커스텀 API의 URL과 모델을 설정하세요');
+    model = model || cfg.model;
+    if (!url || !model) throw new Error('커스텀 API의 URL과 모델을 설정하세요');
 
     const headers = { 'Content-Type': 'application/json' };
     if (cfg.key) headers['Authorization'] = `Bearer ${cfg.key}`;
 
     const body = {
-        model: cfg.model,
+        model,
         messages: [
             { role: 'system', content: systemPrompt },
             { role: 'user', content: userPrompt },
@@ -1446,6 +1453,11 @@ async function callCustomApi(systemPrompt, userPrompt, tokens) {
     // 절감 티어: 배경 작업이라 지연을 감수하고 반값으로 — 제공사마다 거는 위치가 다르다
     if (cfg.flexTier === 'openai') body.service_tier = 'flex';
     else if (cfg.flexTier === 'gemini') headers['X-Goog-Api-Service-Tier'] = 'flex';
+
+    // 추론 줄이기: 기록·요약은 받아 적는 일이라 깊은 추론이 필요 없다 — 추론 토큰은 출력 가격으로 나간다.
+    // 모델이 이 필드를 모르면(400) 떼고 다시 보내고, 그 모델에는 더 붙이지 않는다.
+    const effort = ['minimal', 'low', 'none'].includes(cfg.reasoningEffort) && !reasoningRefused.has(model) ? cfg.reasoningEffort : '';
+    if (effort) body.reasoning_effort = effort;
 
     // 고급: 사용자가 직접 얹는 헤더·본문 필드는 마지막에 적용해 위 기본값까지 덮어쓸 수 있게 한다
     const extraHeaders = parseJsonObjectSetting(cfg.extraHeaders);
@@ -1468,6 +1480,12 @@ async function callCustomApi(systemPrompt, userPrompt, tokens) {
                 const err = await response.json();
                 detail = err?.error?.message || err?.message || detail;
             } catch { /* ignore */ }
+            if (effort && body.reasoning_effort === effort && [400, 404, 422].includes(response.status)) {
+                reasoningRefused.add(model);
+                logActivity('update', `${model}이(가) 추론 줄이기 설정을 받지 않아, 이 모델에는 붙이지 않고 다시 보냈어요`);
+                clearTimeout(timeoutId);
+                return await callCustomApi(systemPrompt, userPrompt, tokens, model);
+            }
             throw new Error(`HTTP ${response.status}: ${detail}`);
         }
         const data = await response.json();
@@ -1584,8 +1602,9 @@ async function getVertexAccessToken(jsonRaw) {
 }
 
 /** Vertex AI generateContent 직접 호출 (구글 서비스 계정 JSON, ST 연결 프로필과 완전히 독립) */
-async function callVertexApi(systemPrompt, userPrompt, tokens) {
-    const cfg = getSettings().customApi;
+async function callVertexApi(systemPrompt, userPrompt, tokens, model = '') {
+    const cfg = { ...getSettings().customApi };
+    cfg.model = model || cfg.model;
     const jsonRaw = String(cfg.vertexJson || '').trim();
     if (!jsonRaw) throw new Error('Vertex 서비스 계정 JSON을 입력하세요');
     if (!cfg.model) throw new Error('Vertex 모델 ID를 입력하세요 (예: gemini-2.5-pro)');
@@ -1640,17 +1659,31 @@ async function callVertexApi(systemPrompt, userPrompt, tokens) {
     }
 }
 
-async function callAuxLLM(systemPrompt, userPrompt, { maxTokens } = {}) {
+/** 이 작업에 쓸 연결 프로필 — 작업별로 따로 골랐고 그 프로필이 아직 있으면 그것, 아니면 기본 연결 */
+function profileForTask(task) {
+    const s = getSettings();
+    const own = task && task !== 'record' ? String(s.taskProfiles?.[task] || '') : '';
+    if (own && listConnectionProfiles().some(p => p.id === own)) return own;
+    return s.profileId || '';
+}
+
+/**
+ * task: 'record' 턴 기록(사서) · 'summary' 요약·연대기·서고 정리 · 'light' 검사·연출·질문 같은 가벼운 판단.
+ * 받아 적기와 가벼운 판단에 같은 값의 모델을 쓸 이유가 없다 — 작업별로 연결(또는 모델)을 달리 둘 수 있다.
+ */
+async function callAuxLLM(systemPrompt, userPrompt, { maxTokens, task = 'record' } = {}) {
     const settings = getSettings();
     const tokens = maxTokens || settings.responseTokens;
 
     if (settings.apiMode === 'custom') {
+        const model = String((task === 'summary' ? settings.customApi.summaryModel : task === 'light' ? settings.customApi.lightModel : '') || '').trim();
         return settings.customApi.authMode === 'vertex'
-            ? await callVertexApi(systemPrompt, userPrompt, tokens)
-            : await callCustomApi(systemPrompt, userPrompt, tokens);
+            ? await callVertexApi(systemPrompt, userPrompt, tokens, model)
+            : await callCustomApi(systemPrompt, userPrompt, tokens, model);
     }
 
-    if (settings.profileId) {
+    const profileId = profileForTask(task);
+    if (profileId) {
         const mod = await ensureConnectionManager();
         const svc = mod?.ConnectionManagerRequestService;
         if (svc) {
@@ -1658,12 +1691,12 @@ async function callAuxLLM(systemPrompt, userPrompt, { maxTokens } = {}) {
                 { role: 'system', content: systemPrompt },
                 { role: 'user', content: userPrompt },
             ];
-            const result = await svc.sendRequest(settings.profileId, messages, tokens, {
+            const result = await svc.sendRequest(profileId, messages, tokens, {
                 stream: false,
                 extractData: true,
                 includePreset: false,
                 includeInstruct: false,
-            }, buildProfileOverrides(settings.profileId));
+            }, buildProfileOverrides(profileId));
             return String(result?.content ?? '');
         }
     }
@@ -3071,6 +3104,7 @@ async function commitTurns(mesIds, { silent = true, force = false, retry = 1 } =
     const digests = new Map(); // 묶어 기록할 때: 교환 번호 → 그 턴의 요약·무게·흐른 시간
 
     let extracted = null;
+    let replied = false; // 모델이 답은 했는가 (연결 오류와 "읽을 수 없는 답"을 구분한다)
     try {
         llmBusy = true;
         updateStatusUI('기록 중…');
@@ -3081,6 +3115,7 @@ async function commitTurns(mesIds, { silent = true, force = false, retry = 1 } =
             const nudge = attempt === 0 ? '' : '\n\nFORMAT WARNING: the previous reply could not be parsed. Respond with EXACTLY ONE minified JSON object — no code fences, no commentary, nothing before "{" or after "}".';
             try {
                 const response = await callAuxLLM(sysPrompt + nudge, userPrompt);
+                replied = true;
                 const parsed = parseJsonLoose(response);
                 if (parsed) {
                     extracted = sanitizeExtraction(parsed, userText, assistantText, { memoryCap });
@@ -3101,9 +3136,26 @@ async function commitTurns(mesIds, { silent = true, force = false, retry = 1 } =
             }
         }
         if (!extracted && !silent) toastr.error('기억 기록에 실패했습니다. (모델 응답 오류)', 'Memoria');
-        if (!extracted) logActivity('error', `${batch ? `#${units[0].mesId}~#${mesId}` : `#${mesId}`} 턴 기록 실패 — 모델 응답을 읽지 못했어요 (도구 → 색인으로 재시도)`);
+        if (!extracted && !(batch && replied)) logActivity('error', `${batch ? `#${units[0].mesId}~#${mesId}` : `#${mesId}`} 턴 기록 실패 — 모델 응답을 읽지 못했어요 (도구 → 색인으로 재시도)`);
     } finally {
         llmBusy = false;
+    }
+
+    // 묶음을 읽을 수 없는 답만 돌아왔다면(거절·잘림·형식 깨짐) 대개 그 안의 한 장면 탓이다.
+    // 묶음 전체를 실패로 남기지 않고 반으로 나눠 다시 적는다 — 문제 장면 하나만 실패로 남고 나머지는 기록된다.
+    // 연결 자체가 안 될 때(답이 한 번도 오지 않음)는 나눠 봐야 호출만 늘므로 하지 않는다.
+    if (!extracted && batch && replied) {
+        const mine = new Set(units.map(u => u.turn));
+        for (const u of units) removeDerivedForTurn(store, u.turn.turnIndex);
+        store.turns = store.turns.filter(t => !mine.has(t));
+        renumberTurns(store);
+        persistStore();
+        const ids = units.map(u => u.mesId);
+        const mid = Math.ceil(ids.length / 2);
+        logActivity('defer', `#${ids[0]}~#${mesId} 묶음의 응답을 읽지 못해 반으로 나눠 다시 기록해요`);
+        const first = await commitTurns(ids.slice(0, mid), { silent, force, retry });
+        const second = await commitTurns(ids.slice(mid), { silent, force, retry });
+        return first || second;
     }
 
     const answered = Boolean(extracted);
@@ -3451,7 +3503,7 @@ async function maybeFoldEras(store) {
     const directive = '\n\nThese are the OLDEST records of a long story, being folded into its single standing "story so far". Up to 10 PLOT bullets. Spend them on what the whole story still stands on: how the characters met and what they became to each other, the turning points, lasting promises, secrets and who holds them, deaths, and anything still unresolved. Let routine scenes go.';
     let text = '';
     try {
-        text = cleanMultiline(sanitizeRecordOutput(await callAuxLLM(`${getSettings().prompts.arc}${directive}\n\n${languageDirective()}`, folding.map(a => `[t${a.fromTurn}–t${a.toTurn}]\n${a.text}`).join('\n\n'), { maxTokens: auxTokens(4000) })), 2800);
+        text = cleanMultiline(sanitizeRecordOutput(await callAuxLLM(`${getSettings().prompts.arc}${directive}\n\n${languageDirective()}`, folding.map(a => `[t${a.fromTurn}–t${a.toTurn}]\n${a.text}`).join('\n\n'), { task: 'summary', maxTokens: auxTokens(4000) })), 2800);
     } catch (e) {
         console.debug(`[${MODULE_NAME}] 옛 이야기 접기 실패 — 다음 기회에 다시`, e);
     }
@@ -3507,6 +3559,7 @@ async function maybeSummarizeChunk(store, { flushAll = false, onProgress = null,
         }
 
         let text = '';
+        let unverified = [];
         // 떡밥 점검: 요약 호출이 이 구간을 통째로 읽는 김에, 열려 있는 떡밥 가운데 풀렸거나 의미가 없어진 것을 함께 묻는다
         const threads = store.locks.filter(l => l.status === 'active' && THREAD_KINDS.includes(normLockKind(l.kind)))
             .sort((a, b) => (a.turnIndex || 0) - (b.turnIndex || 0)).slice(0, 16);
@@ -3539,8 +3592,22 @@ async function maybeSummarizeChunk(store, { flushAll = false, onProgress = null,
             const refBlock = await buildReferenceBlock({ lean: true });
             const userPrompt = [refBlock, previousSummariesForContext(store), threadBlock, staleBlock, `Turn digests to weave:\n${parts.join('\n')}`]
                 .filter(Boolean).join('\n');
-            const reply = splitClosedLine(await callAuxLLM(`${settings.prompts.chunk}${threadDirective}${staleDirective}\n\n${languageDirective()}`, userPrompt, { maxTokens: auxTokens(4000) }));
+            const sysPrompt = `${settings.prompts.chunk}${threadDirective}${staleDirective}\n\n${languageDirective()}`;
+            let reply = splitClosedLine(await callAuxLLM(sysPrompt, userPrompt, { task: 'summary', maxTokens: auxTokens(4000) }));
             text = cleanMultiline(sanitizeRecordOutput(reply.text), 2000);
+            // 숫자 검수: 요약에 나온 숫자가 넘겨준 자료 어디에도 없으면 지어낸 것이다. 그럴 때만 한 번 다시 쓰게 하고,
+            // 덜 틀린 쪽을 남긴다. 숫자가 다 맞으면 호출은 늘지 않는다.
+            let loose = text ? ungroundedFigures(text, userPrompt) : [];
+            if (loose.length) {
+                const again = splitClosedLine(await callAuxLLM(sysPrompt, `${userPrompt}\n\n(Your previous record contained figures that appear nowhere in the material above: ${loose.slice(0, 12).join(', ')}. Write the record again. Every number, date and amount must be copied from the material; where the material gives no figure, write none.)`, { task: 'summary', maxTokens: auxTokens(4000) }));
+                const retext = cleanMultiline(sanitizeRecordOutput(again.text), 2000);
+                const reloose = retext ? ungroundedFigures(retext, userPrompt) : loose;
+                if (retext && reloose.length < loose.length) { reply = again; text = retext; loose = reloose; }
+                logActivity(loose.length ? 'error' : 'summary', loose.length
+                    ? `t${fromTurn}–t${toTurn} 요약에 원문에서 찾지 못한 숫자가 남았어요: ${loose.slice(0, 6).join(', ')} (이야기 탭에서 확인해 주세요)`
+                    : `t${fromTurn}–t${toTurn} 요약에 원문에 없는 숫자가 있어 다시 썼어요`);
+            }
+            unverified = loose;
             if (text) {
                 let closed = 0;
                 for (const tag of reply.closed) {
@@ -3574,7 +3641,7 @@ async function maybeSummarizeChunk(store, { flushAll = false, onProgress = null,
             text = cleanStr(parts.join(' / '), 2000);
         }
 
-        store.chunkSummaries.push({ id: uuidv4(), fromTurn, toTurn, text });
+        store.chunkSummaries.push({ id: uuidv4(), fromTurn, toTurn, text, ...(unverified.length ? { unverified: unverified.slice(0, 12) } : {}) });
         store.summaryCursor = toTurn;
         made++;
         onProgress?.(++done, total);
@@ -3656,7 +3723,7 @@ async function pushArcFromChunks(store, merging) {
     const settings = getSettings();
     let text = '';
     try {
-        text = cleanMultiline(sanitizeRecordOutput(await callAuxLLM(`${settings.prompts.arc}\n\n${languageDirective()}`, merging.map(c => `[t${c.fromTurn}–t${c.toTurn}]\n${c.text}`).join('\n\n'), { maxTokens: auxTokens(4000) })), 2400);
+        text = cleanMultiline(sanitizeRecordOutput(await callAuxLLM(`${settings.prompts.arc}\n\n${languageDirective()}`, merging.map(c => `[t${c.fromTurn}–t${c.toTurn}]\n${c.text}`).join('\n\n'), { task: 'summary', maxTokens: auxTokens(4000) })), 2400);
     } catch (e) {
         console.debug(`[${MODULE_NAME}] 연대기 병합 LLM 실패`, e);
     }
@@ -3692,7 +3759,7 @@ async function regroupChunksIntoArcs(store) {
 
     let plan;
     try {
-        const response = await callAuxLLM(CHUNK_REGROUP_PROMPT, lines.join('\n\n'), { maxTokens: auxTokens(2000) });
+        const response = await callAuxLLM(CHUNK_REGROUP_PROMPT, lines.join('\n\n'), { task: 'summary', maxTokens: auxTokens(2000) });
         plan = parseJsonLoose(response);
     } catch (e) {
         console.warn(`[${MODULE_NAME}] 청크 재그룹핑 실패 (다음 주기에 재시도)`, e);
@@ -3742,7 +3809,7 @@ async function mergeArcsIntoOne(store, arcs) {
     const settings = getSettings();
     let text = '';
     try {
-        text = cleanMultiline(sanitizeRecordOutput(await callAuxLLM(`${settings.prompts.arc}\n\n${languageDirective()}`, arcs.map(a => `[t${a.fromTurn}–t${a.toTurn}]\n${a.text}`).join('\n\n'), { maxTokens: auxTokens(4000) })), 2400);
+        text = cleanMultiline(sanitizeRecordOutput(await callAuxLLM(`${settings.prompts.arc}\n\n${languageDirective()}`, arcs.map(a => `[t${a.fromTurn}–t${a.toTurn}]\n${a.text}`).join('\n\n'), { task: 'summary', maxTokens: auxTokens(4000) })), 2400);
     } catch (e) {
         console.debug(`[${MODULE_NAME}] 아크 재병합 LLM 실패`, e);
     }
@@ -3784,7 +3851,7 @@ async function maybeConsolidateArcs(store) {
 
     let plan;
     try {
-        const response = await callAuxLLM(ARC_REGROUP_PROMPT, lines.join('\n\n'), { maxTokens: auxTokens(2000) });
+        const response = await callAuxLLM(ARC_REGROUP_PROMPT, lines.join('\n\n'), { task: 'summary', maxTokens: auxTokens(2000) });
         plan = parseJsonLoose(response);
     } catch (e) {
         console.warn(`[${MODULE_NAME}] 아크 정리 실패 (다음 주기에 재시도)`, e);
@@ -3868,7 +3935,7 @@ async function runConsolidation(store, { review = false } = {}) {
         return `[${tag}] (${m.kind}, t${m.turnIndex}, imp ${Number(m.importance).toFixed(2)}) ${m.summary}`;
     });
 
-    const response = await callAuxLLM(CURATOR_PROMPT, lines.join('\n'), { maxTokens: auxTokens(8000) });
+    const response = await callAuxLLM(CURATOR_PROMPT, lines.join('\n'), { task: 'summary', maxTokens: auxTokens(8000) });
     const plan = parseJsonLoose(response);
     if (!plan || typeof plan !== 'object') {
         // "모델 응답 오류" 한 줄로는 무엇을 만져야 할지 알 수 없다 — 실제 응답 앞부분을 콘솔에 남기고,
@@ -4154,7 +4221,13 @@ async function retrieveMemories(queryText, recentUserTexts, sceneText = '') {
         }
     }
 
+    // 이 채팅에서 회상하지 않을 말 — 그 말이 든 기억은 후보에서 뺀다 (지우지 않는다. 고정한 기억은 사용자의 뜻이라 그대로)
+    const mute = (store.recallMute || []).map(w => String(w).toLowerCase()).filter(w => w.length >= 2);
+    const muted = (m) => mute.length > 0 && !m.pinned
+        && mute.some(w => `${m.summary} ${m.excerpt || ''} ${(m.hints || []).join(' ')}`.toLowerCase().includes(w));
+
     for (const m of active) {
+        if (muted(m)) continue;
         const isProtected = m.visibility !== 'public';
         // 비공개 기억은 소유자, 또는 "아는 사람"으로 적힌 인물의 시점에서만 후보가 된다
         if (isProtected && !knowsMemory(m, auth)) {
@@ -4316,7 +4389,8 @@ function chapterVec(c) {
 
 /** 최근 주입 창(마지막 3개) 밖의 청크 요약 중 지금 질의와 가장 맞는 하나 (문턱 미달 시 null) */
 async function pickRecalledChapter(store, query, sceneText) {
-    const old = store.chunkSummaries.slice(0, -3);
+    const mute = (store.recallMute || []).map(w => String(w).toLowerCase()).filter(w => w.length >= 2);
+    const old = store.chunkSummaries.slice(0, -3).filter(c => !mute.some(w => String(c.text || '').toLowerCase().includes(w)));
     const q = String(query || '').trim();
     if (!old.length || q.length < 4) return null;
     const qv = embedText(q);
@@ -5079,7 +5153,7 @@ async function rewritePacketWithLibrarian() {
     const rules = lines.slice(0, firstSection);
     const body = lines.slice(firstSection).filter(l => !l.startsWith('(End of archive.')).join('\n');
 
-    const reply = await callAuxLLM(`${packetRewritePrompt(parts.narratorMode)}\n\n${languageDirective()}`, `Archive:\n${body}`, { maxTokens: auxTokens(6000) });
+    const reply = await callAuxLLM(`${packetRewritePrompt(parts.narratorMode)}\n\n${languageDirective()}`, `Archive:\n${body}`, { task: 'light', maxTokens: auxTokens(6000) });
     if (getCurrentChatId() !== chatId || effectivePerspective() !== perspective || getSettings().authorizeCharPrivate !== privateAllowed) {
         throw new Error('채팅 또는 기억·서술 방식이 바뀌어 이전 초안을 버렸습니다. 다시 새로 써 주세요.');
     }
@@ -5257,7 +5331,7 @@ async function runSupervisor(query) {
             : settings.prompts.supervisor;
         // 데드라인 초과 시 연출을 포기하고 즉시 진행 (호출 자체는 뒤에서 끝나든 말든 무해)
         const response = await Promise.race([
-            callAuxLLM(systemPrompt, userPrompt, { maxTokens: auxTokens(2000) }),
+            callAuxLLM(systemPrompt, userPrompt, { task: 'light', maxTokens: auxTokens(2000) }),
             new Promise((_, reject) => setTimeout(() => reject(new Error(`감독 응답 ${SUPERVISOR_DEADLINE_MS / 1000}초 초과`)), SUPERVISOR_DEADLINE_MS)),
         ]);
         const plan = parseJsonLoose(response);
@@ -5805,7 +5879,7 @@ async function recalibrateStoryClock({ silent = false } = {}) {
                 ...batch.map(t => `[t${t.turnIndex}] ${t.summary}`),
             ].join('\n');
             try {
-                const raw = await callAuxLLM(CLOCK_RECAL_PROMPT, lines, { maxTokens: auxTokens(4000) });
+                const raw = await callAuxLLM(CLOCK_RECAL_PROMPT, lines, { task: 'summary', maxTokens: auxTokens(4000) });
                 const parsed = parseJsonLoose(raw);
                 if (!parsed) { failedBatches++; continue; }
                 for (const [k, v] of Object.entries(parsed)) {
@@ -5856,7 +5930,7 @@ async function askLibrarian(question) {
 
     const parts = await buildPacketSections(q, null);
     const context = renderPacket(parts, { recallLimit: 14, protectedLimit: 5 });
-    const reply = await callAuxLLM(ASK_LIBRARIAN_PROMPT, `Archive records:\n${context}\n\nPlayer's question: ${q}`, { maxTokens: auxTokens(4000) });
+    const reply = await callAuxLLM(ASK_LIBRARIAN_PROMPT, `Archive records:\n${context}\n\nPlayer's question: ${q}`, { task: 'light', maxTokens: auxTokens(4000) });
     const answer = String(reply || '').trim();
     if (!answer) throw new Error('빈 응답');
     return answer;
@@ -5948,7 +6022,7 @@ async function proposeEditorTurn(instruction) {
         ? `Recent conversation (for context only, e.g. "취소해" refers to the last message):\n${editorHistory.map(h => `${h.role === 'user' ? 'User' : 'Archivist'}: ${h.content}`).join('\n')}\n\n`
         : '';
     const userPrompt = `Archive:\n${archive}\n\n${historyBlock}User's correction request: ${text}`;
-    const raw = await callAuxLLM(`${EDITOR_PROMPT}\n\n${languageDirective()}`, userPrompt, { maxTokens: auxTokens(3000) });
+    const raw = await callAuxLLM(`${EDITOR_PROMPT}\n\n${languageDirective()}`, userPrompt, { task: 'light', maxTokens: auxTokens(3000) });
     const parsed = parseJsonLoose(raw);
     if (!parsed || typeof parsed.reply !== 'string') throw new Error('사서 응답을 이해하지 못했습니다');
     const ops = Array.isArray(parsed.ops) ? parsed.ops.filter(o => o && typeof o === 'object' && typeof o.op === 'string') : [];
@@ -6656,6 +6730,7 @@ function renderMemoriesPanel() {
     const list = $('#memoria_memory_list');
     if (!list.length) return;
     const search = String($('#memoria_memory_search').val() || '').toLowerCase();
+    if (!$('#memoria_recall_mute').is(':focus')) $('#memoria_recall_mute').val((store.recallMute || []).join(', '));
     const kindFilter = String($('#memoria_memory_kind_filter').val() || '');
 
     let items = [...store.memories].sort((a, b) => b.turnIndex - a.turnIndex);
@@ -6687,6 +6762,7 @@ function renderMemoriesPanel() {
                     ${m.retired ? `<span class="memoria__badge memoria-mem-revive" role="button" tabindex="0" title="이야기가 흘러 더는 맞지 않게 된 기억입니다. 평소 회상에서는 빠지고, 그 일을 직접 꺼낼 때만 '지금은 이렇다'는 표시와 함께 나옵니다.${m.retired.now ? ` 지금: ${escapeHtml(m.retired.now)}` : ''} — 누르면 되살립니다">지나감 ↺</span>` : ''}
                     <span class="memoria__mem-actions">
                         <button type="button" class="memoria-source memoria__source-button" data-id="${escapeHtml(m.id)}" title="대화 원문 확인" aria-label="대화 원문 확인"><i class="fa-solid fa-book-open"></i></button>
+                        ${m.retired ? '' : '<i class="fa-solid fa-hourglass-end memoria-mem-retire" title="지나간 일로 물리기 — 평소 회상에서 빼고, 이 일을 직접 꺼낼 때만 나오게 합니다"></i>'}
                         <i class="fa-solid fa-thumbtack memoria-mem-pin" title="${m.pinned ? '고정 해제' : '예산 안에서 우선 주입(고정)'}"></i>
                         <i class="fa-solid ${m.disabled ? 'fa-eye-slash' : 'fa-eye'} memoria-mem-toggle" title="${m.disabled ? '활성화' : '비활성화'}"></i>
                         <i class="fa-solid fa-pen memoria-mem-edit" title="편집"></i>
@@ -7308,6 +7384,15 @@ function renderSettingsPanel() {
         $sel.append($('<option>').val(p.id).text(p.name || p.id));
     }
     $sel.val(s.profileId || '');
+    for (const task of ['summary', 'light']) {
+        const $t = $(`#memoria_profile_${task}`);
+        $t.empty().append('<option value="">위 연결과 같게</option>');
+        for (const p of listConnectionProfiles()) $t.append($('<option>').val(p.id).text(p.name || p.id));
+        $t.val(s.taskProfiles?.[task] || '');
+    }
+    $('#memoria_custom_summary_model').val(s.customApi.summaryModel || '');
+    $('#memoria_custom_light_model').val(s.customApi.lightModel || '');
+    $('#memoria_custom_reasoning').val(s.customApi.reasoningEffort || '');
 
     $('#memoria_api_mode').val(s.apiMode === 'custom' ? 'custom' : 'st');
     $('#memoria_custom_auth_mode').val(s.customApi.authMode === 'vertex' ? 'vertex' : 'apikey');
@@ -7934,6 +8019,18 @@ function bindUI() {
         m.pinned = !m.pinned;
         persistStore(); renderMemoriesPanel(); updateInjection();
     });
+    $('#memoria_settings').on('click', '.memoria-mem-retire', function () {
+        const m = findMemory($(this).closest('.memoria__mem-card').data('id'));
+        if (!m) return;
+        m.retired = { turn: 0, now: '', manual: true }; // 직접 물린 것은 턴을 되돌려도 그대로다
+        persistStore(); renderMemoriesPanel(); updateInjection();
+    });
+    $('#memoria_recall_mute').on('change', function () {
+        const store = getStore();
+        store.recallMute = parsePhraseList($(this).val()).slice(0, 60);
+        $(this).val(store.recallMute.join(', '));
+        persistStore(); updateInjection();
+    });
     $('#memoria_settings').on('click', '.memoria-mem-revive', function () {
         const m = findMemory($(this).closest('.memoria__mem-card').data('id'));
         if (!m) return;
@@ -8270,6 +8367,7 @@ function bindUI() {
         if (!edited || typeof edited !== 'string') return;
         s.text = cleanMultiline(edited, 4000);
         s.avec = null; // 본문이 바뀌었으니 챕터 API 임베딩은 다음 회상 때 재계산
+        delete s.unverified; // 사람이 직접 고쳤다
         persistStore(); renderSummariesPanel(); updateInjection();
     });
     $('#memoria_settings').on('click', '.memoria-summary-regen', async function () {
@@ -8292,10 +8390,12 @@ function bindUI() {
             const refBlock = await buildReferenceBlock();
             const userPrompt = [refBlock, previousSummariesForContext(store), `Turn digests to weave:\n${parts.join('\n')}`]
                 .filter(Boolean).join('\n');
-            const text = cleanMultiline(sanitizeRecordOutput(await callAuxLLM(`${settings.prompts.chunk}\n\n${languageDirective()}`, userPrompt, { maxTokens: auxTokens(4000) })), 2000);
+            const text = cleanMultiline(sanitizeRecordOutput(await callAuxLLM(`${settings.prompts.chunk}\n\n${languageDirective()}`, userPrompt, { task: 'summary', maxTokens: auxTokens(4000) })), 2000);
             if (!text) throw new Error('빈 응답');
             s.text = text;
             s.avec = null;
+            const loose = ungroundedFigures(text, userPrompt);
+            if (loose.length) s.unverified = loose.slice(0, 12); else delete s.unverified;
             persistStore(); renderSummariesPanel(); updateInjection();
             toastr.success('요약을 다시 생성했습니다.', 'Memoria');
         } catch (e) {
@@ -8486,6 +8586,18 @@ function bindUI() {
     customBind('#memoria_custom_url', 'url');
     customBind('#memoria_custom_key', 'key');
     customBind('#memoria_custom_model', 'model');
+    customBind('#memoria_custom_summary_model', 'summaryModel');
+    customBind('#memoria_custom_light_model', 'lightModel');
+    $('#memoria_custom_reasoning').on('change', function () {
+        getSettings().customApi.reasoningEffort = String($(this).val() || '');
+        reasoningRefused.clear();
+        saveSettingsDebounced();
+    });
+    $('#memoria_profile_summary, #memoria_profile_light').on('change', function () {
+        const s = getSettings();
+        s.taskProfiles[this.id.endsWith('summary') ? 'summary' : 'light'] = String($(this).val() || '');
+        saveSettingsDebounced();
+    });
     customBind('#memoria_custom_temp', 'temperature', true);
     customBind('#memoria_custom_timeout', 'timeoutSec', true);
     $('#memoria_custom_flex').on('change', function () {
