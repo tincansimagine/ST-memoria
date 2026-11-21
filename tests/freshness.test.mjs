@@ -82,7 +82,7 @@ test('the librarian retires an outdated memory in the same call; it stays out of
     a.context.generateRaw = async ({ prompt, systemPrompt }) => {
         asked = `${systemPrompt}\n${prompt[0].content}`;
         return JSON.stringify({ digest: '여행자가 창고 열쇠를 강에 던져 버렸다.', weight: 0.7, time_passed: '0', memories: [],
-            outdated: [{ tag: 'm1', now: '열쇠는 강바닥에 가라앉았다' }, { tag: 'm2' }, { tag: 'm9', now: '없는 꼬리표' }] });
+            outdated: [{ tag: 'm1', now: '열쇠는 강바닥에 가라앉았다', said: '강물 속으로 가라앉았다' }, { tag: 'm2' }, { tag: 'm9', now: '없는 꼬리표', said: '강물' }, { tag: 'm3', now: '박하차를 싫어하게 됐다', said: '지어낸 글귀' }] });
     };
     a.getSettings().recordBatch = 1;
     a.getSettings().chunkTurns = 50;
