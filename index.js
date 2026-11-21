@@ -40,7 +40,7 @@ import { ARGUMENT_TYPE, SlashCommandArgument } from "../../../slash-commands/Sla
 import { MacrosParser } from "../../../../scripts/macros.js";
 import { NARRATOR_PERSPECTIVE, isSharedPerspective, hasChatPerspective, resolvePerspective, findAssociations, sameKnowledgeScope, archiveSnapshot, validateArchive, addCheckpoint, archiveChanges, packetSections } from './archive-engine.mjs';
 import { showArchiveLibrary } from './library-ui.mjs';
-import { withDeadline, parsePhraseList, stripPhrases, hasPhrase, findRepeatedPhrases, pickBundleValues, resolveBundleName, switchBundle, saveBundle, deleteBundle, renameBundle, exportBundle, parseBundleFile, diffStableEntries, shouldRefreeze, createActivityLog, findRivalExtensions, splitClosedLine, sleepStaleThreads, pickPledges, stripOpenLines, THREAD_KINDS, recallCooldown, pushRecallHistory, isEndedValue, ungroundedFigures, roughTokens, noteUsage, usageTotals, groundedIn, soundsHedged, noteThreadSightings, threadTouched, rareQueryWords } from './craft-engine.mjs';
+import { withDeadline, parsePhraseList, stripPhrases, hasPhrase, findRepeatedPhrases, pickBundleValues, resolveBundleName, switchBundle, saveBundle, deleteBundle, renameBundle, exportBundle, parseBundleFile, diffStableEntries, shouldRefreeze, createActivityLog, findRivalExtensions, splitClosedLine, sleepStaleThreads, pickPledges, stripOpenLines, THREAD_KINDS, recallCooldown, pushRecallHistory, isEndedValue, ungroundedFigures, roughTokens, noteUsage, usageTotals, groundedIn, soundsHedged, noteThreadSightings, threadTouched, rareQueryWords, findConflicts } from './craft-engine.mjs';
 import { findStatusBars, statusOneLine, isPauseDirective, isPauseMessage, buildTimelineRows, filterTimelineRows, timelineMarkdown, timelineCsv, layoutTimelineGraph, verifyIssues } from './scene-engine.mjs';
 import { heroHtml, pulseSvg, flowHtml, railHtml, tableHtml, bondMapSvg, bondCardsHtml, statusListHtml } from './story-view.mjs';
 
@@ -3274,6 +3274,27 @@ async function commitTurns(mesIds, { silent = true, force = false, retry = 1 } =
         u.turn.where = ownBar?.place || null;
     });
 
+    // 아는 사람은 그 자리에 있었거나 이 교환에 이름이 나온 사람뿐이다 — 자리에 없던 인물을 "안다"고 적으면
+    // 그 인물이 모르는 비밀을 아는 것처럼 군다. 장면 인물 목록(직전 장면 + 이번에 적힌 장면)과 원문으로 확인한다.
+    const runText = `${userText}\n${assistantText}`;
+    const runLower = runText.toLowerCase();
+    const presentKeys = new Set([getSceneSnapshot(store).present, ...extracted.entityStates
+        .filter(st => String(st.entity).toLowerCase() === 'scene' && canonSlot(st.slot) === 'present').map(st => st.value)]
+        .flatMap(v => String(v || '').split(/[,，、·]+/)).map(n => entityKey(canonEntityName(store, n.trim()))).filter(Boolean));
+    const namesOf = (name) => {
+        const card = store.characters.find(c => entityKey(c.name) === entityKey(name) || (c.aliases || []).some(x => entityKey(x) === entityKey(name)));
+        return [name, ...(card ? [card.name, ...(card.aliases || [])] : [])].map(n => String(n).toLowerCase()).filter(n => n.length >= 2);
+    };
+    const witnessed = (name) => presentKeys.has(entityKey(name)) || namesOf(name).some(n => runLower.includes(n));
+    let unwitnessed = 0;
+    for (const m of rows) {
+        if ((m.visibility || 'public') === 'public' || !m.knowers?.length) continue;
+        const kept = m.knowers.filter(witnessed);
+        unwitnessed += m.knowers.length - kept.length;
+        m.knowers = kept;
+    }
+    if (unwitnessed) logActivity('record', `그 자리에 없던 인물 ${unwitnessed}명은 비밀을 "아는 사람"에서 뺐어요`);
+
     for (const m of rows) {
         store.memories.push({
             id: uuidv4(),
@@ -3325,7 +3346,7 @@ async function commitTurns(mesIds, { silent = true, force = false, retry = 1 } =
     // 수기 서약은 사서가 직접 닫지 못한다 — 대신 "해소된 듯" 의견만 붙여 사용자가 ✔로 확정
     // 근거 확인: 장면에서 옮긴 글귀가 원문에 실제로 있고, 판정이 말끝을 흐리지 않을 때만 닫는다.
     // 근거가 모자라면 닫지 않고 "해소된 듯" 의견만 붙인다 — 사용자가 ✔로 확정한다.
-    const exchangeText = `${userText}\n${assistantText}`;
+    const exchangeText = runText;
     let unsure = 0;
     for (const tag of (extracted.settledPledges || [])) {
         const lock = pledgeTagMap.get(tag);
@@ -4623,6 +4644,9 @@ function auditRecallEcho(mes, mesId = chat.indexOf(mes)) {
  * 주입 내용(장부) 구성 + 주입
  * ============================================================ */
 
+/** 숨은 앎 줄에 붙일 "지금 장면에 있지만 모르는 사람" (id → 이름들). 주입 때마다 재계산 */
+const unawareNotes = new Map();
+
 /** 회상 시점 이후 값이 바뀐 상태를 언급하는 기억에 "당시 기준" 꼬리표 (id → 안내문). 주입 때마다 재계산 */
 const outdatedRecallNotes = new Map();
 
@@ -4666,7 +4690,8 @@ function formatMemoryLine(m, withExcerpt, storyAges = null, turnNow = 0, banned 
     const visNorm = normVisibility(m.visibility);
     // 비밀은 "누가 아는가"까지 적어야 지켜진다 — 소유자만 적으면 함께 아는 인물까지 모르는 척하게 된다
     const others = (m.knowers || []).filter(k => entityKey(k) !== entityKey(m.owner || ''));
-    const known = others.length ? ` · also known to ${others.join(', ')}` : '';
+    const known = (others.length ? ` · also known to ${others.join(', ')}` : '')
+        + (unawareNotes.has(m.id) ? ` · not known to ${unawareNotes.get(m.id).join(', ')}` : '');
     const vis = visNorm === 'public' ? '' : ` [${visNorm}${m.owner ? `:${m.owner}` : ''}${known}]`;
     // 인용은 짧을 때만 주입 — 원문 문단이 통째로 실리는 것 방지.
     // 에피소드 원문 발췌(episode_raw)는 요약이 이미 내용을 담고 있으므로 주입하지 않는다.
@@ -4885,6 +4910,13 @@ async function buildPacketSections(query, supervisorPlan) {
         .map(x => ({ ...x.c, sceneNow: x.scene === 1 }));
     // 관계선: 장면에 있는 인물이 얽힌 줄을 먼저, 그다음 최근에 움직인 줄
     const sceneNames = new Set(characters.filter(c => c.sceneNow).flatMap(c => [c.name, ...(c.aliases || [])]).map(entityKey));
+    // 지금 장면에 있는데 이 비밀·속사정을 모르는 사람 — 모델이 그 사람에게 새어 나가게 쓰지 않도록 이름으로 짚어 준다
+    unawareNotes.clear();
+    for (const m of protectedRecall) {
+        const knows = new Set([m.owner, ...(m.knowers || [])].filter(Boolean).map(n => entityKey(canonEntityName(store, n))));
+        const unaware = characters.filter(c => c.sceneNow && !knows.has(entityKey(c.name)) && !(c.aliases || []).some(x => knows.has(entityKey(x)))).map(c => c.name);
+        if (unaware.length) unawareNotes.set(m.id, unaware.slice(0, 4));
+    }
     const bonds = (store.bonds || [])
         .filter(b => !b.disabled && bondNow(b))
         .map(b => ({ b, scene: (sceneNames.has(entityKey(b.from)) ? 1 : 0) + (sceneNames.has(entityKey(b.to)) ? 1 : 0), turn: bondNow(b).turn || 0 }))
@@ -6812,6 +6844,7 @@ function updateStatusUI(activity) {
         [store.turns.length, '턴', 'summaries'], [store.memories.length, '기억', 'memories'], [store.characters.length, '인물', 'world'],
         [store.locks.filter(l => l.status === 'active').length, '서약', 'world'], [store.chunkSummaries.length + store.arcSummaries.length, '요약', 'summaries'],
         ...(failed ? [[failed, '실패', 'tools', 'is-bad']] : []),
+        ...((n) => (n ? [[n, '어긋남', 'world', 'is-bad']] : []))(currentConflicts(store).length),
     ] : [];
     $('#memoria_stats').prop('hidden', !tiles.length).html(tiles.map(([n, label, tab, cls]) =>
         `<button type="button" data-go="${tab}"${cls ? ` class="${cls}"` : ''}><b>${Number(n).toLocaleString()}</b><span>${label}</span></button>`).join(''));
@@ -7139,12 +7172,88 @@ function renderDossierPanel() {
     }
 }
 
+/* ------------------------------------------------------------
+ * 어긋난 기록 — 같은 사람에 대해 서로 다른 말을 하는 캐논·상태·인물 카드·사실 기억
+ * ------------------------------------------------------------ */
+
+/** 견줄 기록들: 지금도 그렇다고 말하는 것만 (지나간 일·꺼 둔 것·믿음·장면 휘발 값은 뺀다) */
+function conflictClaims(store) {
+    const claims = [];
+    const people = store.characters.filter(c => !c.disabled);
+    const aboutOf = (name) => entityKey(canonEntityName(store, name));
+    const firstPerson = (text) => {
+        const low = String(text || '').toLowerCase();
+        const c = people.find(p => [p.name, ...(p.aliases || [])].some(n => n && String(n).length >= 2 && low.includes(String(n).toLowerCase())));
+        return c ? entityKey(c.name) : '';
+    };
+    for (const st of store.entityStates) {
+        if (st.claim === 'belief' || st.expired != null || isVolatileSlot(st.slot) || isEndedValue(st.value)) continue;
+        if (String(st.entity).toLowerCase() === 'scene') continue;
+        // 칸 이름(habit, injury…)은 견주는 글에 넣지 않는다 — 값끼리 견준다. 숫자만 적힌 나이 칸은 "살"을 붙여 잣대에 걸리게
+        const value = canonSlot(st.slot) === 'age' && /^\d{1,3}$/.test(String(st.value).trim()) ? `${st.value}살` : st.value;
+        claims.push({ key: `s:${st.id}`, about: aboutOf(st.entity), text: value, turn: st.turnIndex || 0, label: `상태 · ${st.entity}.${st.slot}`, show: st.value });
+    }
+    for (const r of store.worldRules) {
+        const about = firstPerson(`${r.key} ${r.value}`);
+        if (about) claims.push({ key: `r:${r.id || r.key}`, about, text: r.value, turn: r.turnIndex || 0, label: `캐논 · ${r.key}`, show: r.value });
+    }
+    for (const c of people) {
+        const about = entityKey(c.name);
+        const age = /^\d{1,3}$/.test(String(c.age || '').trim()) ? `${c.age}살` : c.age;
+        for (const [field, value, label] of [['age', age, '나이'], ['appearance', c.appearance, '외모'], ['occupation', c.occupation, '직업']]) {
+            if (value) claims.push({ key: `c:${c.id || c.name}:${field}`, about, text: value, turn: c.updatedTurn || 0, label: `인물 카드 · ${c.name} ${label}`, show: c[field] });
+        }
+    }
+    for (const m of store.memories) {
+        if (m.disabled || m.retired || !['fact', 'preference'].includes(m.kind)) continue;
+        for (const e of (m.entities || []).slice(0, 3)) {
+            claims.push({ key: `m:${m.id}`, about: aboutOf(e), text: m.summary, turn: m.turnIndex || 0, label: `기억 · ${KIND_LABELS[m.kind] || m.kind}`, show: m.summary });
+        }
+    }
+    return claims;
+}
+
+function currentConflicts(store = getStore()) {
+    const names = store.characters.flatMap(c => [c.name, ...(c.aliases || [])]);
+    return findConflicts(conflictClaims(store), { names, ignore: store.conflictIgnore || [] })
+        .filter(x => x.a.key.split(':')[1] !== x.b.key.split(':')[1] || x.a.key[0] !== x.b.key[0]);
+}
+
+/** 어긋난 두 기록 가운데 한쪽을 거둔다 — 기억은 꺼 두고, 상태·캐논은 지우고, 인물 카드는 그 칸을 비운다 */
+function dropClaim(store, key) {
+    const [kind, id, field] = key.split(':');
+    if (kind === 'm') { const m = store.memories.find(x => x.id === id); if (m) m.disabled = true; return; }
+    if (kind === 's') { store.entityStates = store.entityStates.filter(x => x.id !== id); return; }
+    if (kind === 'r') { store.worldRules = store.worldRules.filter(x => (x.id || x.key) !== id); return; }
+    if (kind === 'c') { const c = store.characters.find(x => (x.id || x.name) === id); if (c && field) c[field] = null; }
+}
+
+const CONFLICT_WHY = { age: '나이가 다름', height: '키가 다름', weight: '몸무게가 다름', negation: '한쪽은 그렇다, 한쪽은 아니라고 함' };
+
+function renderConflictsPanel() {
+    const $sec = $('#memoria_conflict_section');
+    const $list = $('#memoria_conflict_list');
+    if (!$sec.length) return;
+    const found = currentConflicts();
+    $sec.prop('hidden', !found.length);
+    $list.empty();
+    for (const x of found.slice(0, 20)) {
+        const side = (c, which) => `<div class="memoria__conflict-side"><small>${escapeHtml(c.label)}${c.turn ? ` · t${c.turn}` : ''}</small><span>${escapeHtml(c.show)}</span><button type="button" class="menu_button memoria-conflict-keep" data-keep="${which}">이쪽이 맞아요</button></div>`;
+        $list.append($(`<div class="memoria__conflict" data-pair="${escapeHtml(x.pair)}" data-a="${escapeHtml(x.a.key)}" data-b="${escapeHtml(x.b.key)}">
+            <div class="memoria__conflict-why">${CONFLICT_WHY[x.why] || '서로 다름'}</div>
+            ${side(x.a, 'a')}${side(x.b, 'b')}
+            <button type="button" class="menu_button memoria-conflict-ignore">둘 다 맞아요</button>
+        </div>`));
+    }
+}
+
 function renderStatePanel() {
     const store = getStore();
     const $rules = $('#memoria_rules_list');
     const $states = $('#memoria_states_list');
     const $locks = $('#memoria_locks_list');
     if (!$rules.length) return;
+    renderConflictsPanel();
     renderCharactersPanel();
     renderBondsPanel();
     renderBondMap();
@@ -8223,6 +8332,17 @@ function bindUI() {
         const kind = String($(this).data('kind') ?? '');
         const $sel = $('#memoria_memory_kind_filter');
         $sel.val($sel.val() === kind ? '' : kind).trigger('change');
+    });
+    $('#memoria_settings').on('click', '.memoria-conflict-keep, .memoria-conflict-ignore', function () {
+        const store = getStore();
+        const $c = $(this).closest('.memoria__conflict');
+        if ($(this).hasClass('memoria-conflict-ignore')) {
+            store.conflictIgnore = [...new Set([...(store.conflictIgnore || []), String($c.data('pair'))])].slice(-200);
+        } else {
+            checkpointBeforeChange(store, '어긋난 기록 정리');
+            dropClaim(store, String($c.data($(this).data('keep') === 'a' ? 'b' : 'a')));
+        }
+        persistStore(); renderAllPanels(); updateInjection();
     });
     $('#memoria_settings').on('click', '#memoria_stats button', function () {
         $(`#memoria_settings .memoria__tab[data-tab="${$(this).data('go')}"]`).trigger('click');

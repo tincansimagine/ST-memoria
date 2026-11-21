@@ -613,3 +613,97 @@ export function rareQueryWords(queryText, docs, { share = 0.05, minDocs = 8 } = 
     }
     return out;
 }
+
+/* ------------------------------------------------------------
+ * 어긋난 기록 찾기 — 같은 사람에 대해 서로 다른 말을 하는 기록
+ *
+ * 캐논·상태·인물 카드·사실 기억은 따로 쌓이므로, "키 170cm"와 "키 165cm", "술을 마신다"와
+ * "술을 마시지 않는다"가 함께 서고에 남아 둘 다 AI에게 갈 수 있다. 모델을 부르지 않고 글자로 찾는다.
+ * 찾은 것은 고치지 않고 보여 주기만 한다 — 어느 쪽이 맞는지는 사용자가 고른다.
+ * ------------------------------------------------------------ */
+
+/* 한 사람에게 값이 하나뿐인 잣대 — 다르면 둘 중 하나는 틀렸다 */
+const MEASURES = [
+    ['age', /(\d{1,3})\s*(?:살|세(?!기)|years?[ -]old|y\/o|yo\b)/gi],
+    ['height', /(\d{2,3}(?:\.\d)?)\s*(?:cm|센티(?:미터)?)/gi],
+    ['weight', /(\d{2,3}(?:\.\d)?)\s*(?:kg|킬로(?:그램)?)/gi],
+];
+export function measuresIn(text) {
+    const out = {};
+    for (const [kind, re] of MEASURES) {
+        for (const m of String(text ?? '').matchAll(re)) (out[kind] ||= new Set()).add(String(Number(m[1])));
+    }
+    return out;
+}
+
+const NEGATION_RE = /(못\s?하|못\S|않|없|아니|안\s|\bnot\b|n't\b|\bnever\b|\bno longer\b|\bcannot\b|\bwithout\b)/i;
+export function negated(text) {
+    return NEGATION_RE.test(String(text ?? ''));
+}
+
+/** 부정하는 말을 뗀다 — "마시지 않는다" → "마시", "cannot swim" → "swim" */
+export function stripNegation(text) {
+    return String(text ?? '')
+        .replace(/\s*지\s*(?:않|못)\S*/g, '')
+        .replace(/(^|\s)(?:안|못)\s+/g, '$1')
+        .replace(/\s*(?:않|못하|없|아니)\S*/g, '')
+        .replace(/\b(?:can't|cannot|won't|don't|doesn't|didn't|isn't|aren't|wasn't|weren't|not|never|no longer)\b/gi, ' ')
+        .replace(/n't\b/gi, '');
+}
+
+const bigramsOf = (text, drop) => {
+    let s = String(text ?? '').toLowerCase();
+    for (const d of drop) if (d) s = s.split(d).join(' ');
+    s = s.replace(/[^\p{L}\p{N}]+/gu, '');
+    const g = new Set();
+    for (let i = 0; i < s.length - 1; i++) g.add(s.slice(i, i + 2));
+    return g;
+};
+
+/**
+ * claims: [{ key, about, text, turn }] — about은 그 기록이 다루는 사람(정식 이름 키).
+ * names: 견줄 때 빼고 볼 이름들(모든 기록에 나오므로 겹쳐도 아무 뜻이 없다). ignore: 사용자가 "둘 다 맞음"으로 넘긴 쌍.
+ * 반환: [{ a, b, why }] — why: 'age' | 'height' | 'weight' | 'negation'
+ */
+export function findConflicts(claims, { names = [], ignore = [], perGroup = 60 } = {}) {
+    const skip = new Set(ignore);
+    const drop = [...new Set(names.map(n => String(n).toLowerCase()).filter(n => n.length >= 2))].sort((a, b) => b.length - a.length);
+    const groups = new Map();
+    for (const c of claims || []) {
+        if (!c?.about || !String(c.text ?? '').trim()) continue;
+        if (!groups.has(c.about)) groups.set(c.about, []);
+        groups.get(c.about).push(c);
+    }
+    const out = [];
+    const seen = new Set();
+    for (const list of groups.values()) {
+        const recent = list.sort((x, y) => (y.turn || 0) - (x.turn || 0)).slice(0, perGroup)
+            .map(c => ({ c, m: measuresIn(c.text), neg: negated(c.text), g: bigramsOf(c.text, drop) }));
+        for (let i = 0; i < recent.length; i++) {
+            for (let j = i + 1; j < recent.length; j++) {
+                const A = recent[i], B = recent[j];
+                if (A.c.key === B.c.key) continue;
+                const pair = [A.c.key, B.c.key].sort().join('|');
+                if (skip.has(pair) || seen.has(pair)) continue;
+                let why = '';
+                for (const kind of ['age', 'height', 'weight']) {
+                    const a = A.m[kind], b = B.m[kind];
+                    // 한쪽에 값이 여럿이면(나이 차이, 두 사람의 키) 견주지 않는다
+                    if (a?.size === 1 && b?.size === 1 && [...a][0] !== [...b][0]) { why = kind; break; }
+                }
+                if (!why && A.neg !== B.neg) {
+                    // 부정한 쪽에서 부정하는 말을 떼어 낸 나머지가 다른 쪽에 거의 다 들어 있어야 같은 일을 두고 엇갈린 것이다
+                    const [N, P] = A.neg ? [A, B] : [B, A];
+                    const rest = bigramsOf(stripNegation(N.c.text), drop);
+                    let hit = 0;
+                    for (const x of rest) if (P.g.has(x)) hit++;
+                    if (rest.size >= 2 && P.g.size >= 2 && hit / rest.size >= 0.66) why = 'negation';
+                }
+                if (!why) continue;
+                seen.add(pair);
+                out.push({ a: A.c, b: B.c, why, pair });
+            }
+        }
+    }
+    return out;
+}
