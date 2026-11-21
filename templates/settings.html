@@ -1,7 +1,7 @@
 <div id="memoria_settings" class="memoria">
     <div class="inline-drawer">
         <div class="inline-drawer-toggle inline-drawer-header">
-            <b><i class="fa-solid fa-book-bookmark"></i> Memoria — 장기기억 서고 <span class="memoria__version">v2.6.0</span></b>
+            <b><i class="fa-solid fa-book-bookmark"></i> Memoria — 장기기억 서고 <span class="memoria__version">v2.7.0</span></b>
             <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
         </div>
         <div class="inline-drawer-content">
@@ -149,6 +149,15 @@
 
             <!-- ===== 세계 ===== -->
             <section class="memoria__panel" data-panel="world">
+                <div class="memoria__section memoria__conflicts" id="memoria_conflict_section" hidden>
+                    <div class="memoria__section-head">
+                        <div>
+                            <h4>어긋난 기록</h4>
+                            <p>같은 인물에 대해 서로 다른 말을 하는 기록입니다. 둘 다 AI에게 가면 답이 오락가락합니다. 맞는 쪽을 고르면 다른 쪽은 거둡니다(기억은 꺼 두고, 상태·캐논은 지우고, 인물 카드는 그 칸을 비웁니다). 고르기 전 상태는 복구 지점에 남습니다.</p>
+                        </div>
+                    </div>
+                    <div id="memoria_conflict_list" class="memoria__conflict-list"></div>
+                </div>
                 <div class="memoria__section">
                     <div class="memoria__section-head">
                         <div>

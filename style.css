@@ -1596,3 +1596,16 @@ body[data-memoria-paper="dark"] :is(#memoria_settings.memoria, .memoria-library,
 #memoria_settings .inline-drawer-content textarea.memoria__preview { font: 400 12.5px/1.55 ui-monospace, "SF Mono", Consolas, monospace; }
 /* 다른 확장·테마가 버튼에 거는 테두리가 서고 안의 작은 버튼에 묻지 않게 */
 #memoria_settings .memoria__kindchip, #memoria_settings .memoria__stats > button { box-shadow: none; }
+
+/* 어긋난 기록 */
+#memoria_settings .memoria__conflicts[hidden] { display: none; }
+#memoria_settings .memoria__conflicts { border-color: var(--bad); }
+#memoria_settings .memoria__conflicts .memoria__section-head h4::before { background: var(--bad); }
+#memoria_settings .memoria__conflict-list { display: flex; flex-direction: column; gap: 12px; }
+#memoria_settings .memoria__conflict { display: flex; flex-direction: column; gap: 8px; padding-bottom: 12px; border-bottom: 1px solid var(--ink-line); }
+#memoria_settings .memoria__conflict:last-child { padding-bottom: 0; border-bottom: 0; }
+#memoria_settings .memoria__conflict-why { font-size: .82em; font-weight: 700; color: var(--bad); }
+#memoria_settings .memoria__conflict-side { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; padding: 8px 10px; border: 1px solid var(--ink-line); background: var(--surface2); }
+#memoria_settings .memoria__conflict-side small { flex: 1 1 100%; color: var(--dim); font-size: .78em; }
+#memoria_settings .memoria__conflict-side span { flex: 1 1 auto; min-width: 0; font-size: .92em; overflow-wrap: anywhere; }
+#memoria_settings .memoria__conflict .memoria-conflict-ignore { align-self: flex-start; }
