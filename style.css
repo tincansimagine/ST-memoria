@@ -1309,11 +1309,13 @@ body[data-memoria-paper="dark"] :is(#memoria_settings.memoria, .memoria-library,
 
 /* ── 바탕 ── */
 #memoria_settings .inline-drawer-content {
-    display: flex; flex-direction: column; gap: 14px; padding: 18px; border-radius: var(--r);
+    /* display는 건드리지 않는다 — 실리태번 드로어가 처음엔 접어 두고(display:none) 열 때 펼친다.
+       여기서 display를 정하면 확장 패널을 열 때마다 서고가 펼쳐진 채로 나온다. 간격은 자식의 margin으로 준다. */
+    padding: 18px; border-radius: var(--r);
     background: linear-gradient(180deg, var(--bg), var(--bg2)); color: var(--text); box-shadow: var(--shadow-sm);
     font: 400 15px/1.6 var(--font); word-break: keep-all; overflow-wrap: anywhere; -webkit-font-smoothing: antialiased;
 }
-#memoria_settings .inline-drawer-content > * + * { margin-top: 0; }
+#memoria_settings .inline-drawer-content > * + * { margin-top: 14px; }
 #memoria_settings .inline-drawer-content :is(h4, h5, p) { margin: 0; }
 #memoria_settings .memoria__version { border: 1px solid currentColor; border-radius: 0; background: none; padding: 0 6px; font: 500 .62em var(--display, sans-serif); letter-spacing: .08em; opacity: .7; color: inherit; }
 #memoria_settings :is(.menu_button, button, input, select, textarea, summary, [role="button"]):focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }

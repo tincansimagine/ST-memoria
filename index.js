@@ -875,9 +875,14 @@ function persistStore() {
  * 예전에는 여기서 예외를 던져, 서고가 너무 커서 초기화하려는 경우조차 막혔다.
  * 반환: 복구 지점을 남겼는지 여부.
  */
+let checkpointWarnedChat = '';
 function checkpointBeforeChange(store, label) {
     if (addCheckpoint(store, label, uuidv4())) return true;
     console.warn(`[${MODULE_NAME}] 복구 지점 생성 실패 (서고가 한도를 넘음): ${label}`);
+    logActivity('error', `서고가 커서 "${label}" 복구 지점을 만들지 못했어요 — 작업은 계속했어요`);
+    // 큰 서고는 큰 작업마다 이 경고를 보게 된다 — 채팅당 한 번만 띄운다 (작업은 원래부터 막지 않는다)
+    if (checkpointWarnedChat === getCurrentChatId()) return false;
+    checkpointWarnedChat = getCurrentChatId();
     toastr.warning('서고가 너무 커서 복구 지점을 만들지 못했습니다. 이 작업은 되돌릴 수 없으니, 필요하면 도구 탭에서 JSON으로 내보내 두세요.', 'Memoria', { timeOut: 12000 });
     return false;
 }
@@ -2420,9 +2425,35 @@ function findPrecedingUserMessage(mesId) {
 }
 
 /** 이 턴에서 갱신된 항목을 지우되, 이전값 이력이 있으면 그 값으로 되돌린다 (스와이프가 슬롯 자체를 날리지 않게) */
+/* ------------------------------------------------------------
+ * 값의 지나온 길 — 되감기·분기를 몇 턴이든 정확히 되돌리기 위해
+ *
+ * 상태·캐논·물건·인물 카드는 "지금 값"만 들고 있고, 예전에는 바로 앞 값 하나만 남겼다. 그래서
+ * 값이 두 번 이상 바뀐 뒤 그보다 앞으로 돌아가면(50턴 → 30턴 분기) 중간 값이 되살아나, 지워진
+ * 미래의 내용이 장부에 남았다. 이제 값이 바뀔 때마다 그 전 값과 그 값이 적힌 턴을 쌓아 두고,
+ * 되돌릴 때 하나씩 꺼낸다. valueTurn은 "값이 마지막으로 바뀐 턴" — turnIndex(마지막으로 다시 확인된 턴)와 다르다.
+ * ------------------------------------------------------------ */
+const HISTORY_MAX = 12;
+
+/** 바뀌기 직전 값을 쌓는다 (가장 오래된 것부터 버린다) */
+function pushHistory(row, entry) {
+    row.hist = [...(row.hist || []), entry].slice(-HISTORY_MAX);
+}
+
 function rollbackOrDrop(list, turnIndex) {
     return list.flatMap(row => {
         if (row.turnIndex !== turnIndex) return [row];
+        if (row.valueTurn != null) {
+            // 이 턴에는 다시 확인만 됐다 — 값은 그대로, 확인된 턴만 값이 적힌 때로 되돌린다
+            if (row.valueTurn !== turnIndex) return [{ ...row, turnIndex: row.valueTurn }];
+            const hist = row.hist || [];
+            if (!hist.length) return []; // 이 턴에 처음 생긴 값 — 그 앞에는 없었다
+            const last = hist[hist.length - 1];
+            const rest = hist.slice(0, -1);
+            const before = rest[rest.length - 1];
+            return [{ ...row, value: last.value, ...(last.claim ? { claim: last.claim } : {}), turnIndex: last.turn, valueTurn: last.turn,
+                hist: rest, prev: before ? before.value : null, prevTurn: before ? before.turn : null }];
+        }
         if (row.prev != null) {
             return [{ ...row, value: row.prev, turnIndex: row.prevTurn ?? 0, prev: null, prevTurn: null }];
         }
@@ -2482,6 +2513,21 @@ function removeDerivedForTurn(store, turnIndex) {
     // 다만 "이 턴에 갱신된 필드값"은 여기서 되돌린다 — 서약과 같은 1단계 이전 값 방식.
     if (Array.isArray(store.characters)) {
         for (const c of store.characters) {
+            // 이 턴에 바뀐 관계는 그 전 관계로, 이 턴에 처음 생긴 관계는 지운다 (턴 기록이 없는 옛 관계는 그대로)
+            if (Array.isArray(c.relationships)) {
+                c.relationships = c.relationships.flatMap(r => (r.turn === turnIndex ? (r.was ? [r.was] : []) : [r]));
+            }
+            // 프로필: 이 턴에 바뀌었으면 쌓아 둔 그 전 프로필로
+            if (c.profileTurn === turnIndex && c.hist?.length) {
+                const last = c.hist[c.hist.length - 1];
+                c.hist = c.hist.slice(0, -1);
+                Object.assign(c, last.fields);
+                c.profileTurn = last.turn;
+                c.prev = null; c.prevTurn = null;
+                if (c.updatedTurn === turnIndex) c.updatedTurn = Math.max(last.turn || 0, c.firstTurn || 0);
+                continue;
+            }
+            if (c.profileTurn === turnIndex) c.profileTurn = c.firstTurn ?? null;
             if (c.updatedTurn !== turnIndex) continue;
             if (c.prev) {
                 c.role = c.prev.role; c.age = c.prev.age; c.occupation = c.prev.occupation;
@@ -2512,23 +2558,39 @@ function removeDerivedForTurn(store, turnIndex) {
     if (Array.isArray(store.milestones)) {
         store.milestones = store.milestones.filter(e => e.manual || e.turnIndex !== turnIndex);
     }
+    // 물건: 이 턴에 누가 들게 됐는지·상태가 바뀌었으면 그 전 모습으로, 이 턴에 처음 나온 물건은 지운다
+    if (Array.isArray(store.items)) {
+        store.items = store.items.flatMap(it => {
+            if (it.manual) return [it];
+            if (it.valueTurn === turnIndex && it.hist?.length) {
+                const last = it.hist[it.hist.length - 1];
+                return [{ ...it, meaning: last.meaning, holder: last.holder, status: last.status, valueTurn: last.turn,
+                    updatedTurn: last.turn, hist: it.hist.slice(0, -1) }];
+            }
+            if (it.firstTurn === turnIndex && (it.valueTurn == null || it.valueTurn === turnIndex)) return [];
+            if (it.updatedTurn === turnIndex) return [{ ...it, updatedTurn: it.valueTurn != null && it.valueTurn !== turnIndex ? it.valueTurn : it.firstTurn }];
+            return [it];
+        });
+    }
 }
 
 function upsertWorldRule(store, rule, turnIndex) {
     const idx = store.worldRules.findIndex(r => r.scope === rule.scope && (r.scopeName || '') === (rule.scopeName || '') && r.key === rule.key);
     if (idx < 0) {
-        store.worldRules.push({ id: uuidv4(), ...rule, turnIndex, createdTurn: turnIndex, prev: null, prevTurn: null });
+        store.worldRules.push({ id: uuidv4(), ...rule, turnIndex, valueTurn: turnIndex, createdTurn: turnIndex, prev: null, prevTurn: null, hist: [] });
         return;
     }
     const cur = store.worldRules[idx];
     const createdTurn = cur.createdTurn ?? cur.turnIndex; // 처음 생긴 턴 보존 — 스와이프 롤백 증발 방지
     if ((cur.turnIndex || 0) > turnIndex) return; // 최신성 보호: 옛 턴 재기록이 새 사실을 덮지 못함
-    if (cur.value === rule.value) { cur.turnIndex = turnIndex; cur.createdTurn = createdTurn; return; } // 재확인 — 이전값 이력 유지
-    if ((cur.turnIndex || 0) === turnIndex) {
-        store.worldRules[idx] = { id: cur.id, ...rule, turnIndex, createdTurn, prev: cur.prev ?? null, prevTurn: cur.prevTurn ?? null };
+    if (cur.value === rule.value) { cur.turnIndex = turnIndex; cur.createdTurn = createdTurn; if (cur.valueTurn == null) cur.valueTurn = createdTurn; return; } // 재확인 — 이전값 이력 유지
+    if ((cur.valueTurn ?? cur.turnIndex ?? 0) === turnIndex) {
+        store.worldRules[idx] = { ...cur, ...rule, id: cur.id, turnIndex, valueTurn: turnIndex, createdTurn };
         return;
     }
-    store.worldRules[idx] = { id: cur.id, ...rule, turnIndex, createdTurn, prev: cur.value, prevTurn: cur.turnIndex };
+    const next = { ...cur, ...rule, id: cur.id, turnIndex, valueTurn: turnIndex, createdTurn, prev: cur.value, prevTurn: cur.valueTurn ?? cur.turnIndex };
+    pushHistory(next, { value: cur.value, turn: cur.valueTurn ?? cur.turnIndex });
+    store.worldRules[idx] = next;
 }
 
 /* ------------------------------------------------------------
@@ -2643,20 +2705,25 @@ function upsertEntityState(store, state, turnIndex) {
     // 슬롯 별칭 병합: 기존 항목이 구식 슬롯명(physical_state 등)으로 저장돼 있어도 같은 줄로 합쳐진다
     const idx = store.entityStates.findIndex(s => entityKey(s.entity) === entityKey(state.entity) && canonSlot(s.slot) === canonSlot(state.slot) && s.claim === state.claim && entityKey(s.owner || '') === entityKey(state.owner || ''));
     if (idx < 0) {
-        store.entityStates.push({ id: uuidv4(), ...state, turnIndex, createdTurn: turnIndex, prev: null, prevTurn: null });
+        store.entityStates.push({ id: uuidv4(), ...state, turnIndex, valueTurn: turnIndex, createdTurn: turnIndex, prev: null, prevTurn: null, hist: [] });
         return;
     }
     const cur = store.entityStates[idx];
     const createdTurn = cur.createdTurn ?? cur.turnIndex; // 처음 생긴 턴 보존 — 스와이프 롤백 증발 방지
     if ((cur.turnIndex || 0) > turnIndex) return; // 최신성 보호
     // 다시 적혔다는 것은 아직 살아 있는 상태라는 뜻 — "지나간 상태" 표시를 걷는다
-    if (cur.value === state.value) { cur.turnIndex = turnIndex; cur.createdTurn = createdTurn; delete cur.expired; return; }
-    if ((cur.turnIndex || 0) === turnIndex) {
+    if (cur.value === state.value) { cur.turnIndex = turnIndex; cur.createdTurn = createdTurn; if (cur.valueTurn == null) cur.valueTurn = createdTurn; delete cur.expired; return; }
+    if ((cur.valueTurn ?? cur.turnIndex ?? 0) === turnIndex) {
         // 같은 턴 안의 중복 항목 — 값만 갱신하고 이전값 이력은 유지
-        store.entityStates[idx] = { id: cur.id, ...state, turnIndex, createdTurn, prev: cur.prev ?? null, prevTurn: cur.prevTurn ?? null };
+        const same = { ...cur, ...state, id: cur.id, turnIndex, valueTurn: turnIndex, createdTurn };
+        delete same.expired;
+        store.entityStates[idx] = same;
         return;
     }
-    store.entityStates[idx] = { id: cur.id, ...state, turnIndex, createdTurn, prev: cur.value, prevTurn: cur.turnIndex };
+    const next = { ...cur, ...state, id: cur.id, turnIndex, valueTurn: turnIndex, createdTurn, prev: cur.value, prevTurn: cur.valueTurn ?? cur.turnIndex };
+    delete next.expired;
+    pushHistory(next, { value: cur.value, claim: cur.claim, turn: cur.valueTurn ?? cur.turnIndex });
+    store.entityStates[idx] = next;
 }
 
 function upsertLock(store, lock, turnIndex) {
@@ -2693,6 +2760,12 @@ function upsertLock(store, lock, turnIndex) {
 /** 인물 도감 upsert: 새 정보만 채우고, 관계는 대상별 최신값으로 갱신.
  * 이름 또는 별칭이 겹치면 같은 인물 — 이름 없는 인물의 핸들 카드가 본명 카드로 접힌다.
  * 🔒 잠긴 카드는 프로필 칸(이름·별칭·역할·나이·직업·외모·말투·특성)이 동결되고 관계만 갱신된다. */
+/** 관계의 지나온 길은 세 단계까지만 품는다 */
+function trimWas(rel, depth = 3) {
+    if (!rel || depth <= 0) return null;
+    return { ...rel, was: trimWas(rel.was, depth - 1) };
+}
+
 function upsertCharacter(store, c, turnIndex) {
     const norm = (s) => String(s || '').toLowerCase();
     const findCard = (n) => store.characters.find(x =>
@@ -2748,13 +2821,19 @@ function upsertCharacter(store, c, turnIndex) {
             .some(f => c[f] && c[f] !== existing[f]);
         const incomingTraits = (c.traits || []).filter(t => !(existing.traits || []).includes(t));
         if (scalarChanged || incomingTraits.length) {
-            // 이 턴이 삭제되면 되돌릴 수 있게, 바뀌기 직전 값을 한 단계만 남겨둔다 (캐논·서약과 동일한 방식)
-            existing.prev = {
+            // 이 턴이 삭제되면 되돌릴 수 있게, 바뀌기 직전 프로필을 쌓아 둔다 (몇 턴을 되감아도 그때의 프로필로)
+            const snapshot = {
                 role: existing.role, age: existing.age, occupation: existing.occupation,
                 appearance: existing.appearance, voice: existing.voice,
                 traits: existing.traits ? [...existing.traits] : [],
             };
-            existing.prevTurn = existing.updatedTurn;
+            const at = existing.profileTurn ?? existing.prevTurn ?? existing.firstTurn ?? 0;
+            if (at !== turnIndex) {
+                pushHistory(existing, { fields: snapshot, turn: at });
+                existing.prev = snapshot;
+                existing.prevTurn = existing.updatedTurn;
+            }
+            existing.profileTurn = turnIndex;
         }
         for (const field of ['role', 'age', 'occupation', 'appearance', 'voice']) {
             if (c[field]) existing[field] = c[field];
@@ -2778,7 +2857,13 @@ function upsertCharacter(store, c, turnIndex) {
     for (const rel of (c.relationships || [])) {
         const list = existing.relationships || (existing.relationships = []);
         const idx = list.findIndex(r => r.target.toLowerCase() === rel.target.toLowerCase());
-        if (idx >= 0) list[idx] = rel; else list.push(rel);
+        if (idx >= 0) {
+            const old = list[idx];
+            // 바뀐 관계는 그 전 관계를 품고 있다 — 이 턴을 되돌리면 그 전 관계로 돌아간다 (같은 말이면 그대로)
+            if (old.relation !== rel.relation) list[idx] = { ...rel, turn: turnIndex, was: old.turn === turnIndex ? (old.was || null) : trimWas(old) };
+        } else {
+            list.push({ ...rel, turn: turnIndex, was: null });
+        }
         existing.relationships = list.slice(0, 10);
     }
     existing.updatedTurn = turnIndex;
@@ -2944,13 +3029,21 @@ function upsertItem(store, it, turnIndex) {
     if (!existing) {
         store.items.push({
             id: uuidv4(), ...it,
-            firstTurn: turnIndex, updatedTurn: turnIndex, disabled: false, manual: false,
+            firstTurn: turnIndex, updatedTurn: turnIndex, valueTurn: turnIndex, hist: [], disabled: false, manual: false,
         });
         return;
     }
-    if (it.meaning && !existing.meaning) existing.meaning = it.meaning;
-    if (it.holder) existing.holder = it.holder;
-    if (it.status) existing.status = it.status;
+    const before = { meaning: existing.meaning || '', holder: existing.holder || null, status: existing.status || null };
+    const after = { meaning: before.meaning || it.meaning || '', holder: it.holder || before.holder, status: it.status || before.status };
+    if (after.meaning !== before.meaning || after.holder !== before.holder || after.status !== before.status) {
+        // 누가 들고 있는지·어떤 상태인지가 바뀌면 그 전 모습을 쌓는다 — 되감기 때 그때의 모습으로 돌아간다
+        const at = existing.valueTurn ?? existing.updatedTurn ?? existing.firstTurn ?? 0;
+        if (at !== turnIndex) pushHistory(existing, { ...before, turn: at });
+        Object.assign(existing, after);
+        existing.valueTurn = turnIndex;
+    } else if (existing.valueTurn == null) {
+        existing.valueTurn = existing.updatedTurn ?? existing.firstTurn ?? turnIndex;
+    }
     existing.updatedTurn = turnIndex;
     delete existing.dormant; // 다시 등장한 물건은 깨운다
 }
@@ -5633,11 +5726,15 @@ function renumberTurns(store) {
         r.turnIndex = remap(r.turnIndex);
         if (r.prevTurn != null) r.prevTurn = remap(r.prevTurn);
         if (r.createdTurn != null) r.createdTurn = remap(r.createdTurn);
+        if (r.valueTurn != null) r.valueTurn = remap(r.valueTurn);
+        for (const h of (r.hist || [])) h.turn = remap(h.turn);
     }
     for (const s of store.entityStates) {
         s.turnIndex = remap(s.turnIndex);
         if (s.prevTurn != null) s.prevTurn = remap(s.prevTurn);
         if (s.createdTurn != null) s.createdTurn = remap(s.createdTurn);
+        if (s.valueTurn != null) s.valueTurn = remap(s.valueTurn);
+        for (const h of (s.hist || [])) h.turn = remap(h.turn);
         if (s.expired != null) s.expired = remap(s.expired);
     }
     for (const l of store.locks) {
@@ -5655,6 +5752,9 @@ function renumberTurns(store) {
         c.updatedTurn = remap(c.updatedTurn);
         if (c.prevTurn != null) c.prevTurn = remap(c.prevTurn);
         if (c.coreTurn != null) c.coreTurn = remap(c.coreTurn);
+        if (c.profileTurn != null) c.profileTurn = remap(c.profileTurn);
+        for (const h of (c.hist || [])) h.turn = remap(h.turn);
+        for (const r of (c.relationships || [])) for (let x = r; x; x = x.was) if (x.turn != null) x.turn = remap(x.turn);
         for (const l of (c.lines || [])) l.turn = remap(l.turn);
         for (const g of (c.growth || [])) g.turn = remap(g.turn);
     }
@@ -5664,6 +5764,8 @@ function renumberTurns(store) {
         it.firstTurn = remap(it.firstTurn);
         it.updatedTurn = remap(it.updatedTurn);
         if (it.dormant != null) it.dormant = remap(it.dormant);
+        if (it.valueTurn != null) it.valueTurn = remap(it.valueTurn);
+        for (const h of (it.hist || [])) h.turn = remap(h.turn);
     }
     for (const s of store.chunkSummaries) {
         if (s.carried) continue; // 이전 채팅에서 인계된 요약의 범위는 이 채팅의 축이 아님
@@ -5767,6 +5869,30 @@ function repairSummaryRecords(store) {
     return fixed;
 }
 
+/**
+ * 되감기 전에, 지나온 값을 쌓기 전(이전 버전)에 만들어진 줄을 K 시점으로 맞춘다.
+ * - 상태: K 뒤에 바뀌었고 바로 앞 값이 K 이전 것이면 그 값으로, 아니면 그 줄을 거둔다 (다음 기록이 다시 적는다)
+ * - 물건: K 뒤에 바뀐 소유자·상태는 알 수 없으니 비운다 (물건 자체는 K 이전에 있었으므로 남긴다)
+ * 지나온 값이 쌓인 새 줄은 건드리지 않는다 — 턴별 되돌리기가 정확히 처리한다.
+ */
+function rewindLegacyTo(store, K) {
+    store.entityStates = store.entityStates.flatMap(row => {
+        if (row.valueTurn != null || (row.turnIndex || 0) <= K) return [row];
+        if ((row.createdTurn ?? row.turnIndex) > K) return [row]; // K 뒤에 생긴 줄 — 턴별 되돌리기가 지운다
+        if (row.prev != null && (row.prevTurn ?? Infinity) <= K) {
+            return [{ ...row, value: row.prev, turnIndex: row.prevTurn, valueTurn: row.prevTurn, prev: null, prevTurn: null, hist: [] }];
+        }
+        return [];
+    });
+    for (const it of store.items || []) {
+        if (it.manual || it.valueTurn != null || (it.updatedTurn || 0) <= K || (it.firstTurn || 0) > K) continue;
+        it.holder = null;
+        it.status = null;
+        it.updatedTurn = it.firstTurn;
+        it.valueTurn = it.firstTurn;
+    }
+}
+
 function reconcileWithChat() {
     const store = getStore();
     let changed = false;
@@ -5841,12 +5967,24 @@ function reconcileWithChat() {
         changed = true;
     }
     const keptInPlace = new Set(validTurns);
-    for (const t of orphans) {
-        if (keptInPlace.has(t)) continue;
+    const gone = orphans.filter(t => !keptInPlace.has(t));
+    // 되감기(분기·뒤쪽 삭제): 사라진 턴이 전부 남은 턴보다 뒤에 있다. 그 지점(K)보다 뒤에서 바뀐 값을
+    // 쌓아 둔 기록 없이 들고 있는 옛 줄은 K 시점의 값을 알 수 없다 — 미래 값을 남기느니 거둔다.
+    const lastKept = validTurns.reduce((a, t) => Math.max(a, t.turnIndex || 0), 0);
+    const rewound = gone.length > 0 && gone.every(t => (t.turnIndex || 0) > lastKept);
+    if (rewound) rewindLegacyTo(store, lastKept);
+    // 새것부터 되돌린다 — 값이 여러 번 바뀌었으면 쌓인 순서의 반대로 꺼내야 그때의 값에 닿는다
+    for (const t of [...gone].sort((a, b) => (b.turnIndex || 0) - (a.turnIndex || 0))) {
         removeDerivedForTurn(store, t.turnIndex);
         deletedTurnIndexes.push(t.turnIndex);
         changed = true;
     }
+    if (rewound && store.packetPin?.turn > lastKept) {
+        // 고정해 둔 장부가 그 뒤에 만든 것이면 미래를 담고 있다
+        store.packetPin = null;
+        toastr.info('되감은 지점 뒤에 고정했던 장부를 풀었습니다.', 'Memoria');
+    }
+    if (rewound) logActivity('update', `되감기·분기를 알아채 t${lastKept} 뒤의 기록 ${gone.length}턴을 거뒀어요`);
     store.turns = validTurns;
     if (deletedTurnIndexes.length) {
         dropAffectedSummaries(store, deletedTurnIndexes);
@@ -6377,8 +6515,9 @@ async function applyEditorOps(ops) {
 
     if (applied) {
         persistStore();
-        renderAllPanels();
-        await updateInjection();
+        // 반영은 끝났다 — 화면·장부 새로 고침이 실패해도 적용 실패로 보이지 않게 따로 받는다
+        try { renderAllPanels(); await updateInjection(); }
+        catch (e) { console.warn(`[${MODULE_NAME}] 정정 후 새로 고침 실패`, e); }
     }
     return { applied, skipped };
 }
@@ -8293,8 +8432,19 @@ function bindUI() {
                     `<div class="menu_button" id="${confirmId}_ok" style="display:inline-block; margin-right:6px;">적용</div>` +
                     `<div class="menu_button" id="${confirmId}_no" style="display:inline-block;">취소</div>`);
                 $(`#${confirmId}_ok`).on('click', async function () {
+                    if ($(this).hasClass('disabled')) return;
                     $(this).addClass('disabled');
-                    const { applied, skipped } = await applyEditorOps(ops);
+                    let result;
+                    try {
+                        result = await applyEditorOps(ops);
+                    } catch (e) {
+                        // 실패하면 버튼을 다시 살리고 이유를 보여 준다 — 예전에는 회색인 채로 멈춰 "안 눌리는" 것처럼 보였다
+                        console.error(`[${MODULE_NAME}] 사서 정정 적용 실패`, e);
+                        $(this).removeClass('disabled');
+                        toastr.error(`정정을 적용하지 못했습니다: ${e.message}`, 'Memoria');
+                        return;
+                    }
+                    const { applied, skipped } = result;
                     $(this).parent().find(`#${confirmId}_no`).remove();
                     const skipHtml = skipped.length
                         ? `<div style="margin-top:4px; opacity:0.85;">⚠ ${skipped.map(escapeHtml).join('<br>⚠ ')}</div>` : '';
