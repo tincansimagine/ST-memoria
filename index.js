@@ -40,7 +40,7 @@ import { ARGUMENT_TYPE, SlashCommandArgument } from "../../../slash-commands/Sla
 import { MacrosParser } from "../../../../scripts/macros.js";
 import { NARRATOR_PERSPECTIVE, isSharedPerspective, hasChatPerspective, resolvePerspective, findAssociations, sameKnowledgeScope, archiveSnapshot, validateArchive, addCheckpoint, archiveChanges, packetSections } from './archive-engine.mjs';
 import { showArchiveLibrary } from './library-ui.mjs';
-import { withDeadline, parsePhraseList, stripPhrases, hasPhrase, findRepeatedPhrases, pickBundleValues, resolveBundleName, switchBundle, saveBundle, deleteBundle, renameBundle, exportBundle, parseBundleFile, diffStableEntries, shouldRefreeze, createActivityLog, findRivalExtensions, splitClosedLine, sleepStaleThreads, pickPledges, stripOpenLines, THREAD_KINDS, recallCooldown, pushRecallHistory, isEndedValue, ungroundedFigures, roughTokens, noteUsage, usageTotals } from './craft-engine.mjs';
+import { withDeadline, parsePhraseList, stripPhrases, hasPhrase, findRepeatedPhrases, pickBundleValues, resolveBundleName, switchBundle, saveBundle, deleteBundle, renameBundle, exportBundle, parseBundleFile, diffStableEntries, shouldRefreeze, createActivityLog, findRivalExtensions, splitClosedLine, sleepStaleThreads, pickPledges, stripOpenLines, THREAD_KINDS, recallCooldown, pushRecallHistory, isEndedValue, ungroundedFigures, roughTokens, noteUsage, usageTotals, groundedIn, soundsHedged, noteThreadSightings, threadTouched, rareQueryWords } from './craft-engine.mjs';
 import { findStatusBars, statusOneLine, isPauseDirective, isPauseMessage, buildTimelineRows, filterTimelineRows, timelineMarkdown, timelineCsv, layoutTimelineGraph, verifyIssues } from './scene-engine.mjs';
 import { heroHtml, pulseSvg, flowHtml, railHtml, tableHtml, bondMapSvg, bondCardsHtml, statusListHtml } from './story-view.mjs';
 
@@ -2254,18 +2254,25 @@ function sanitizeExtraction(raw, userText, assistantText, { memoryCap = 12 } = {
     // 서약 자동 해소: 프롬프트에 준 [p1] 꼬리표 목록에서 이번 턴에 해소된 것.
     // "p1" 또는 {"tag":"p1","how":"어떻게 풀렸는지"} — 복선은 어떻게 회수됐는지가 기록의 절반이다.
     out.settledHow = {};
+    out.settledSaid = {};
     out.settledPledges = (Array.isArray(raw?.settled) ? raw.settled : [])
         .map(t => {
             const tag = String((t && typeof t === 'object' ? t.tag : t) || '').trim().toLowerCase();
             const how = t && typeof t === 'object' ? cleanStr(t.how, 200) : '';
+            const said = t && typeof t === 'object' ? cleanStr(t.said, 120) : '';
             if (tag && how) out.settledHow[tag] = how;
+            if (tag && said) out.settledSaid[tag] = said;
             return tag;
         }).filter(Boolean).slice(0, 8);
+    // 진전: 아직 열려 있지만 이번 교환에서 움직인 떡밥 — "지금은 어디까지 왔는지" 한 구절
+    out.movedPledges = (Array.isArray(raw?.moved) ? raw.moved : [])
+        .map(t => ({ tag: String(t?.tag || '').trim().toLowerCase(), now: cleanStr(t?.now, 160) }))
+        .filter(t => /^p\d{1,2}$/.test(t.tag) && t.now).slice(0, 6);
 
     // 지나간 기억: 프롬프트에 준 [m1] 꼬리표 가운데 이번 교환으로 더는 맞지 않게 된 것.
     // "지금은 어떤지" 한 구절이 없는 항목은 받지 않는다 — 근거 없이 기억을 물리지 않는다.
     out.outdated = (Array.isArray(raw?.outdated) ? raw.outdated : [])
-        .map(o => ({ tag: String(o?.tag || '').trim().toLowerCase(), now: cleanStr(o?.now, 160) }))
+        .map(o => ({ tag: String(o?.tag || '').trim().toLowerCase(), now: cleanStr(o?.now, 160), said: cleanStr(o?.said, 120) }))
         .filter(o => /^m\d{1,2}$/.test(o.tag) && o.now).slice(0, 6);
 
     const rawCanon = Array.isArray(raw?.canon) ? raw.canon : (Array.isArray(raw?.world_rules) ? raw.world_rules : []);
@@ -2456,6 +2463,10 @@ function removeDerivedForTurn(store, turnIndex) {
     });
     // 이 턴에서 "해소됨" 판정을 받은 서약은 다시 활성으로 (스와이프/삭제 롤백)
     for (const l of store.locks) {
+        // 이 턴이 붙인 "지금"·언급·깨움은 그 턴과 함께 물린다
+        if (l.latest && l.latest.turn === turnIndex) l.latest = l.latest.was || null;
+        if (l.seenTurn === turnIndex) { l.seenTurn = l.seenPrev ?? null; l.seenPrev = null; }
+        if (l.wokeTurn === turnIndex) { if (l.status === 'active') l.status = 'dormant'; l.wokeTurn = null; }
         if (l.status === 'resolved' && l.resolvedTurn === turnIndex) {
             l.status = 'active';
             l.resolvedTurn = null;
@@ -3076,10 +3087,10 @@ async function commitTurns(mesIds, { silent = true, force = false, retry = 1 } =
     const pledgeLines = openPledges.map((l, i) => {
         const tag = `p${i + 1}`;
         pledgeTagMap.set(tag, l);
-        return `[${tag}] (${normLockKind(l.kind)}) ${l.summary}`;
+        return `[${tag}] (${normLockKind(l.kind)}) ${l.summary}${l.latest?.text ? ` — now: ${l.latest.text}` : ''}`;
     });
     const pledgeDirective = pledgeLines.length
-        ? '\n\nPLEDGE CHECK: the file below lists open pledges with tags like [p1]. If this exchange clearly settles one ON-SCREEN (the secret is revealed, the promise is kept, the thread is closed), include a top-level array "settled" naming the tag and, in one clause, how it was settled, e.g. "settled":[{"tag":"p1","how":"Mina read the letter aloud at dinner"}]. Only what actually happened — never predict, never guess.'
+        ? '\n\nPLEDGE CHECK: the file below lists open pledges with tags like [p1]. If this exchange clearly settles one ON-SCREEN (the secret is revealed, the promise is kept, the thread is closed), include a top-level array "settled" naming the tag, how it was settled in one clause, and "said": a short phrase (a few words) copied character for character from the exchange that shows it, e.g. "settled":[{"tag":"p1","how":"Mina read the letter aloud at dinner","said":"she unfolded the letter and began to read"}]. Only what actually happened — never predict, never guess; something about to happen, half done, or only planned is not settled. If a pledge is still open but this exchange clearly moved it (part of it is done, the search narrowed, the plan changed), include "moved":[{"tag":"p2","now":"one clause: where it stands now"}] instead. Most exchanges settle and move nothing.'
         : '';
 
     // 지나간 기억 점검 — 이번 교환과 같은 사람·물건을 다루는 옛 기억을 꼬리표와 함께 보여 주고,
@@ -3092,7 +3103,7 @@ async function commitTurns(mesIds, { silent = true, force = false, retry = 1 } =
         return `[${tag}] (${m.kind}) ${m.summary}`;
     });
     const shelfDirective = shelfLines.length
-        ? '\n\nSHELF CHECK: the file below lists earlier memories with tags like [m1] that touch the same people or things. If this exchange shows ON-SCREEN that one no longer holds — the object was used up, lost, handed over or destroyed; the plan was carried out or dropped; the fact was overturned; the taste or the tie changed — include a top-level array "outdated" naming the tag and, in one clause, what is true instead, e.g. "outdated":[{"tag":"m2","now":"Mina threw the key into the river"}]. A memory that is merely not mentioned, or still true, is NOT outdated. What happened stays happened: only a standing matter can go out of date. Most exchanges outdate nothing.'
+        ? '\n\nSHELF CHECK: the file below lists earlier memories with tags like [m1] that touch the same people or things. If this exchange shows ON-SCREEN that one no longer holds — the object was used up, lost, handed over or destroyed; the plan was carried out or dropped; the fact was overturned; the taste or the tie changed — include a top-level array "outdated" naming the tag, what is true instead in one clause, and "said": a short phrase copied character for character from the exchange that shows the change, e.g. "outdated":[{"tag":"m2","now":"Mina threw the key into the river","said":"the key sank out of sight"}]. A memory that is merely not mentioned, or still true, is NOT outdated. What happened stays happened: only a standing matter can go out of date. Most exchanges outdate nothing.'
         : '';
 
     // 도감 명단 — 사서가 "누가 아직 카드가 없는지"를 추측하지 않고 알 수 있게 한다.
@@ -3312,17 +3323,32 @@ async function commitTurns(mesIds, { silent = true, force = false, retry = 1 } =
 
     // 사서가 해소됐다고 판정한 서약 처리 (스와이프 시 되돌릴 수 있게 턴 기록)
     // 수기 서약은 사서가 직접 닫지 못한다 — 대신 "해소된 듯" 의견만 붙여 사용자가 ✔로 확정
+    // 근거 확인: 장면에서 옮긴 글귀가 원문에 실제로 있고, 판정이 말끝을 흐리지 않을 때만 닫는다.
+    // 근거가 모자라면 닫지 않고 "해소된 듯" 의견만 붙인다 — 사용자가 ✔로 확정한다.
+    const exchangeText = `${userText}\n${assistantText}`;
+    let unsure = 0;
     for (const tag of (extracted.settledPledges || [])) {
         const lock = pledgeTagMap.get(tag);
         if (!lock || lock.status !== 'active') continue;
-        if (lock.manual) {
+        const how = extracted.settledHow?.[tag] || '';
+        const grounded = groundedIn(extracted.settledSaid?.[tag], exchangeText) && !soundsHedged(how);
+        if (lock.manual || !grounded) {
             lock.suggestResolved = true;
             lock.suggestTurn = turn.turnIndex;
+            if (how) lock.suggestHow = how;
+            if (!lock.manual) unsure++;
         } else {
             lock.status = 'resolved';
             lock.resolvedTurn = turn.turnIndex;
-            lock.resolution = extracted.settledHow?.[tag] || null; // 어떻게 풀렸는지 (복선 회수의 기록)
+            lock.resolution = how || null; // 어떻게 풀렸는지 (복선 회수의 기록)
         }
+    }
+    if (unsure) logActivity('record', `풀린 듯한 서약 ${unsure}개는 근거가 모자라 닫지 않았어요 (세계 탭에서 ✔로 확정할 수 있어요)`);
+    // 진전: 닫히지 않았지만 움직인 떡밥에 "지금" 한 줄을 붙인다 (처음 문구는 그대로 둔다)
+    for (const mv of (extracted.movedPledges || [])) {
+        const lock = pledgeTagMap.get(mv.tag);
+        if (!lock || lock.status !== 'active' || lock.latest?.text === mv.now) continue;
+        lock.latest = { text: mv.now, turn: turn.turnIndex, was: lock.latest || null };
     }
     // 사서가 "더는 맞지 않는다"고 본 옛 기억을 물린다 — 지우지 않는다: 평소 회상에서만 빠지고,
     // 그 일을 직접 꺼내거나 옛일을 되짚을 때는 "지금은 이렇다"는 꼬리표와 함께 다시 나온다.
@@ -3330,6 +3356,8 @@ async function commitTurns(mesIds, { silent = true, force = false, retry = 1 } =
     for (const o of (extracted.outdated || [])) {
         const m = shelfTagMap.get(o.tag);
         if (!m || m.retired || !store.memories.includes(m)) continue;
+        // 원문에서 옮긴 글귀가 없거나 말끝을 흐린 판정이면 물리지 않는다
+        if (!groundedIn(o.said, exchangeText) || soundsHedged(o.now)) continue;
         m.retired = { turn: turn.turnIndex, now: o.now };
         retiredNow++;
     }
@@ -3345,6 +3373,12 @@ async function commitTurns(mesIds, { silent = true, force = false, retry = 1 } =
         for (const it of (extracted.items || [])) upsertItem(store, it, turn.turnIndex);
     }
 
+    // 떡밥 언급 추적: 이번에 적은 턴 요약과 기억을 떡밥과 견주어, 언급된 떡밥은 깨우고 "마지막으로 본 턴"을 적는다
+    if (answered) {
+        const told = [...units.map(u => u.turn.summary), ...rows.map(r => r.summary)].join('\n');
+        const { woke } = noteThreadSightings(store.locks, told, turn.turnIndex);
+        if (woke) logActivity('record', `잠들어 있던 떡밥 ${woke}개가 다시 언급돼 깨웠어요`);
+    }
     pruneMemories(store);
     if (answered) logActivity('record', batch
         ? `#${units[0].mesId}~#${mesId} 턴 ${units.length}개를 호출 한 번으로 기록 — 기억 ${rows.length}개`
@@ -3615,7 +3649,7 @@ async function maybeSummarizeChunk(store, { flushAll = false, onProgress = null,
             .sort((a, b) => (a.turnIndex || 0) - (b.turnIndex || 0)).slice(0, 16);
         const threadTags = new Map(threads.map((l, i) => [`o${i + 1}`, l]));
         const threadBlock = threads.length
-            ? `Open threads on file:\n${[...threadTags].map(([tag, l]) => `[${tag}] ${l.summary}`).join('\n')}\n`
+            ? `Open threads on file:\n${[...threadTags].map(([tag, l]) => `[${tag}] ${l.summary}${l.latest?.text ? ` — now: ${l.latest.text}` : ''}`).join('\n')}\n`
             : '';
         const threadDirective = threads.length
             ? '\n\nTHREAD CHECK: after the record, add ONE final line "CLOSED: o2, o5" naming every listed open thread that these turns (or the earlier records shown) have clearly settled, answered, carried out, abandoned, or made pointless. A thread nobody will plausibly return to — a passing errand, a small question already overtaken by events — counts as closed. Write "CLOSED: none" when all are still live. This line is filing metadata, not part of the record.'
@@ -4287,6 +4321,10 @@ async function retrieveMemories(queryText, recentUserTexts, sceneText = '') {
         }
     }
 
+    // 드문 낱말: 입력의 낱말 가운데 서고 전체에서 몇 기억에만 나오는 것 — 그 기억을 가리키는 강한 단서
+    const indexLower = new Map(active.map(m => [m.id, memoryIndexText(m).toLowerCase()]));
+    const rareWords = rareQueryWords(queryText, [...indexLower.values()]);
+
     // 이 채팅에서 회상하지 않을 말 — 그 말이 든 기억은 후보에서 뺀다 (지우지 않는다. 고정한 기억은 사용자의 뜻이라 그대로)
     const mute = (store.recallMute || []).map(w => String(w).toLowerCase()).filter(w => w.length >= 2);
     const muted = (m) => mute.length > 0 && !m.pinned
@@ -4357,13 +4395,19 @@ async function retrieveMemories(queryText, recentUserTexts, sceneText = '') {
         // 장면 개체 사전확률: 질의에 이름은 없지만 지금 장면에 있는 인물과 얽힌 기억
         const presenceHit = !entityHit && presentEntities.size > 0
             && (m.entities || []).some(e => presentEntities.has(String(e).toLowerCase()));
+        // 드문 낱말이 닿았는가 — 길고 드문 낱말 하나, 또는 드문 낱말 둘이면 "직접 가리킴"으로 친다
+        const idxLower = indexLower.get(m.id) || '';
+        const rareHits = rareWords.filter(r => idxLower.includes(r.word));
+        const rareStrong = rareHits.length >= 2 || rareHits.some(r => r.word.length >= 3 && !/^[a-z0-9]+$/.test(r.word)) || rareHits.some(r => r.word.length >= 6);
+        // 흔한 낱말이 겹치는 것(문맥 유사도의 잡음)보다 확실히 앞서도록 — 그 낱말을 가진 기억은 몇 개뿐이다
+        const rareBoost = Math.min(0.2, rareHits.reduce((a, r) => a + 0.03 * r.idf, 0)) + (rareStrong ? 0.06 : 0);
         // 관문: 사전확률만으로는 절반의 의미 유사도라도 있어야 통과 (무관 기억 범람 방지)
-        if (cos < settings.minCosine && lex < 0.035 && !entityHit && !hintHit
+        if (cos < settings.minCosine && lex < 0.035 && !entityHit && !hintHit && !rareHits.length
             && !(presenceHit && cos >= settings.minCosine * 0.5)) continue;
 
         // 지나간 기억(잃어버린 물건, 이미 치른 약속, 뒤집힌 사실)은 평소 회상에서 빠진다.
         // 사용자가 그 일을 직접 꺼내거나 옛일을 되짚을 때만 후보가 되고, 주입될 때 "지금은 이렇다"가 붙는다.
-        const direct = hintHit || raisedDirectly(m, queryLower, knownNames);
+        const direct = hintHit || rareStrong || raisedDirectly(m, queryLower, knownNames);
         if (m.retired && !pastQuery && !direct) continue;
 
         const age = Math.max(0, currentTurn - m.turnIndex);
@@ -4373,15 +4417,17 @@ async function retrieveMemories(queryText, recentUserTexts, sceneText = '') {
         // 서사적 키 보호: "잊으면 이야기가 깨지는 급"(0.75+) 기억은 깊은 화석화 면제 —
         // 의도적 시간 스킵 뒤에도 핵심 과거가 회상 경쟁에서 밀리지 않게 바닥을 받친다
         if (m.importance >= 0.75) fossil = Math.max(fossil, 0.7);
-        const recency = pastQuery ? 0.55 : Math.exp(-age / 18) * fossil;
-        const cool = coolHistory.length
+        // 옛일을 되짚는 질문이거나, 그 기억에만 있는 드문 낱말로 직접 가리켰으면 나이로 깎지 않는다
+        const recency = pastQuery ? 0.55 : rareStrong ? Math.max(0.55, Math.exp(-age / 18) * fossil) : Math.exp(-age / 18) * fossil;
+        // 그 기억에만 있는 낱말로 직접 물었으면 연달아 실렸어도 미루지 않는다
+        const cool = coolHistory.length && !rareStrong
             ? recallCooldown(coolHistory, m.id, { before: coolBefore, direct: direct || pastQuery, echoed: (m.echoes || 0) > 0 && !(m.coldRun > 0) })
             : 1;
         const score = (0.62 * Math.max(0, cos) + 0.18 * lex + 0.12 * m.importance + 0.08 * recency
-            + (entityHit ? 0.08 : 0) + (hintHit ? 0.07 : 0) + (presenceHit ? 0.05 : 0)) * cool * (m.retired ? 0.7 : 1);
+            + (entityHit ? 0.08 : 0) + (hintHit ? 0.07 : 0) + (presenceHit ? 0.05 : 0) + rareBoost) * cool * (m.retired ? 0.7 : 1);
         if (score < settings.minScore) continue;
         candidates.push({ m, score, vec });
-        trace.set(m.id, { reason: [cool < 0.8 && '연달아 실려 순서를 미룸', m.retired && '지나간 기억', entityHit && '인물 일치', hintHit && '검색 힌트', presenceHit && '현재 장면의 인물', lex >= 0.035 && '어휘 일치', cos >= settings.minCosine && '문맥 유사도'].filter(Boolean).join(' · ') || '관련성 점수', score, mode: 'direct' });
+        trace.set(m.id, { reason: [rareHits.length && `드문 낱말: ${rareHits.map(r => r.word).join(', ')}`, cool < 0.8 && '연달아 실려 순서를 미룸', m.retired && '지나간 기억', entityHit && '인물 일치', hintHit && '검색 힌트', presenceHit && '현재 장면의 인물', lex >= 0.035 && '어휘 일치', cos >= settings.minCosine && '문맥 유사도'].filter(Boolean).join(' · ') || '관련성 점수', score, mode: 'direct' });
     }
 
     candidates.sort((a, b) => b.score - a.score);
@@ -5065,7 +5111,7 @@ function renderPacket(parts, { withExcerpts = true, excerptLimit = Infinity, rec
         // "지금 일어나는 일"이 아니라 "깔려 있는 압력"임을 명시 — 모델이 서약 소재를
         // 매 턴 억지로 무대에 올리거나 성급히 해소해 버리는 과잉 반응 방지
         stable.push('## Pledges (the story must keep these true — standing pressure in the background, not events happening right now; never rush to stage or resolve them. A [foreshadow] entry is a setup waiting for its payoff: let it surface when the story is ready, not before)');
-        for (const l of parts.locks) entry('Pledges', l.id || l.summary, `- [${normLockKind(l.kind)}] ${l.summary}`);
+        for (const l of parts.locks) entry('Pledges', l.id || l.summary, `- [${normLockKind(l.kind)}] ${l.summary}${l.latest?.text ? ` — now: ${l.latest.text}` : ''}`);
     }
 
     // ── 여기부터는 매 턴 달라지는 섹션 (캐싱 재사용 구간은 여기서 끝남)
@@ -5567,6 +5613,10 @@ function renumberTurns(store) {
         if (l.resolvedTurn != null) l.resolvedTurn = remap(l.resolvedTurn);
         if (l.createdTurn != null) l.createdTurn = remap(l.createdTurn);
         if (l.prevTurn != null) l.prevTurn = remap(l.prevTurn);
+        for (let x = l.latest; x; x = x.was) x.turn = remap(x.turn);
+        if (l.seenTurn != null) l.seenTurn = remap(l.seenTurn);
+        if (l.seenPrev != null) l.seenPrev = remap(l.seenPrev);
+        if (l.wokeTurn != null) l.wokeTurn = remap(l.wokeTurn);
     }
     for (const c of store.characters) {
         c.firstTurn = remap(c.firstTurn);
@@ -7140,11 +7190,11 @@ function renderStatePanel() {
     if (!store.locks.length) $locks.append('<div class="memoria__empty">기록된 서약이 없습니다.</div>');
     for (const l of store.locks) {
         const suggest = (l.suggestResolved && l.status === 'active')
-            ? ' <small class="memoria__suggest" title="사서가 이야기 속에서 해소됐다고 판단한 수기 서약입니다. 동의하면 ✔로 확정하세요.">🔔 해소된 듯 — ✔로 확정</small>'
+            ? ` <small class="memoria__suggest" title="사서가 이야기 속에서 풀린 것 같다고 본 서약입니다${l.suggestHow ? ` — ${escapeHtml(l.suggestHow)}` : ''}. 직접 적은 서약이거나 장면 속 근거가 모자라 저절로 닫지 않았습니다. 동의하면 ✔로 확정하세요.">해소된 듯 — ✔로 확정</small>`
             : '';
         $locks.append($(`
             <div class="memoria__row${l.status === 'resolved' ? ' is-resolved' : ''}${l.status === 'dormant' ? ' is-dormant' : ''}" data-id="${l.id}">
-                <span class="memoria__row-text"><span class="memoria__badge memoria__badge--lock">${LOCK_LABELS[l.kind] || l.kind}</span>${l.status === 'dormant' ? ' <span class="memoria__badge" title="오래 진전이 없어 주입에서 뺐습니다. 다시 언급되면 깨어납니다">휴면</span>' : ''} ${escapeHtml(l.summary)} <small>(P${l.priority} · t${l.turnIndex})</small>${l.resolution && l.status === 'resolved' ? ` <small>— ${escapeHtml(l.resolution)}</small>` : ''}${suggest}</span>
+                <span class="memoria__row-text"><span class="memoria__badge memoria__badge--lock">${LOCK_LABELS[l.kind] || l.kind}</span>${l.status === 'dormant' ? ' <span class="memoria__badge" title="오래 진전이 없어 주입에서 뺐습니다. 다시 언급되면 깨어납니다">휴면</span>' : ''} ${escapeHtml(l.summary)} <small>(P${l.priority} · t${l.turnIndex})</small>${l.latest?.text && l.status !== 'resolved' ? ` <small class="memoria__lock-now">지금: ${escapeHtml(l.latest.text)}</small>` : ''}${l.resolution && l.status === 'resolved' ? ` <small>— ${escapeHtml(l.resolution)}</small>` : ''}${suggest}</span>
                 <i class="fa-solid ${l.status === 'active' ? 'fa-check' : 'fa-rotate-left'} memoria-lock-toggle" title="${l.status === 'active' ? '해결됨으로 표시' : '다시 활성화'}"></i>
                 <i class="fa-solid fa-trash memoria-lock-delete" title="삭제"></i>
             </div>
@@ -8508,8 +8558,11 @@ function bindUI() {
         lock.status = lock.status === 'active' ? 'resolved' : 'active';
         // 깨운 떡밥은 방금 다뤄진 것으로 친다 — 곧바로 다시 잠들지 않게
         if (lock.status === 'active') { lock.turnIndex = store.turnCounter; lock.resolvedTurn = null; lock.resolution = null; }
+        // 사서가 "풀린 듯"이라며 적어 둔 경위가 있으면 확정할 때 그대로 남긴다
+        else if (lock.suggestResolved && lock.suggestHow) lock.resolution = lock.suggestHow;
         lock.suggestResolved = false; // 사용자가 직접 결정했으니 사서 의견은 정리
         lock.suggestTurn = null;
+        lock.suggestHow = null;
         persistStore(); renderStatePanel(); updateInjection();
     });
 

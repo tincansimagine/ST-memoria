@@ -430,7 +430,7 @@ export function sleepStaleThreads(locks, turnNow, after = 60) {
     let slept = 0;
     for (const l of locks || []) {
         if (l.status !== 'active' || l.manual || !THREAD_KINDS.includes(l.kind) || (l.priority ?? 2) <= 1) continue;
-        if (turnNow - (l.turnIndex || 0) < after) continue;
+        if (turnNow - threadTouched(l) < after) continue;
         l.status = 'dormant';
         l.sleptTurn = turnNow;
         slept++;
@@ -448,8 +448,8 @@ export function pickPledges(locks, { turnNow = 0, sceneText = '', overlap = () =
     const active = (locks || []).filter(l => l.status === 'active').sort((a, b) => (a.priority ?? 2) - (b.priority ?? 2));
     const standing = active.filter(l => !THREAD_KINDS.includes(l.kind));
     const threads = active.filter(l => THREAD_KINDS.includes(l.kind)).map((l) => {
-        const age = turnNow - (l.turnIndex || 0);
-        const near = sceneText ? overlap(l.summary, sceneText) : 0;
+        const age = turnNow - threadTouched(l);
+        const near = sceneText ? overlap(`${l.summary} ${l.latest?.text || ''}`, sceneText) : 0;
         const keep = (l.priority ?? 2) <= 1 || age <= fresh || near >= 0.34;
         return { l, keep, rank: ((l.priority ?? 2) <= 1 ? 2 : 0) + near * 2 + Math.max(0, 1 - age / 80) };
     }).filter(x => x.keep).sort((a, b) => b.rank - a.rank).slice(0, threadCap).map(x => x.l);
@@ -511,4 +511,105 @@ export function noteUsage(usage, task, input, output, day) {
 export function usageTotals(usage) {
     const rows = Object.entries(usage?.tasks || {});
     return rows.reduce((a, [, r]) => ({ calls: a.calls + r.calls, in: a.in + r.in, out: a.out + r.out }), { calls: 0, in: 0, out: 0 });
+}
+
+/* ------------------------------------------------------------
+ * 근거 확인 — 닫거나 물릴 때는 장면 속 글귀를 대야 한다
+ *
+ * 서약을 닫고 기억을 물리는 일은 되돌리기 전까지 그 일을 장부에서 지운다. 사서가 짐작으로 닫으면
+ * 아직 살아 있는 떡밥이 사라진다. 그래서 장면에서 그대로 옮긴 짧은 글귀를 함께 받고, 그 글귀가
+ * 실제로 원문에 있는지 글자로 확인한다. 말끝을 흐린 판정("아직", "거의", "~인 듯")도 받지 않는다.
+ * ------------------------------------------------------------ */
+
+const squashText = (t) => String(t ?? '').toLowerCase().replace(/[\s\p{P}\p{S}]+/gu, '');
+
+/** phrase가 source 안에 글자 그대로 있는가 (띄어쓰기·문장부호·따옴표는 무시). 너무 짧은 글귀는 근거가 못 된다 */
+export function groundedIn(phrase, source, min = 4) {
+    const p = squashText(phrase);
+    return p.length >= min && squashText(source).includes(p);
+}
+
+const HEDGE_RE = /(아직|거의|일부|반쯤|부분적|것 ?같|듯(?:하|싶|이|$)|모양이|지도 모른|려고 ?(?:했|한다|함)|하려|기로 ?(?:했|함)|\bnot yet\b|\balmost\b|\bnearly\b|\bpartly\b|\bpartially\b|\bseems?\b|\bappears? to\b|\bmight\b|\bmay\b|\bprobably\b|\bplans? to\b|\babout to\b|\bgoing to\b)/i;
+/** 끝났다고 말하면서 말끝을 흐리는가 — 그런 판정으로는 닫지 않는다 */
+export function soundsHedged(text) {
+    return HEDGE_RE.test(String(text ?? ''));
+}
+
+/* ------------------------------------------------------------
+ * 떡밥이 마지막으로 언급된 때
+ *
+ * 오래 진전 없는 떡밥은 잠재운다. 그런데 "진전"을 사서가 그 떡밥을 다시 적은 때로만 재면,
+ * 이야기 속에서 계속 오가는 떡밥도 사서가 다시 적지 않았다는 이유로 잠들어 버린다.
+ * 매 기록마다 새 턴 요약과 떡밥을 견주어, 언급된 떡밥은 "마지막으로 본 턴"을 새로 적고
+ * 잠들어 있었으면 깨운다. 모델을 부르지 않는다.
+ * ------------------------------------------------------------ */
+
+const PARTICLE_TAIL = /(으로부터|에게서|한테서|으로서|으로써|에서는|에서도|에게는|까지는|부터는|이라도|처럼|보다|까지|부터|에서|에게|한테|께서|으로|이랑|하고|이나|라도|은|는|이|가|을|를|에|의|로|과|와|도|만|랑)$/;
+
+/** 견줄 낱말들 — 한국어는 붙은 조사를 떼고, 로마자는 짧은 낱말을 뺀다 */
+export function contentWords(text) {
+    const out = new Set();
+    for (const raw of String(text ?? '').toLowerCase().match(/[\p{L}\p{N}]+/gu) || []) {
+        if (/^[a-z0-9]+$/.test(raw)) { if (raw.length >= 4) out.add(raw); continue; }
+        if (/^\d+$/.test(raw)) continue;
+        const stem = raw.length >= 3 ? raw.replace(PARTICLE_TAIL, '') : raw;
+        if (stem.length >= 2) out.add(stem);
+    }
+    return out;
+}
+
+/** text가 이 떡밥을 다루는가 — 떡밥의 낱말 가운데 둘 이상, 그리고 절반 이상이 글에 있어야 한다 */
+export function mentionsThread(threadText, text) {
+    const words = [...contentWords(threadText)];
+    if (words.length < 2) return false;
+    const hay = String(text ?? '').toLowerCase();
+    const hits = words.filter(w => hay.includes(w)).length;
+    return hits >= 2 && hits / words.length >= 0.5;
+}
+
+/**
+ * 이번 기록에서 언급된 떡밥에 "본 턴"을 적고, 잠든 떡밥은 깨운다. 되돌리기용으로 이전 값을 남긴다.
+ * 반환: { seen, woke }
+ */
+export function noteThreadSightings(locks, text, turn) {
+    let seen = 0;
+    let woke = 0;
+    if (!String(text ?? '').trim()) return { seen, woke };
+    for (const l of locks || []) {
+        if (!THREAD_KINDS.includes(l.kind) || !['active', 'dormant'].includes(l.status)) continue;
+        if (!mentionsThread(`${l.summary} ${l.latest?.text || ''}`, text)) continue;
+        if (l.seenTurn !== turn) { l.seenPrev = l.seenTurn ?? null; l.seenTurn = turn; seen++; }
+        if (l.status === 'dormant') { l.status = 'active'; l.wokeTurn = turn; woke++; }
+    }
+    return { seen, woke };
+}
+
+/** 떡밥이 마지막으로 움직인 턴 — 다시 적힌 때, 언급된 때, "지금"이 바뀐 때 가운데 가장 늦은 것 */
+export function threadTouched(l) {
+    return Math.max(l?.turnIndex || 0, l?.seenTurn || 0, l?.latest?.turn || 0);
+}
+
+/* ------------------------------------------------------------
+ * 드문 낱말 회상
+ *
+ * "그 나침반 아직 있어?"의 "나침반"처럼 서고 전체에서 몇 번 안 나오는 낱말은, 그 낱말이 든 기억을
+ * 가리키는 아주 강한 단서다. 흔한 낱말(이름, "오늘", "말했다")은 아무것도 가리키지 않는다.
+ * 기억마다 그 낱말이 몇 개의 기억에 나오는지 세어, 드문 낱말이 닿은 기억을 끌어올린다.
+ * ------------------------------------------------------------ */
+
+/**
+ * queryText의 낱말 가운데 docs(기억 색인 글, 소문자) 몇 개에만 나오는 드문 것들. 반환: [{ word, idf }]
+ * share: 전체의 이 비율 이하에 나와야 드물다 (최소 1개). 기억이 적으면(8개 미만) 드물다는 말이 의미가 없어 빈 배열.
+ */
+export function rareQueryWords(queryText, docs, { share = 0.05, minDocs = 8 } = {}) {
+    const n = docs.length;
+    if (n < minDocs) return [];
+    const limit = Math.max(1, Math.floor(n * share));
+    const out = [];
+    for (const word of contentWords(queryText)) {
+        let df = 0;
+        for (const d of docs) { if (d.includes(word) && ++df > limit) break; }
+        if (df >= 1 && df <= limit) out.push({ word, idf: Math.log((n + 1) / df) });
+    }
+    return out;
 }
