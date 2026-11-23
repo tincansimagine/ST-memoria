@@ -4876,11 +4876,16 @@ function currentRecallQuery() {
         }
         return '';
     }
-    let query = '';
+    // 내 입력이 마지막 답변보다 뒤에 있을 때만 그 입력이 질의다. 입력 없이 이어 받는 중이면 마지막 내 입력은
+    // 수십 턴 전 것일 수 있다 — 그걸로 찾으면 옛 장면이 회상된다. 그땐 마지막 장면의 끝으로 찾는다.
     for (let i = chat.length - 1; i >= 0; i--) {
-        if (chat[i]?.is_user && chat[i].mes && !isSideMessage(chat[i])) { query = chat[i].mes; break; }
+        const m = chat[i];
+        if (!m || m.is_system || isSideMessage(m) || !m.mes) continue;
+        const text = visibleProse(m.mes).trim();
+        if (!text) continue;
+        return m.is_user ? text : text.slice(-2400);
     }
-    return visibleProse(query || chat[chat.length - 1]?.mes || '');
+    return '';
 }
 
 async function buildPacketSections(query, supervisorPlan) {
@@ -4889,7 +4894,8 @@ async function buildPacketSections(query, supervisorPlan) {
     const narratorMode = effectivePerspective(store) === NARRATOR_PERSPECTIVE;
 
     const recentUserTexts = [];
-    for (let i = chat.length - 1; i >= 0 && recentUserTexts.length < settings.multiQueryRecent + 1; i--) {
+    // 보조 질의로 쓰는 옛 입력은 최근 몇 교환 안의 것만 — 풀사칭 채팅의 수십 턴 전 입력이 회상을 끌고 가지 않게
+    for (let i = chat.length - 1; i >= Math.max(0, chat.length - 12) && recentUserTexts.length < settings.multiQueryRecent + 1; i--) {
         if (chat[i]?.is_user && chat[i].mes && !isSideMessage(chat[i])) recentUserTexts.push(visibleProse(chat[i].mes));
     }
     // 직전 본문(어시스턴트) — "응", "계속해줘" 같은 짧은 입력에도 장면이 이어지게 회상 보조 질의로 쓴다.
@@ -4910,9 +4916,15 @@ async function buildPacketSections(query, supervisorPlan) {
 
     const publicRecall = [];
     const protectedRecall = [];
+    // 아직 AI가 원문으로 보고 있는 메시지의 기억은 싣지 않는다 — 같은 일이 원문과 요약으로 두 번 들어가고,
+    // 요약 쪽이 "회상"이라는 이름으로 장면 바로 앞에 놓여 모델이 몇 턴 전 일에 다시 반응하게 만든다.
+    const onScreenFrom = chat.length - (settings.autoHide ? Math.max(1, settings.preserveRecent) + 2 : 24);
+    const onScreen = (m) => {
+        const id = Number(m.mesId);
+        return Number.isInteger(id) && id >= onScreenFrom && chat[id] && !chat[id].is_system;
+    };
     for (const m of [...pinned, ...triggered, ...selected]) {
-        // 직전 1교환 이내의 기억은 눈에 보이는 채팅 원문과 겹친다 — 요약본을 또 실을 이유가 없다
-        if (!m.pinned && (store.turnCounter - (m.turnIndex || 0)) <= 1) continue;
+        if (!m.pinned && ((store.turnCounter - (m.turnIndex || 0)) <= 1 || onScreen(m))) continue;
         (m.visibility === 'public' ? publicRecall : protectedRecall).push(m);
     }
     // 낡은 회상 표시: 회상된 기억이 그 후 바뀐 상태의 옛 값을 담고 있으면 주입 시 "당시 기준" 꼬리표를 붙인다
@@ -5077,7 +5089,11 @@ async function buildPacketSections(query, supervisorPlan) {
         m.pinned || (m.excerpt && m.excerpt.length <= 160 && !(m.tags || []).includes('episode_raw'))
         || !(milestoneTexts.some(t => textOverlap(m.summary, t) >= 0.6) || chapterCovers(m)));
 
-    return { bonds, voices, banned, styleGuard: settings.styleGuard !== false, recallQuotes: settings.recallQuotes !== false, banTell: settings.banTell === true,
+    // 기록이 몇 답변 늦었는지 — 장면·상태는 그 시점 값이다 (묶어 기록·기록 지연 때문에 최근 답변은 아직 안 적혔다)
+    const lastRecorded = store.turns.reduce((mx, t) => (t.failed ? mx : Math.max(mx, t.mesId ?? -1)), -1);
+    let recordLag = 0;
+    for (let i = lastRecorded + 1; i < chat.length; i++) if (chat[i] && !chat[i].is_user && !chat[i].is_system) recordLag++;
+    return { recordLag, bonds, voices, banned, styleGuard: settings.styleGuard !== false, recallQuotes: settings.recallQuotes !== false, banTell: settings.banTell === true,
         publicRecall: publicRecallDeduped, protectedRecall, hiddenProtected, locks, rules, scene, states, characters, milestones, items, summaries, supervisorPlan, narratorMode, turnNow: store.turnCounter, storyAges, storyTotalDays, sources: await pickDossierExcerpts(query, recallContext), recallCandidates, trace };
 }
 
@@ -5284,7 +5300,8 @@ function renderPacket(parts, { withExcerpts = true, excerptLimit = Infinity, rec
         if (parts.scene.present) bits.push(`present: ${parts.scene.present}`);
         if (parts.scene.mood) bits.push(`mood: ${parts.scene.mood}`);
         if ((parts.storyTotalDays || 0) >= 1) bits.push(`story clock: ~${humanizeStoryDays(parts.storyTotalDays)} since the story began`);
-        lines.push(`## Scene Now — ${bits.join(' · ')}`);
+        const lag = parts.recordLag > 0 && !bar ? ` (recorded ${parts.recordLag} repl${parts.recordLag === 1 ? 'y' : 'ies'} ago — the latest replies in the chat are newer and win)` : '';
+        lines.push(`## Scene Now — ${bits.join(' · ')}${lag}`);
     }
     if (stableMode) {
         // 안정 구간에서 뺀 "지금 장면에 있는 인물의 외형"은 여기에 싣는다
@@ -5293,7 +5310,9 @@ function renderPacket(parts, { withExcerpts = true, excerptLimit = Infinity, rec
     }
     const states = takeLast(parts.states, stateLimit);
     if (states.length) {
-        lines.push('## Status Board (current values)');
+        lines.push(parts.recordLag > 0
+            ? `## Status Board (as of ${parts.recordLag} repl${parts.recordLag === 1 ? 'y' : 'ies'} ago — wherever the latest replies show otherwise, they win)`
+            : '## Status Board (current values)');
         // 지속 상태(부상·위치·목표 등)를 먼저, 장면 휘발성 상태(자세·복장·기분)를 뒤에 —
         // 모델이 "오래 유지할 값"과 "이번 장면에서 재확인할 값"을 구분해 읽도록
         // 인물별로 묶어 정렬 — 같은 인물의 상태가 흩어져 실리면 모순을 알아채기 어렵다
@@ -5597,12 +5616,32 @@ let lastInjected = { main: '', stable: '' };
  * 한 덩어리: 설정한 위치·깊이에 그대로.
  * 고정 장부: 안정 구간은 메인 프롬프트 앞/뒤(채팅 기록보다 앞)에, 매 턴 바뀌는 구간은 채팅 내 깊이에.
  */
+/**
+ * 채팅 안에 넣을 깊이.
+ * 설정한 깊이만큼 끝에서 올라가되, 장부가 "마지막 이야기 답변"과 "그 뒤에 보낸 내 입력" 사이에 끼지 않게 한다.
+ * 깊이 1을 그대로 쓰면 입력을 보냈을 때 순서가 [마지막 답변] [장부] [내 입력]이 된다 — 장부가 입력 바로 앞,
+ * 가장 최근 자리를 차지해서, 기록이 몇 턴 늦은 장부의 장면·상태를 "지금"으로 읽고 몇 턴 전으로 되돌아간다.
+ * 입력 없이 이어 받을 때([장부] [마지막 답변])는 멀쩡하던 이유가 이것이다. 그래서 끝에 붙은 사용자 메시지 수만큼
+ * 더 올라가, 어느 쪽이든 [장부] [마지막 답변] [내 입력] 순서가 되게 한다.
+ */
+function ledgerDepth() {
+    const base = Math.max(0, Number(getSettings().injectDepth) || 0);
+    let trailingUser = 0;
+    for (let i = chat.length - 1; i >= 0; i--) {
+        const m = chat[i];
+        if (!m || m.is_system) continue;
+        if (!m.is_user) break;
+        trailingUser++;
+    }
+    return trailingUser ? Math.max(base, trailingUser + 1) : base;
+}
+
 function applyLedger(main, stable = '') {
     const settings = getSettings();
     lastInjected = { main, stable };
     const stableType = settings.injectPosition === 'before' ? extension_prompt_types.BEFORE_PROMPT : extension_prompt_types.IN_PROMPT;
     setExtensionPrompt(INJECT_KEY_STABLE, stable, stableType, 0, false, extension_prompt_roles.SYSTEM);
-    setExtensionPrompt(INJECT_KEY, main, stable ? extension_prompt_types.IN_CHAT : injectionType(), settings.injectDepth, false, extension_prompt_roles.SYSTEM);
+    setExtensionPrompt(INJECT_KEY, main, stable ? extension_prompt_types.IN_CHAT : injectionType(), ledgerDepth(), false, extension_prompt_roles.SYSTEM);
 }
 
 /**

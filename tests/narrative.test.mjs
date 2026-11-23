@@ -95,8 +95,11 @@ test('assistant-only continuation searches the latest scene, while a new user co
     await app.updateInjection();
     assert.equal(app.run('lastPacketDiagnostics.rows.find(m => m.id === "current").mode'), 'trigger');
     store.perspective = '';
+    // 기본 방식에서도: 마지막 답변보다 먼저 보낸 옛 입력은 질의가 아니다 (입력 없이 이어 받는 풀사칭 채팅)
     app.context.chat.unshift({ is_user: true, mes: '과수원으로 가자.' });
-    assert.equal(app.currentRecallQuery(), '과수원으로 가자.');
+    assert.equal(app.currentRecallQuery(), '청동열쇠로 문을 열었다.');
+    app.context.chat.push({ is_user: true, mes: '과수원으로 가자.' });
+    assert.equal(app.currentRecallQuery(), '과수원으로 가자.', 'a fresh input still leads');
 });
 
 test('novel guidance works with an empty archive and does not disappear into the old long-packet footer', async () => {

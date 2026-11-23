@@ -470,3 +470,28 @@ test('batched recording: an unparsable or changed run is not half-filed', async 
     assert.equal(a.getStore().turns.length, 0, 'a run that changed underfoot is dropped whole and re-batched later');
     assert.equal(a.getStore().memories.length, 0);
 });
+
+test('a sent input never sits right after a stale ledger, and replies still on screen are not "recalled"', async () => {
+    const a = await app();
+    const store = a.getStore();
+    const chat = a.context.chat;
+    for (let i = 0; i < 30; i++) chat.push({ is_user: false, mes: `아리아의 ${i}번째 장면. 바람이 불었다.`, name: '아리아' });
+    store.turns = [{ id: 't1', mesId: 5, mesHash: 1, turnIndex: 1, summary: '오래전 장면' }, { id: 't2', mesId: 25, mesHash: 2, turnIndex: 2, summary: '최근 장면' }];
+    store.turnCounter = 6;
+    store.memories.push(
+        memory('old', { summary: '아리아가 등대 열쇠를 숨겼다', mesId: 5, turnIndex: 1, pinned: false, trigger: '열쇠' }),
+        memory('recent', { summary: '아리아가 열쇠를 다시 꺼냈다', mesId: 25, turnIndex: 2, pinned: false, trigger: '열쇠' }),
+    );
+    store.entityStates.push({ id: 's', entity: 'scene', slot: 'location', value: '등대', turnIndex: 2 });
+
+    await a.updateInjection();
+    const noInput = a.prompts.at(-1);
+    assert.equal(noInput[3], 1, 'continuing without input keeps the configured depth');
+    assert.match(noInput[1], /recorded 4 replies ago — the latest replies in the chat are newer and win/);
+    assert.match(noInput[1], /등대 열쇠를 숨겼다/);
+    assert.doesNotMatch(noInput[1], /열쇠를 다시 꺼냈다/, 'a reply still visible in the chat is not repeated as a recall');
+
+    chat.push({ is_user: true, mes: '열쇠는 어디 있어?', name: '여행자' });
+    await a.updateInjection();
+    assert.equal(a.prompts.at(-1)[3], 2, 'with an input the ledger goes above the latest reply: [ledger] [reply] [input]');
+});
