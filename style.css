@@ -1611,3 +1611,9 @@ body[data-memoria-paper="dark"] :is(#memoria_settings.memoria, .memoria-library,
 #memoria_settings .memoria__conflict-side small { flex: 1 1 100%; color: var(--dim); font-size: .78em; }
 #memoria_settings .memoria__conflict-side span { flex: 1 1 auto; min-width: 0; font-size: .92em; overflow-wrap: anywhere; }
 #memoria_settings .memoria__conflict .memoria-conflict-ignore { align-self: flex-start; }
+
+/* 이야기 보기: 표·노선도가 좁은 화면에서 칸을 넓히지 않게 — 넘치는 건 그 상자 안에서만 가로로 민다 */
+.mmv-view { grid-template-columns: minmax(0, 1fr); }
+.mmv-view > *, .mmv-results { min-width: 0; max-width: 100%; }
+.mmv-results { overflow-x: auto; }
+.mmv-tools > * { min-width: 0; }
