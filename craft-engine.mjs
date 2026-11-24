@@ -360,7 +360,7 @@ export function findRivalExtensions(names, disabled = []) {
  * 떡밥(미해결 서약) 관리 — 끝난 일이 "미해결"로 남아 계속 실리지 않게
  * ------------------------------------------------------------ */
 
-export const THREAD_KINDS = Object.freeze(['keep_unresolved', 'loose_end', 'foreshadow']);
+export const THREAD_KINDS = Object.freeze(['keep_unresolved', 'loose_end', 'foreshadow', 'feeling']);
 
 /**
  * 요약 응답 끝의 "CLOSED: o2, o5" 줄을 떼어 낸다.
@@ -707,3 +707,137 @@ export function findConflicts(claims, { names = [], ignore = [], perGroup = 60 }
     }
     return out;
 }
+
+/* ------------------------------------------------------------
+ * 거절 문구 · 숨긴 원문 되돌리기 · 원문 회상 · 표기만 다른 이름 · 서약 점검 차례 · 여러 인물을 맡는 카드
+ * ------------------------------------------------------------ */
+const REFUSAL_RE = new RegExp([
+  "\\bi(?:'m| am)? (?:really |so |very )?sorry\\b",
+  "\\bi apologi[sz]e\\b",
+  "\\bi (?:can(?:'|no)?t|cannot|won'?t|will not|am unable to|am not able to|must decline to)\\b[^.\\n]{0,60}\\b(?:help|assist|continue|comply|provide|create|write|generate|summar|produce|fulfil|engage|process|do that|do this)",
+  "\\b(?:unable|not able) to (?:help|assist|continue|comply|provide|create|write|generate|summar|produce|process)",
+  "\\bas an ai\\b",
+  "\\b(?:content|usage|safety) (?:policy|policies|guidelines?)\\b",
+  "\\bi (?:must|have to) (?:decline|refuse)\\b",
+  "죄송(?:하지만|합니다|해요|하나)",
+  "(?:도와|요약해|작성해|생성해|제공해|진행해|계속해) ?(?:드릴|줄) ?수 ?(?:가 )?없",
+  "(?:요청|내용)(?:을|은|에)[^.\\n]{0,24}(?:응할|처리할|수행할|따를) ?수 ?(?:가 )?없",
+  "정책(?:상|에 따라|에 위배)",
+  "申し訳(?:ありません|ございません)",
+  "(?:お手伝い|対応|お応え|作成|要約)(?:する|は)?(?:こと(?:が|は))?できません",
+  "(?:抱歉|对不起|很遗憾)[^。\\n]{0,24}(?:无法|不能)",
+  "我(?:无法|不能)(?:协助|帮助|继续|提供|完成|生成|总结)"
+].join("|"), "i");
+function looksRefused(text, max = 1200) {
+  const s = String(text ?? "").trim();
+  return !!s && s.length <= max && REFUSAL_RE.test(s);
+}
+const BLOCK_ERR_RE = /content[ _-]?(?:filter|policy|management|moderation)|safety|blocked|prohibited|recitation|refus|flagged|moderation|responsible ai|harm_category|finish_?reason[^a-z]{0,6}(?:safety|content|prohibited)/i;
+function looksBlocked(err) {
+  const e = err;
+  if (!e || e.name === "AbortError") return false;
+  const s = String(e.message ?? e);
+  return !/\b(?:401|403|429)\b|api[ _-]?key|unauthori|rate limit|quota|timeout|network|failed to fetch/i.test(s) && BLOCK_ERR_RE.test(s);
+}
+function strayHidden(flags, coveredTo, preserve) {
+  const end = Math.min(coveredTo, flags.length - Math.max(1, Math.round(preserve) || 1) - 1), out = [];
+  for (let i = Math.max(0, end + 1); i < flags.length; i++) if (flags[i]) out.push(i);
+  return out;
+}
+const transcriptTerms = (text) => contentWords(text);
+function pickTranscript(lines, queries, { max = 1, size = 2, minScore = 0.34, minTerms = 2, names = [], mute = [] } = {}, terms) {
+  const rows = (lines || []).filter((l) => l && String(l.text || "").trim());
+  if (!rows.length || max <= 0) return [];
+  const drop = /* @__PURE__ */ new Set();
+  for (const n2 of names) for (const w of contentWords(n2)) drop.add(w);
+  const q = /* @__PURE__ */ new Set();
+  for (const text of queries) for (const w of contentWords(text)) if (!drop.has(w)) q.add(w);
+  if (q.size < minTerms) return [];
+  const of = terms || ((l) => transcriptTerms(l.text)), sets = rows.map(of);
+  const n = Math.max(1, Math.round(size)), wins = [];
+  for (let a = 0; a < rows.length; a += 1) {
+    let b = a;
+    while (b + 1 < rows.length && b - a + 1 < n && rows[b + 1].i - rows[b].i <= 2) b++;
+    const has = /* @__PURE__ */ new Set();
+    for (let k = a; k <= b; k++) for (const w of q) if (sets[k].has(w)) has.add(w);
+    if (has.size) wins.push({ a, b, has });
+  }
+  if (!wins.length) return [];
+  const df = /* @__PURE__ */ new Map();
+  for (const w of wins) for (const x of w.has) df.set(x, (df.get(x) || 0) + 1);
+  const total = Math.max(wins.length, rows.length / n), idf = (x) => Math.log(1 + total / (df.get(x) || total));
+  let mass = 0;
+  for (const x of q) if (df.has(x)) mass += idf(x);
+  const rareMax = Math.max(2, Math.ceil(total * 0.06)), low = (s) => String(s ?? "").toLowerCase(), muted = mute.map(low).filter((w) => w.length >= 2);
+  const scored = wins.map((w) => {
+    let hit = 0, rare = 0;
+    for (const x of w.has) {
+      hit += idf(x);
+      if ((df.get(x) || 0) <= rareMax) rare++;
+    }
+    return { w, rare, score: mass ? hit / mass : 0 };
+  }).filter((x) => x.rare >= 1 && x.w.has.size >= minTerms && x.score >= minScore).sort((x, y) => y.score - x.score || y.w.a - x.w.a);
+  const out = [];
+  for (const { w, score } of scored) {
+    if (out.length >= max) break;
+    const part = rows.slice(w.a, w.b + 1), from = part[0].i, to = part[part.length - 1].i;
+    if (out.some((o) => from <= o.to + 1 && to >= o.from - 1)) continue;
+    if (muted.length && muted.some((m) => part.some((l) => low(l.text).includes(m)))) continue;
+    out.push({ from, to, lines: part, score, matched: [...w.has] });
+  }
+  return out.sort((x, y) => x.from - y.from);
+}
+const RR_LEAD = ["g", "kk", "n", "d", "tt", "r", "m", "b", "pp", "s", "ss", "", "j", "jj", "ch", "k", "t", "p", "h"];
+const RR_MID = ["a", "ae", "ya", "yae", "eo", "e", "yeo", "ye", "o", "wa", "wae", "oe", "yo", "u", "wo", "we", "wi", "yu", "eu", "ui", "i"];
+const RR_TAIL = ["", "k", "k", "k", "n", "n", "n", "t", "l", "k", "m", "l", "l", "l", "p", "l", "m", "p", "p", "t", "t", "ng", "t", "t", "k", "t", "p", "t"];
+function romanize(text) {
+  let out = "";
+  for (const ch of String(text ?? "")) {
+    const c = ch.codePointAt(0) - 44032;
+    out += c < 0 || c > 11171 ? ch : RR_LEAD[Math.floor(c / 588)] + RR_MID[Math.floor(c % 588 / 28)] + RR_TAIL[c % 28];
+  }
+  return out;
+}
+const nameSkeleton = (name) => {
+  const s = romanize(String(name ?? "").toLowerCase()).replace(/[^a-z]/g, "").replace(/ng/g, "N").replace(/ch/g, "j").replace(/sh/g, "s").replace(/[wy]/g, "").replace(/[gkq]/g, "k").replace(/[dt]/g, "t").replace(/[bpf]/g, "p").replace(/[rl]/g, "l").replace(/(.)\1+/g, "$1");
+  const bones = s.replace(/[aeiou]+/g, "");
+  return bones.length >= 2 ? `${bones}:${(s.match(/[aeiou]+/g) || []).length}` : "";
+};
+const hasHangul = (s) => /[가-힣]/.test(s), plainLatin = (s) => /[a-z]/i.test(s) && !/[^\x00-\x7fÀ-ɏ]/.test(s);
+function crossScriptSame(a, b) {
+  const x = String(a ?? "").trim(), y = String(b ?? "").trim();
+  if (!x || !y || !(hasHangul(x) && plainLatin(y) || hasHangul(y) && plainLatin(x))) return false;
+  const kx = nameSkeleton(x);
+  return !!kx && kx === nameSkeleton(y);
+}
+function crossScriptPairs(names) {
+  const out = [];
+  for (let i = 0; i < names.length; i++) for (let j = i + 1; j < names.length; j++) if (crossScriptSame(names[i], names[j])) out.push([i, j]);
+  return out;
+}
+function pickPledgesToCheck(locks, { text = "", turnNow = 0, cap = 12, near = 6 } = {}) {
+  const active = (locks || []).filter((l) => l.status === "active");
+  if (active.length <= cap) return active;
+  const touched = (l) => Math.max(l.turn ?? 0, l.seenTurn ?? 0, l.latest?.turn ?? 0);
+  const hot = active.filter((l) => turnNow - touched(l) <= 8 || !!text && mentionsThread(`${l.summary || ""} ${l.latest?.text || ""}`, text)).sort((a, b) => touched(b) - touched(a)).slice(0, Math.min(near, cap));
+  const rest = active.filter((l) => !hot.includes(l)).sort((a, b) => (a.checkedTurn ?? -1) - (b.checkedTurn ?? -1) || touched(a) - touched(b)).slice(0, cap - hot.length);
+  return active.filter((l) => hot.includes(l) || rest.includes(l));
+}
+function ensembleLabel(cardName, userName, cast, soloCard) {
+  const card = String(cardName ?? "").trim(), key = (s) => String(s ?? "").toLowerCase().replace(/[\s._\-'"`]+/g, "");
+  if (!soloCard || !card) return "";
+  const others = cast.filter((c) => key(c.name) && key(c.name) !== key(userName));
+  return others.length >= 2 && !others.some((c) => [c.name, ...c.aka || []].some((n) => key(n) === key(card))) ? card : "";
+}
+export {
+  crossScriptPairs,
+  crossScriptSame,
+  ensembleLabel,
+  looksBlocked,
+  looksRefused,
+  pickPledgesToCheck,
+  pickTranscript,
+  romanize,
+  strayHidden,
+  transcriptTerms
+};

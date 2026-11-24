@@ -332,3 +332,27 @@ export function verifyIssues(issues, reply, context) {
     }
     return { kept: kept.slice(0, 6), filtered: filtered.slice(0, 6) };
 }
+
+/** 재확인의 판정을 경고에 반영한다 (근거를 확인한 경고는 "아니다"가 있어야 빠지고, 못 한 경고는 "맞다"가 있어야 산다) */
+export function applyVerdicts(kept, filtered, verdicts) {
+  const by = /* @__PURE__ */ new Map();
+  for (const v of Array.isArray(verdicts) ? verdicts : []) {
+    const n = Number(v?.n);
+    if (!v || !Number.isInteger(n) || n < 1 || by.has(n)) continue;
+    by.set(n, { keep: v.keep === true || v.keep === "true", why: String(v.why ?? "").trim().slice(0, 200) });
+  }
+  const outKept = [], outFiltered = [];
+  kept.forEach((x, i) => {
+    const v = by.get(i + 1);
+    if (v && !v.keep) outFiltered.push({ ...x, why: v.why || '재확인에서 근거가 약하다고 봤습니다' });
+    else outKept.push(x);
+  });
+  filtered.forEach((x, i) => {
+    const v = by.get(kept.length + i + 1);
+    if (v?.keep) {
+      const { why: _w, ...rest } = x;
+      outKept.push(rest);
+    } else outFiltered.push(v?.why ? { ...x, why: v.why } : x);
+  });
+  return { kept: outKept.slice(0, 6), filtered: outFiltered.slice(0, 8) };
+}

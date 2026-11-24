@@ -120,8 +120,12 @@ test('status board: scene first, ended values fade, and absent people\'s old sta
         st('아리아', 'injury', 'uninjured', 57),
         st('보라', 'whereabouts', '옛 숙소', 30, { expired: 48 }),
     );
-    const board = (await a.buildPacketWithinBudget('보라', null)).text.match(/## Status Board[\s\S]*?(?=\n## |\n\(|<\/memoria)/)[0];
-    assert.match(board, /보라\.injury = 왼팔 골절/, 'someone in the scene keeps even an old state');
+    const text = (await a.buildPacketWithinBudget('보라', null)).text;
+    const board = text.match(/## Status Board[\s\S]*?(?=\n## |\n\(|<\/memoria)/)[0];
+    // 장면에 있는 사람의 상태는 사람마다 한 줄로 따로 묶인다
+    const now = text.match(/## People in the Scene Now[\s\S]*?(?=\n## |\n\(|<\/memoria)/)[0];
+    assert.match(now, /- 보라: .*injured 왼팔 골절/, 'someone in the scene keeps even an old state');
+    assert.doesNotMatch(board, /보라\./, 'and it is not repeated on the board');
     assert.doesNotMatch(board, /민호\.injury/, 'an absent person\'s old state stays off the page');
     assert.match(board, /민호\.goal/, 'a recent change still shows');
     assert.doesNotMatch(board, /빈손/, 'an ended value is not repeated forever');
