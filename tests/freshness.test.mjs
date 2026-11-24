@@ -223,8 +223,8 @@ test('an unreadable batch is split and refiled, so one bad scene does not fail t
         const body = prompt[0].content;
         if (body.includes('문제 장면')) return '죄송하지만 이 내용은 도와드릴 수 없습니다.';
         const n = (body.match(/<exchange n=/g) || []).length;
-        return n ? JSON.stringify({ digests: Array.from({ length: n }, (_, i) => ({ n: i + 1, digest: `${i + 1}번째 요약.` })) })
-            : JSON.stringify({ digest: '한 턴 요약.', memories: [] });
+        return n ? JSON.stringify({ digests: Array.from({ length: n }, (_, i) => ({ n: i + 1, digest: `${i + 1}번째 요약.`, day: 1 })) })
+            : JSON.stringify({ digest: '한 턴 요약.', clock: { day: 1 }, memories: [] });
     };
     a.run('setTimeout = (fn) => { fn(); return 0; }'); // 재시도 사이의 기다림을 건너뛴다
     assert.equal(await a.run('commitTurns')([1, 3, 5, 7]), true);

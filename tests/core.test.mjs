@@ -222,7 +222,7 @@ test('a recorded turn files bonds, voice samples and scene stamp end to end, and
         calls++;
         assert.match(prompt[0].content, /The cast shelf is empty/);
         return JSON.stringify({
-            digest: '아리아가 망설이다 여행자에게 창고 열쇠를 맡겼다.', weight: 0.8, time_passed: '0',
+            digest: '아리아가 망설이다 여행자에게 창고 열쇠를 맡겼다.', weight: 0.8, time_passed: '0', clock: { day: 1 },
             memories: [{ kind: 'event', summary: '아리아가 여행자에게 창고 열쇠를 맡겼다', importance: 0.7, entities: ['아리아', '여행자'], visibility: 'public' }],
             status: [{ entity: 'scene', slot: 'location', value: '등대 현관' }, { entity: 'scene', slot: 'date', value: '3일째' }, { entity: 'scene', slot: 'present', value: '아리아, 여행자' }],
             bonds: [{ from: '아리아', to: '여행자', stage: '마지못한 신뢰', basis: '창고 열쇠를 맡겼다', calls: '손님' }],
@@ -424,7 +424,7 @@ test('batched recording: several exchanges cost one librarian call, yet every tu
     a.context.generateRaw = async ({ prompt, systemPrompt }) => {
         calls++; system = systemPrompt; body = prompt[0].content;
         return JSON.stringify({
-            digests: [1, 2, 3, 4].map(n => ({ n, digest: `${n}번째 교환의 요약.`, weight: n === 2 ? 0.9 : 0.4, time_passed: n === 3 ? '1d' : '0' })),
+            digests: [1, 2, 3, 4].map(n => ({ n, digest: `${n}번째 교환의 요약.`, weight: n === 2 ? 0.9 : 0.4, time_passed: n === 3 ? '1d' : '0', day: n >= 3 ? 2 : 1 })),
             memories: [
                 { n: 2, kind: 'event', summary: '아리아가 여행자에게 창고 열쇠를 맡겼다', importance: 0.8, entities: ['아리아', '여행자'] },
                 { n: 4, kind: 'secret', summary: '아리아가 편지를 숨겼다', importance: 0.6, visibility: 'secret', owner: '아리아' },
@@ -465,7 +465,7 @@ test('batched recording: an unparsable or changed run is not half-filed', async 
     const a = await app();
     const chat = a.context.chat;
     for (let i = 0; i < 2; i++) chat.push({ is_user: true, mes: '행동', name: '여행자' }, { is_user: false, mes: `아리아가 ${i}번째로 대답했다. 바람이 불었고 파도 소리가 들렸다.`, name: '아리아' });
-    a.context.generateRaw = async () => { chat[3].mes = '아리아의 대답이 통째로 고쳐졌다. 전혀 다른 장면이 되었다.'; return JSON.stringify({ digests: [{ n: 1, digest: '첫 요약.' }, { n: 2, digest: '둘째 요약.' }] }); };
+    a.context.generateRaw = async () => { chat[3].mes = '아리아의 대답이 통째로 고쳐졌다. 전혀 다른 장면이 되었다.'; return JSON.stringify({ digests: [{ n: 1, digest: '첫 요약.', day: 1 }, { n: 2, digest: '둘째 요약.', day: 1 }] }); };
     assert.equal(await a.run('commitTurns')([1, 3]), false);
     assert.equal(a.getStore().turns.length, 0, 'a run that changed underfoot is dropped whole and re-batched later');
     assert.equal(a.getStore().memories.length, 0);
