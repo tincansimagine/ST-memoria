@@ -43,6 +43,8 @@ import { showArchiveLibrary } from './library-ui.mjs';
 import { withDeadline, parsePhraseList, stripPhrases, hasPhrase, findRepeatedPhrases, pickBundleValues, resolveBundleName, switchBundle, saveBundle, deleteBundle, renameBundle, exportBundle, parseBundleFile, diffStableEntries, shouldRefreeze, createActivityLog, findRivalExtensions, splitClosedLine, sleepStaleThreads, pickPledges, stripOpenLines, THREAD_KINDS, recallCooldown, pushRecallHistory, isEndedValue, ungroundedFigures, roughTokens, noteUsage, usageTotals, groundedIn, soundsHedged, noteThreadSightings, threadTouched, rareQueryWords, findConflicts, looksRefused, looksBlocked, strayHidden, pickTranscript, transcriptTerms, crossScriptPairs, crossScriptSame, pickPledgesToCheck, ensembleLabel } from './craft-engine.mjs';
 import { isOocText, looksOocReply, attributeQuote, addressTermsIn, tallyAddress, pickAddressLines, personNowLine } from './stage-engine.mjs';
 import { parseStoryDate, storyDatesOf, isIsoDate, trackerText, trackerLineOf, pickBeats, beatLines, veilLeaks } from './calendar-engine.mjs';
+import { peopleList, matchPerson, personPage, nameSuggestions, planMerge, pairKey, WIPE_KINDS, wipeCounts, NOW_ORDER } from './people-engine.mjs';
+import { readerSystem, readerUser, readerKey, needsReading, packBatches, replyBudget, readReply, trimItems, READER_LANGS } from './reader-engine.mjs';
 import { KNOW_DIRECTIVE, LEARN_DIRECTIVE, BEATS_DIRECTIVE, FEELING_DIRECTIVE, THREAD_KIND_NOTE, VOICE_LINES, PLAN_HEAD, VEIL_PROMPT } from './directives.mjs';
 import { findStatusBars, statusOneLine, isPauseDirective, isPauseMessage, buildTimelineRows, filterTimelineRows, timelineMarkdown, timelineCsv, layoutTimelineGraph, verifyIssues, applyVerdicts } from './scene-engine.mjs';
 import { heroHtml, pulseSvg, flowHtml, railHtml, tableHtml, bondMapSvg, bondCardsHtml, statusListHtml } from './story-view.mjs';
@@ -339,6 +341,7 @@ const DEFAULT_SETTINGS = Object.freeze({
     uiPaper: 'auto',          // 서고 지면 — auto(실리태번 테마의 밝기를 따름) | light | dark
     recallCooldown: true,     // 회상 쉬어가기 — 앞선 답변들에 연달아 실린 기억은 순서를 미룬다 (직접 꺼내면 그대로 나온다)
     recallQuotes: true,       // 회상에 옛 원문 대사 인용을 싣는다 (옛 말투가 돌아오면 끈다)
+    readerLang: 'ko',         // 읽는 말로 보기의 말
     rawRecall: 'auto',        // 원문 회상 — 옛일을 되짚는 말일 때만 숨긴 옛 대화에서 그 대목을 한 곳 찾아 싣는다 (모델 호출 없음. 'off' = 끔)
     sceneCards: 1,            // 떠올린 옛 구간을 장면 카드(순서대로의 일 · 원문 대사)로 펼치는 수 — 기록 호출에 함께 받아 두므로 호출은 늘지 않는다 (0 = 끔)
     mindLines: 2,             // 장면 속 인물마다 마음에 둔 것(속마음 기억)을 이 줄 수까지 따로 싣는다 (0 = 끔)
@@ -770,6 +773,7 @@ function hadCheck(mes) { return !!mes?.extra && (!!mes.extra.memoria_check || !!
 function decorateCheck(mesId) {
     const $mes = $(`#chat .mes[mesid="${Number(mesId)}"]`);
     if (!$mes.length) return;
+    decorateMessageButtons($mes, Number(mesId));
     $mes.find('.memoria-check-badge').remove();
     const c = checkOf(chat[mesId]);
     if (!c || (!c.issues?.length && !c.filtered?.length)) return;
@@ -7691,6 +7695,7 @@ function renderMemoriesPanel() {
                     <span class="memoria__mem-actions">
                         <button type="button" class="memoria-source memoria__source-button" data-id="${escapeHtml(m.id)}" title="대화 원문 확인" aria-label="대화 원문 확인"><i class="fa-solid fa-book-open"></i></button>
                         ${m.retired ? '' : '<i class="fa-solid fa-hourglass-end memoria-mem-retire" title="지나간 일로 물리기 — 평소 회상에서 빼고, 이 일을 직접 꺼낼 때만 나오게 합니다"></i>'}
+                        ${normVisibility(m.visibility) !== 'public' ? `<i class="fa-solid fa-user-group memoria-mem-knowers" title="아는 사람·짐작하는 사람 고치기${m.knowLock ? ' (손으로 고침 — 사서가 덮어쓰지 않음)' : ''}"></i>` : ''}
                         <i class="fa-solid fa-thumbtack memoria-mem-pin" title="${m.pinned ? '고정 해제' : '예산 안에서 우선 주입(고정)'}"></i>
                         <i class="fa-solid ${m.disabled ? 'fa-eye-slash' : 'fa-eye'} memoria-mem-toggle" title="${m.disabled ? '활성화' : '비활성화'}"></i>
                         <i class="fa-solid fa-pen memoria-mem-edit" title="편집"></i>
@@ -7698,7 +7703,8 @@ function renderMemoriesPanel() {
                     </span>
                 </div>
                 <div class="memoria__mem-summary">${escapeHtml(m.summary)}</div>
-                ${m.excerpt ? `<div class="memoria__mem-excerpt">"${escapeHtml(m.excerpt)}"</div>` : ''}
+                ${m.excerpt ? `<div class="memoria__mem-excerpt">${m.by ? `${escapeHtml(m.by)}${m.to ? ` → ${escapeHtml(m.to)}` : ''}: ` : ''}"${escapeHtml(m.excerpt)}"</div>` : ''}
+                ${memoryWhoHtml(m)}
                 ${(m.entities || []).length || (m.tags || []).length ? `<div class="memoria__mem-meta">${(m.entities || []).map(e => `<span class="memoria__chip">@${escapeHtml(e)}</span>`).join('')}${(m.tags || []).map(t => `<span class="memoria__chip memoria__chip--tag">#${escapeHtml(t)}</span>`).join('')}</div>` : ''}
             </div>
         `);
@@ -8059,7 +8065,8 @@ function renderStatePanel() {
             : '';
         $locks.append($(`
             <div class="memoria__row${l.status === 'resolved' ? ' is-resolved' : ''}${l.status === 'dormant' ? ' is-dormant' : ''}" data-id="${l.id}">
-                <span class="memoria__row-text"><span class="memoria__badge memoria__badge--lock">${LOCK_LABELS[l.kind] || l.kind}</span>${l.status === 'dormant' ? ' <span class="memoria__badge" title="오래 진전이 없어 주입에서 뺐습니다. 다시 언급되면 깨어납니다">휴면</span>' : ''} ${escapeHtml(l.summary)} <small>(P${l.priority} · t${l.turnIndex})</small>${l.latest?.text && l.status !== 'resolved' ? ` <small class="memoria__lock-now">지금: ${escapeHtml(l.latest.text)}</small>` : ''}${l.resolution && l.status === 'resolved' ? ` <small>— ${escapeHtml(l.resolution)}</small>` : ''}${suggest}</span>
+                <span class="memoria__row-text"><span class="memoria__badge memoria__badge--lock">${LOCK_LABELS[l.kind] || l.kind}</span>${l.status === 'dormant' ? ' <span class="memoria__badge" title="오래 진전이 없어 주입에서 뺐습니다. 다시 언급되면 깨어납니다">휴면</span>' : ''} ${escapeHtml(l.summary)} <small>(P${l.priority} · t${l.turnIndex})</small>${l.latest?.text && l.status !== 'resolved' ? ` <small class="memoria__lock-now">지금: ${escapeHtml(l.latest.text)}</small>` : ''}${l.resolution && l.status === 'resolved' ? ` <small>— ${escapeHtml(l.resolution)}</small>` : ''}${lockExtraHtml(store, l)}${suggest}</span>
+                ${normLockKind(l.kind) === 'author_plan' ? '<i class="fa-solid fa-mask memoria-lock-veil" title="가린 줄 고치기 — AI에게는 이 줄만 갑니다"></i>' : ''}
                 <i class="fa-solid ${l.status === 'active' ? 'fa-check' : 'fa-rotate-left'} memoria-lock-toggle" title="${l.status === 'active' ? '해결됨으로 표시' : '다시 활성화'}"></i>
                 <i class="fa-solid fa-trash memoria-lock-delete" title="삭제"></i>
             </div>
@@ -8466,6 +8473,7 @@ function renderPromptsPanel() {
 }
 
 function renderAllPanels() {
+    renderTrackersPanel();
     updateStatusUI();
     refreshPacketPreview();
     renderMemoriesPanel();
@@ -9340,6 +9348,7 @@ function bindUI() {
         persistStore(); renderItemsPanel(); updateInjection();
         toastr.success(`아이템 "${cleanStr(name, 40)}"을(를) 추가했습니다.`, 'Memoria');
     });
+    bindExtraUI();
     $('#memoria_lock_add').on('click', async function () {
         const ctx = getContext();
         const $dlg = $(`
@@ -9353,9 +9362,14 @@ function bindUI() {
                     <option value="knowledge_gap">정보 격차 — 특정 인물이 아직 몰라야 하는 것</option>
                     <option value="consent">동의 경계 — 넘지 말아야 할 선</option>
                     <option value="world_limit">세계 제약 — 세계관의 불변 규칙</option>
+                    <option value="foreshadow">복선 — 때가 되면 회수할 장치</option>
+                    <option value="feeling">풀리지 않은 감정 — 두 사람 사이에 남은 앙금</option>
+                    <option value="author_plan">작가 계획 — 인물은 모르는 답 (가린 줄만 실림)</option>
                 </select>
                 <label>내용</label>
                 <textarea class="text_pole memoria__lock-add-summary" rows="3" placeholder="예: 은우는 도윤이 편지를 읽었다는 사실을 아직 모른다"></textarea>
+                <label class="memoria__lock-add-veil-label">가린 줄 <small>(작가 계획일 때 — AI에게는 이 줄만 갑니다. 비우면 「가리기」로 받습니다)</small></label>
+                <input type="text" class="text_pole memoria__lock-add-veil" placeholder="예: 편지를 보낸 사람이 누구인지는 아직 밝히지 않는다">
                 <label>우선순위</label>
                 <select class="text_pole memoria__lock-add-priority">
                     <option value="1">P1 — 절대 어기면 안 됨</option>
@@ -9368,8 +9382,12 @@ function bindUI() {
         const summary = cleanStr($dlg.find('.memoria__lock-add-summary').val(), 200);
         if (!summary) { toastr.warning('내용이 비어 있습니다.', 'Memoria'); return; }
         const store = getStore();
+        const addKind = normLockKind(String($dlg.find('.memoria__lock-add-kind').val()));
+        const veil = cleanStr($dlg.find('.memoria__lock-add-veil').val(), 200);
+        if (addKind === 'author_plan' && veil && veilLeaks(veil, summary, castNames(store))) { toastr.warning('가린 줄이 계획의 답을 흘립니다. 다른 말로 적어 주세요.', 'Memoria'); return; }
         upsertLock(store, {
-            kind: normLockKind(String($dlg.find('.memoria__lock-add-kind').val())),
+            ...(addKind === 'author_plan' && veil ? { veil } : {}),
+            kind: addKind,
             summary,
             status: 'active',
             priority: Number($dlg.find('.memoria__lock-add-priority').val()) || 2,
@@ -10183,6 +10201,16 @@ function registerCommands() {
         }));
 
         SlashCommandParser.addCommandObject(SlashCommand.fromProps({
+            name: 'memoria-cut',
+            helpString: '#N 메시지부터의 기록을 걷어 내고 그 앞 모습으로 되돌립니다 (메시지는 그대로). 예: /memoria-cut 120',
+            unnamedArgumentList: [SlashCommandArgument.fromProps({ description: '메시지 번호', typeList: [ARGUMENT_TYPE.NUMBER], isRequired: true })],
+            callback: async (_args, value) => {
+                const n = Number(String(value || '').trim().replace(/^#/, ''));
+                if (!Number.isInteger(n) || n < 0) return '메시지 번호를 적어 주세요. 예: /memoria-cut 120';
+                return String(await cutRecordsAfter(n));
+            },
+        }));
+        SlashCommandParser.addCommandObject(SlashCommand.fromProps({
             name: 'memoria-reconcile',
             helpString: '저장된 턴 기록을 현재 채팅 메시지와 다시 맞춥니다 (이미 지워진 기록은 복구하지 않음)',
             callback: async () => { await repairChatSync(); return '채팅과 기록 동기화를 실행했습니다.'; },
@@ -10217,6 +10245,568 @@ function registerCommands() {
     } catch (e) {
         console.debug(`[${MODULE_NAME}] 매크로 등록 실패:`, e);
     }
+}
+
+/* ============================================================
+ * 인물별 보기 · 이름 정리 · 날 세기 · 골라 지우기 · 회상 시험 · 읽는 말로 보기 · 메시지 별표
+ * ============================================================ */
+
+const castNames = (store) => store.characters.flatMap(c => [c.name, ...(c.aliases || [])]).filter(Boolean);
+const popupCtx = () => getContext();
+async function showPopup(html, opts = {}) {
+    const ctx = popupCtx();
+    return ctx.callGenericPopup(html, opts.type ?? ctx.POPUP_TYPE.TEXT, '', { wide: true, allowVerticalScrolling: true, okButton: '닫기', ...opts });
+}
+const esc = (v) => escapeHtml(String(v ?? ''));
+
+/** 사람 모아 보기 함수들이 읽는 꼴로 서고를 비춘다 (읽기 전용 — 고치지 않는다) */
+function peopleMem(store) {
+    return {
+        cast: store.characters.map(c => ({ ...c, aka: c.aliases || [], updated: c.updatedTurn, first: c.firstTurn })),
+        status: store.entityStates.map(s => ({ ...s, turn: s.turnIndex })),
+        bonds: (store.bonds || []).map(b => ({ ...b, log: (b.log || []).map(x => ({ ...x })) })),
+        memories: store.memories.map(m => ({ ...m, turn: m.turnIndex })),
+        pledges: store.locks.map(l => ({ ...l, turn: l.turnIndex })),
+        items: store.items.map(i => ({ ...i, turn: i.firstTurn, updated: i.updatedTurn })),
+        turns: [...store.turns].sort((a, b) => a.turnIndex - b.turnIndex),
+        nameApart: store.nameApart || [],
+    };
+}
+
+/** 한 사람에 얽힌 기록 (인물별 화면용) */
+function personBase(store, mem, name) {
+    const canon = canonEntityName(store, name);
+    const card = mem.cast.find(c => entityKey(c.name) === entityKey(canon)) || null;
+    const keys = new Set([canon, ...(card?.aka || [])].map(entityKey));
+    const is = (n) => !!n && keys.has(entityKey(n));
+    const any = (xs) => (xs || []).some(is);
+    const live = (m) => !m.disabled;
+    const hay = [canon, ...(card?.aka || [])].map(n => String(n).toLowerCase()).filter(n => n.length >= 2);
+    const today = storyToday(store);
+    return {
+        name: canon, card,
+        states: mem.status.filter(s => is(s.entity) && s.expired == null),
+        bondsOut: mem.bonds.filter(b => !b.disabled && is(b.from)), bondsIn: mem.bonds.filter(b => !b.disabled && is(b.to)),
+        memories: mem.memories.filter(m => live(m) && (m.visibility || 'public') === 'public' && !(m.tags || []).includes('episode_raw') && any(m.entities)),
+        own: mem.memories.filter(m => live(m) && (m.visibility || 'public') !== 'public' && is(m.owner)),
+        knows: mem.memories.filter(m => live(m) && (m.visibility || 'public') !== 'public' && !is(m.owner) && any(m.knowers)),
+        suspects: mem.memories.filter(m => live(m) && any(m.guessers)),
+        dim: mem.memories.filter(m => live(m) && (m.dim || []).some(d => is(d.who))),
+        pledges: mem.pledges.filter(p => p.status !== 'resolved' && (is(p.owner) || hay.some(n => `${p.summary} ${p.latest?.text || ''}`.toLowerCase().includes(n)))),
+        trackers: (store.trackers || []).filter(t => any(t.people)).map(tracker => ({ tracker, text: trackerText(tracker, today) })),
+    };
+}
+
+const NOW_LABEL = { location: '위치', activity: '하는 일', outfit: '옷차림', injury: '몸', mood: '기분', other: '그 밖' };
+
+async function openPeople() {
+    const store = getStore();
+    const mem = peopleMem(store);
+    const rows = peopleList(mem);
+    if (!rows.length) return toastr.info('아직 기록된 인물이 없습니다.', 'Memoria');
+    const $box = $(`<div class="memoria-pop">
+        <h3>인물별</h3>
+        <input type="search" class="text_pole memoria-pop__search" placeholder="이름·역할로 찾기">
+        <div class="memoria-pop__list"></div>
+    </div>`);
+    const draw = () => {
+        const q = String($box.find('.memoria-pop__search').val() || '');
+        const $list = $box.find('.memoria-pop__list').empty();
+        for (const p of rows.filter(r => matchPerson(r, q))) {
+            const meta = [p.here ? '장면에 있음' : '', p.card ? [p.card.role, p.card.occupation].filter(Boolean).join(' · ') : '카드 없음', p.memories ? `기억 ${p.memories}` : '', p.bonds ? `관계 ${p.bonds}` : ''].filter(Boolean).join(' · ');
+            $list.append($(`<button type="button" class="memoria-pop__person${p.here ? ' is-here' : ''}"><b>${esc(p.name)}</b><small>${esc(meta)}</small></button>`).on('click', () => openPersonPage(p.name)));
+        }
+    };
+    // 한글 입력이 끊기지 않게 목록만 다시 그린다
+    $box.find('.memoria-pop__search').on('input', draw);
+    draw();
+    await showPopup($box);
+}
+
+async function openPersonPage(name) {
+    const store = getStore();
+    const mem = peopleMem(store);
+    const page = personPage(mem, personBase(store, mem, name));
+    const b = page.base;
+    const list = (items, fn) => items.length ? `<ul>${items.map(x => `<li>${fn(x)}</li>`).join('')}</ul>` : '';
+    const sec = (title, body) => body ? `<section><h4>${title}</h4>${body}</section>` : '';
+    const memLine = (m) => `${esc(m.summary)}${m.turn > 0 ? ` <small>t${m.turn}</small>` : ''}`;
+    const html = `<div class="memoria-pop memoria-pop--person">
+        <h3>${esc(b.name)}${page.here ? ' <small>장면에 있음</small>' : ''}</h3>
+        ${b.card ? `<p class="memoria-pop__meta">${esc([b.card.role, b.card.age, b.card.occupation].filter(Boolean).join(' · '))}${page.names.length > 1 ? ` · 다른 이름: ${esc(page.names.slice(1).join(', '))}` : ''}</p>${b.card.core ? `<p>${esc(b.card.core)}</p>` : ''}` : '<p class="memoria-pop__meta">카드가 없는 이름입니다. 이름 정리에서 다른 카드와 합칠 수 있어요.</p>'}
+        ${sec('지금 모습', list(page.now, x => `<b>${NOW_LABEL[x.kind]}</b> ${esc(x.row.slot)} = ${esc(x.row.value)}${x.row.claim === 'belief' ? ' <small>(믿음)</small>' : ''}`))}
+        ${sec('관계', list(page.bonds, x => `${x.dir === 'out' ? '→' : '←'} <b>${esc(x.other)}</b>: ${esc(x.step.stage)}${x.step.calls ? ` <small>부르는 말: ${esc(x.step.calls)}</small>` : ''}`))}
+        ${sec('속마음·비밀', list(b.own, memLine))}
+        ${sec('남의 비밀 가운데 아는 것', list(b.knows, memLine))}
+        ${sec('짐작만 하는 것', list(b.suspects, memLine))}
+        ${sec('흐릿하게 기억하는 일', list(b.dim, m => `${memLine(m)}${page.dimOf.get(m.id)?.level === 'none' ? ' <small>기억 없음</small>' : ' <small>흐릿함</small>'}`))}
+        ${sec('그 자리에 없었던 일', list(page.absent.slice(0, 12), memLine))}
+        ${sec('모르는 일', list(page.unaware.slice(0, 12), memLine))}
+        ${sec('약속·떡밥', list(b.pledges, p => `<small>${esc(LOCK_LABELS[normLockKind(p.kind)] || p.kind)}</small> ${esc(p.summary)}${p.latest?.text ? ` <small>지금: ${esc(p.latest.text)}</small>` : ''}`))}
+        ${sec('날 세기', list(b.trackers, x => `${esc(x.tracker.label)} ${x.text ? `<small>${esc(x.text.replace(/^[^:]*:\s*/, ''))}</small>` : ''}`))}
+        ${sec('가진 물건', list(page.items, it => `${esc(it.name)}${it.status ? ` <small>${esc(it.status)}</small>` : ''}`))}
+        ${sec('함께한 장면', list(page.scenes, memLine))}
+        ${page.resolved.length ? `<details><summary>끝난 약속 ${page.resolved.length}개</summary>${list(page.resolved, p => esc(p.summary))}</details>` : ''}
+    </div>`;
+    await showPopup(html);
+}
+
+async function openNameTidy() {
+    const store = getStore();
+    const list = nameSuggestions(peopleMem(store), crossScriptSame);
+    const why = { aka: '다른 이름이 겹침', sound: '한글·로마자 표기만 다름', part: '한 이름이 다른 이름에 들어 있음' };
+    const $box = $(`<div class="memoria-pop">
+        <h3>이름 정리</h3>
+        <p class="memoria-pop__meta">같은 사람일 수 있는 이름들입니다. 저절로 합치지 않습니다 — 고르면 합치고, 「다른 사람」을 누르면 다시 권하지 않습니다.</p>
+        <div class="memoria-pop__list"></div>
+    </div>`);
+    const $list = $box.find('.memoria-pop__list');
+    if (!list.length) $list.append('<p class="memoria-pop__meta">합칠 만한 이름이 없습니다.</p>');
+    for (const s of list) {
+        const $row = $(`<div class="memoria-pop__pair">
+            <span><b>${esc(s.a)}</b> · <b>${esc(s.b)}</b> <small>${why[s.why]}</small></span>
+            <span class="memoria-pop__acts">
+                <button type="button" class="menu_button" data-keep="a" title="${esc(s.a)}(으)로 합칩니다">${esc(cleanStr(s.a, 10))}로</button>
+                <button type="button" class="menu_button" data-keep="b" title="${esc(s.b)}(으)로 합칩니다">${esc(cleanStr(s.b, 10))}로</button>
+                <button type="button" class="menu_button" data-apart="1" title="다른 사람입니다 — 다시 권하지 않습니다">다른 사람</button>
+            </span>
+        </div>`);
+        $row.on('click', 'button', function () {
+            const st = getStore();
+            if ($(this).data('apart')) {
+                st.nameApart = [...new Set([...(st.nameApart || []), s.key])].slice(-200);
+            } else {
+                const rep = $(this).data('keep') === 'a' ? s.a : s.b;
+                checkpointBeforeChange(st, `이름 정리: ${s.a} · ${s.b}`);
+                mergeNames(st, [s.a, s.b], rep);
+                toastr.success(`"${rep}"(으)로 합쳤습니다.`, 'Memoria');
+            }
+            persistStore();
+            renderStatePanel(); renderMemoriesPanel(); updateInjection({ quiet: true });
+            $row.remove();
+        });
+        $list.append($row);
+    }
+    await showPopup($box);
+}
+
+/** 고른 이름들을 대표 이름 하나로 — 대표 이름을 가진 카드가 남고, 나머지 카드는 접고, 카드 없는 이름은 다른 이름으로 단다 */
+function mergeNames(store, names, rep) {
+    const mem = peopleMem(store);
+    const plan = planMerge(mem, names, rep);
+    let keep = plan.keep ? store.characters.find(c => c.id === plan.keep.id) : null;
+    if (!keep) {
+        keep = { id: uuidv4(), name: rep, aliases: [], traits: [], relationships: [], firstTurn: store.turnCounter, updatedTurn: store.turnCounter, manual: true };
+        store.characters.push(keep);
+    } else if (plan.rename) {
+        keep.aliases = [...new Set([...(keep.aliases || []), keep.name])].filter(a => entityKey(a) !== entityKey(rep));
+        keep.name = rep;
+    }
+    for (const c of plan.cards) {
+        const absorb = store.characters.find(x => x.id === c.id);
+        if (absorb && absorb !== keep) mergeCharacterCards(store, keep, absorb);
+    }
+    keep.aliases = [...new Set([...(keep.aliases || []), ...plan.aliases])].filter(a => a && entityKey(a) !== entityKey(keep.name)).slice(0, 12);
+    foldEntityAliases(store);
+}
+
+/* ---------- 날 세기 ---------- */
+const TRACKER_KIND = { count: '며칠째', until: 'D-day', cycle: '주기' };
+function renderTrackersPanel() {
+    const $list = $('#memoria_trackers_list');
+    if (!$list.length) return;
+    const store = getStore();
+    const today = storyToday(store);
+    $('#memoria_tracker_today').text(today ? `지금 작중 날짜: ${today}` : '작중 날짜를 아직 모릅니다. 상태창에 달력 날짜가 나오거나 「날짜」로 정해 주면 셉니다.');
+    $list.empty();
+    if (!(store.trackers || []).length) { $list.append('<div class="memoria__empty">날 세기가 없습니다.</div>'); return; }
+    for (const t of store.trackers) {
+        const text = trackerText(t, today).replace(/^[^:]*:\s*/, '');
+        $list.append($(`<div class="memoria__row${t.disabled ? ' is-dormant' : ''}" data-id="${esc(t.id)}">
+            <span class="memoria__row-text"><span class="memoria__badge">${TRACKER_KIND[t.type]}</span> <b>${esc(t.label)}</b>${(t.people || []).length ? ` <small>${esc(t.people.join(' & '))}</small>` : ''} ${text ? `<small class="memoria__lock-now">${esc(text)}</small>` : ''}</span>
+            <i class="fa-solid fa-pen memoria-tracker-edit" title="고치기"></i>
+            <i class="fa-solid fa-trash memoria-tracker-delete" title="삭제"></i>
+        </div>`));
+    }
+}
+
+function cleanTracker(input, base) {
+    const t = { ...(base || {}), ...input };
+    const type = ['count', 'until', 'cycle'].includes(t.type) ? t.type : 'count';
+    const label = cleanStr(t.label, 40);
+    if (!label) return null;
+    const out = { id: base?.id || 'k' + uuidv4().slice(0, 8), label, type, people: [...new Set((t.people || []).map(p => cleanStr(p, 60)).filter(Boolean))].slice(0, 2), inject: ['always', 'never'].includes(t.inject) ? t.inject : 'present' };
+    if (t.disabled) out.disabled = true;
+    if (type === 'count') { if (!isIsoDate(t.start)) return null; out.start = t.start; out.firstDay = t.firstDay === 0 ? 0 : 1; }
+    if (type === 'until') { if (!isIsoDate(t.target)) return null; out.target = t.target; }
+    if (type === 'cycle') {
+        const every = Math.round(Number(t.every) || 0);
+        if (!(every >= 1 && every <= 3660)) return null;
+        out.every = every;
+        out.length = Math.max(1, Math.min(every, Math.round(Number(t.length) || 1)));
+        out.starts = [...new Set((t.starts || []).filter(isIsoDate))].sort().slice(-12);
+    }
+    return out;
+}
+
+async function editTracker(id) {
+    const store = getStore();
+    const cur = (store.trackers || []).find(t => t.id === id);
+    const today = storyToday(store) || '';
+    const $dlg = $(`<div class="memoria-pop memoria-pop--form">
+        <h3>${cur ? '날 세기 고치기' : '날 세기 추가'}</h3>
+        <label>이름 <input type="text" class="text_pole" name="label" placeholder="예: 사귄 지"></label>
+        <label>종류 <select class="text_pole" name="type"><option value="count">며칠째 (시작한 날부터)</option><option value="until">D-day (그날까지)</option><option value="cycle">주기 (며칠마다)</option></select></label>
+        <label data-for="count">시작한 날 <input type="date" class="text_pole" name="start"></label>
+        <label data-for="until">그날 <input type="date" class="text_pole" name="target"></label>
+        <label data-for="cycle">마지막으로 시작한 날 <input type="date" class="text_pole" name="cstart"></label>
+        <label data-for="cycle">며칠마다 <input type="number" class="text_pole" name="every" min="1" max="3660"></label>
+        <label data-for="cycle">며칠 동안 <input type="number" class="text_pole" name="length" min="1"></label>
+        <label>누구의 일 <input type="text" class="text_pole" name="people" placeholder="이름, 쉼표로 둘까지 (비우면 모두)"></label>
+        <label>싣기 <select class="text_pole" name="inject"><option value="present">그 사람이 장면에 있을 때</option><option value="always">늘</option><option value="never">싣지 않음</option></select></label>
+    </div>`);
+    const f = (n) => $dlg.find(`[name="${n}"]`);
+    f('label').val(cur?.label || ''); f('type').val(cur?.type || 'count');
+    f('start').val(cur?.start || today); f('target').val(cur?.target || ''); f('cstart').val(cur?.starts?.slice(-1)[0] || today);
+    f('every').val(cur?.every || 28); f('length').val(cur?.length || 1); f('people').val((cur?.people || []).join(', ')); f('inject').val(cur?.inject || 'present');
+    const sync = () => $dlg.find('[data-for]').each(function () { $(this).toggle($(this).data('for') === f('type').val()); });
+    f('type').on('change', sync); sync();
+    const ok = await showPopup($dlg, { type: popupCtx().POPUP_TYPE.CONFIRM, okButton: '저장', cancelButton: '취소' });
+    if (!ok) return;
+    const type = String(f('type').val());
+    const next = cleanTracker({
+        label: f('label').val(), type, start: f('start').val(), target: f('target').val(), every: f('every').val(), length: f('length').val(),
+        starts: type === 'cycle' ? [...(cur?.starts || []), String(f('cstart').val() || '')] : cur?.starts,
+        people: String(f('people').val() || '').split(/[,，]/).map(s => canonEntityName(store, s.trim())).filter(Boolean),
+        inject: String(f('inject').val()),
+    }, cur);
+    if (!next) return toastr.warning('이름과 날짜를 확인해 주세요.', 'Memoria');
+    store.trackers = cur ? store.trackers.map(t => (t.id === cur.id ? next : t)) : [...(store.trackers || []), next].slice(-30);
+    persistStore(); renderTrackersPanel(); updateInjection({ quiet: true });
+}
+
+async function fixStoryDate() {
+    const store = getStore();
+    if (!store.turns.length) return toastr.info('아직 기록된 턴이 없습니다.', 'Memoria');
+    const ctx = popupCtx();
+    const raw = await ctx.callGenericPopup(`날짜를 고칠 메시지 번호와 날짜를 적어 주세요. 그 메시지부터 그 날짜로 이어집니다.\n예: 120 2024-10-18 (날짜를 비우면 고친 것을 지웁니다)`, ctx.POPUP_TYPE.INPUT, `${chat.length - 1} ${storyToday(store) || ''}`.trim(), { rows: 1 });
+    if (!raw || typeof raw !== 'string') return;
+    const [no, date = ''] = raw.trim().split(/\s+/);
+    const n = Number(String(no).replace(/^#/, ''));
+    if (!Number.isInteger(n) || n < 0) return toastr.warning('메시지 번호를 확인해 주세요.', 'Memoria');
+    if (date && !isIsoDate(date)) return toastr.warning('날짜는 2024-10-18 꼴로 적어 주세요.', 'Memoria');
+    const turn = [...store.turns].sort((a, b) => a.mesId - b.mesId).find(t => t.mesId >= n);
+    if (!turn) return toastr.warning('그 메시지 뒤로 기록된 턴이 없습니다.', 'Memoria');
+    const rest = (store.dateFix || []).filter(x => x.msgId !== turn.id);
+    store.dateFix = date ? [...rest, { msgId: turn.id, date }].slice(-40) : rest;
+    if (!store.dateFix.length) delete store.dateFix;
+    persistStore(); renderTrackersPanel(); updateInjection({ quiet: true });
+    toastr.success(date ? `#${turn.mesId}부터 ${date}로 셉니다.` : '고친 날짜를 지웠습니다.', 'Memoria');
+}
+
+/* ---------- 서약 곁줄 · 기억의 아는 사람 ---------- */
+function lockExtraHtml(store, l) {
+    const bits = [];
+    const kind = normLockKind(l.kind);
+    if (kind === 'feeling' && (l.cause || l.needs)) bits.push([l.cause ? `왜: ${l.cause}` : '', l.needs ? `풀리려면: ${l.needs}` : ''].filter(Boolean).join(' · '));
+    if (kind === 'author_plan') bits.push(l.veil ? `AI에게 가는 줄: ${l.veil}` : '가린 줄 없음 — 실리지 않습니다');
+    if (l.due && l.status === 'active' && getSettings().storyClock) {
+        const d = pickStoryDeadlines(store, 50).find(x => x.lock === l);
+        if (d) bits.push(`기한 ${d.label}`);
+    }
+    return bits.length ? ` <small class="memoria__lock-now">${esc(bits.join(' · '))}</small>` : '';
+}
+
+function memoryWhoHtml(m) {
+    const bits = [];
+    if ((m.knowers || []).length) bits.push(`아는 사람: ${m.knowers.join(', ')}${m.knowLock ? ' (고정)' : ''}`);
+    if ((m.guessers || []).length) bits.push(`짐작: ${m.guessers.join(', ')}`);
+    for (const d of (m.dim || [])) bits.push(`${d.who}: ${d.level === 'none' ? '기억 없음' : '흐릿함'}${d.kept ? ` (${d.kept})` : ''}`);
+    if ((m.witnesses || []).length) bits.push(`본 사람: ${m.witnesses.slice(0, 6).join(', ')}`);
+    return bits.length ? `<div class="memoria__mem-meta memoria__mem-who">${esc(bits.join(' · '))}</div>` : '';
+}
+
+async function editKnowers(id) {
+    const store = getStore();
+    const m = store.memories.find(x => x.id === id);
+    if (!m) return;
+    const $dlg = $(`<div class="memoria-pop memoria-pop--form">
+        <h3>누가 아는가</h3>
+        <p class="memoria-pop__meta">${esc(m.summary)}</p>
+        <label>아는 사람 <input type="text" class="text_pole" name="k" placeholder="이름, 쉼표로"></label>
+        <label>짐작만 하는 사람 <input type="text" class="text_pole" name="g" placeholder="이름, 쉼표로"></label>
+        <p class="memoria-pop__meta">저장하면 사서가 덮어쓰지 않습니다. 「풀기」를 누르면 다시 사서에게 맡깁니다.</p>
+    </div>`);
+    $dlg.find('[name="k"]').val((m.knowers || []).join(', '));
+    $dlg.find('[name="g"]').val((m.guessers || []).join(', '));
+    const pick = await showPopup($dlg, { type: popupCtx().POPUP_TYPE.CONFIRM, okButton: '저장', cancelButton: '취소', customButtons: m.knowLock ? [{ text: '풀기', result: 3 }] : [] });
+    if (pick === 3) { delete m.knowLock; persistStore(); renderMemoriesPanel(); return; }
+    if (!pick) return;
+    const names = (v) => [...new Set(String(v || '').split(/[,，]/).map(n => canonEntityName(store, cleanStr(n, 60))).filter(Boolean))];
+    m.knowers = names($dlg.find('[name="k"]').val()).filter(n => entityKey(n) !== entityKey(m.owner || ''));
+    const known = new Set([m.owner || '', ...m.knowers].map(entityKey));
+    const g = names($dlg.find('[name="g"]').val()).filter(n => !known.has(entityKey(n)));
+    if (g.length) m.guessers = g; else delete m.guessers;
+    m.knowLock = true;
+    delete m.learned;
+    persistStore(); renderMemoriesPanel(); updateInjection({ quiet: true });
+}
+
+async function editVeil(id) {
+    const store = getStore();
+    const l = store.locks.find(x => x.id === id);
+    if (!l) return;
+    const ctx = popupCtx();
+    const v = await ctx.callGenericPopup(`AI에게는 이 줄만 갑니다. 계획의 답(누가·왜·어떻게)을 쓰지 말고, 아직 밝히지 말 것만 적어 주세요.\n\n계획: ${l.summary}`, ctx.POPUP_TYPE.INPUT, l.veil || '', { rows: 2 });
+    if (typeof v !== 'string') return;
+    const veil = cleanStr(v, 200);
+    if (veil && veilLeaks(veil, l.summary, castNames(store))) return toastr.warning('이 줄은 계획의 답을 흘립니다. 다른 말로 적어 주세요.', 'Memoria');
+    if (veil) l.veil = veil; else delete l.veil;
+    persistStore(); renderStatePanel(); updateInjection({ quiet: true });
+}
+
+async function veilPlans() {
+    const store = getStore();
+    const plans = store.locks.filter(l => normLockKind(l.kind) === 'author_plan' && l.status === 'active' && !l.veil).slice(0, 8);
+    if (!plans.length) return toastr.info('가린 줄이 필요한 작가 계획이 없습니다.', 'Memoria');
+    const tags = new Map(plans.map((p, i) => [`a${i + 1}`, p]));
+    let parsed = null;
+    try { parsed = parseJsonLoose(await callAuxLLM(VEIL_PROMPT, [...tags].map(([tag, p]) => `[${tag}] ${p.summary}`).join('\n'), { task: 'light', maxTokens: auxTokens(1200) })); }
+    catch (e) { return toastr.error(`가린 줄을 받지 못했습니다: ${e?.message || e}`, 'Memoria'); }
+    if (getStore() !== store) return;
+    let made = 0, rejected = 0;
+    for (const v of (Array.isArray(parsed?.veils) ? parsed.veils : [])) {
+        const p = tags.get(String(v?.tag || '').trim().toLowerCase());
+        const veil = cleanStr(v?.veil, 200);
+        if (!p || !veil || p.veil) continue;
+        if (veilLeaks(veil, p.summary, castNames(store))) { rejected++; continue; }
+        p.veil = veil;
+        made++;
+    }
+    persistStore(); renderStatePanel(); updateInjection({ quiet: true });
+    toastr.success(`가린 줄 ${made}개를 적었습니다${rejected ? ` (답을 흘린 ${rejected}개는 버림)` : ''}.`, 'Memoria');
+}
+
+/* ---------- 골라 지우기 ---------- */
+const WIPE_LABEL = { memories: '기억', cast: '인물 카드', bonds: '관계선', pledges: '서약', canon: '캐논', status: '상태 보드', items: '물건', summaries: '요약', dossier: '자료실' };
+async function openWipe() {
+    const store = getStore();
+    const counts = { memories: store.memories.length, cast: store.characters.length, bonds: (store.bonds || []).length, pledges: store.locks.length, canon: store.worldRules.length, status: store.entityStates.length, items: store.items.length, summaries: store.chunkSummaries.length + store.arcSummaries.length, dossier: store.dossier.length };
+    const $dlg = $(`<div class="memoria-pop memoria-pop--form">
+        <h3>골라 지우기</h3>
+        <p class="memoria-pop__meta">고른 선반만 비웁니다. 턴 기록은 남아서 지운 것이 저절로 다시 적히지는 않습니다 (다시 적으려면 도구 탭 색인). 지우기 전 상태는 복구 지점에 남습니다.</p>
+        ${WIPE_KINDS.map(k => `<label class="memoria-pop__check"><input type="checkbox" value="${k}"${counts[k] ? '' : ' disabled'}> ${WIPE_LABEL[k]} <small>${counts[k]}개</small></label>`).join('')}
+    </div>`);
+    const ok = await showPopup($dlg, { type: popupCtx().POPUP_TYPE.CONFIRM, okButton: '지우기', cancelButton: '취소' });
+    if (!ok) return;
+    const pick = new Set($dlg.find('input:checked').map(function () { return this.value; }).get());
+    if (!pick.size) return;
+    checkpointBeforeChange(store, `골라 지우기: ${[...pick].map(k => WIPE_LABEL[k]).join(', ')}`);
+    if (pick.has('memories')) store.memories = [];
+    if (pick.has('cast')) { store.characters = []; delete store.nameApart; }
+    if (pick.has('bonds')) store.bonds = [];
+    if (pick.has('pledges')) store.locks = [];
+    if (pick.has('canon')) store.worldRules = [];
+    if (pick.has('status')) store.entityStates = [];
+    if (pick.has('items')) store.items = [];
+    if (pick.has('summaries')) { store.chunkSummaries = []; store.arcSummaries = []; delete store.summaryCursor; }
+    if (pick.has('dossier')) store.dossier = [];
+    persistStore(); renderAllPanels(); updateInjection({ quiet: true });
+    toastr.success(`${[...pick].map(k => WIPE_LABEL[k]).join(', ')}을(를) 비웠습니다.`, 'Memoria');
+}
+
+/* ---------- 회상 시험 ---------- */
+async function openRecallTest() {
+    const ctx = popupCtx();
+    const q = await ctx.callGenericPopup('이 말을 보내면 무엇이 떠오르는지 봅니다. 모델은 부르지 않고, 회상 기록에도 남지 않습니다.', ctx.POPUP_TYPE.INPUT, String($('#send_textarea').val() || ''), { rows: 3 });
+    if (!q || typeof q !== 'string' || !q.trim()) return;
+    const store = getStore();
+    const parts = await buildPacketSections(q.trim(), null);
+    const transcript = transcriptRecall(store, [q], { force: true, max: 3 });
+    const row = (m, hidden) => `<li>${hidden ? '<small>비밀</small> ' : ''}${esc(m.summary)} <small>${esc(parts.trace?.get(m.id)?.reason || '')}${parts.trace?.get(m.id)?.score != null ? ` · ${parts.trace.get(m.id).score.toFixed(2)}` : ''}</small></li>`;
+    const html = `<div class="memoria-pop">
+        <h3>회상 시험</h3>
+        <p class="memoria-pop__meta">${esc(cleanStr(q, 200))}</p>
+        <section><h4>떠오르는 기억</h4>${[...parts.publicRecall, ...parts.protectedRecall].length ? `<ul>${parts.publicRecall.map(m => row(m, false)).join('')}${parts.protectedRecall.map(m => row(m, true)).join('')}</ul>` : '<p class="memoria-pop__meta">없음</p>'}</section>
+        ${parts.summaries.find(s => s.recalled) ? `<section><h4>떠오르는 옛 장</h4><p>${esc(parts.summaries.find(s => s.recalled).text)}</p></section>` : ''}
+        ${(parts.cards || []).length ? `<section><h4>장면 카드</h4>${parts.cards.map(c => `<pre>${esc([c.head, ...c.lines].join('\n'))}</pre>`).join('')}</section>` : ''}
+        ${transcript.length ? `<section><h4>옛 원문</h4>${transcript.map(h => `<pre>${esc(h.lines.map(l => `#${l.i} ${l.who}: ${l.text}`).join('\n'))}</pre>`).join('')}</section>` : ''}
+    </div>`;
+    await showPopup(html);
+}
+
+/* ---------- 읽는 말로 보기 ---------- */
+const readerStoreKey = () => `memoria_reader:${getCurrentChatId() || ''}`;
+function readerItems() {
+    try { return JSON.parse(globalThis.localStorage?.getItem(readerStoreKey()) || '{}') || {}; } catch { return {}; }
+}
+function saveReaderItems(items) {
+    trimItems(items);
+    try { globalThis.localStorage?.setItem(readerStoreKey(), JSON.stringify(items)); } catch { /* 저장 못 해도 이번 화면에는 보인다 */ }
+}
+async function openReader() {
+    const store = getStore();
+    const lang = String(getSettings().readerLang || 'ko');
+    const entries = [
+        ...[...store.arcSummaries, ...store.chunkSummaries].sort((a, b) => a.fromTurn - b.fromTurn).map(s => ({ head: `t${s.fromTurn}–t${s.toTurn}`, text: s.text, group: '이야기' })),
+        ...store.characters.filter(c => !c.disabled).flatMap(c => [c.core, c.voice, c.appearance].filter(Boolean).map(t => ({ head: c.name, text: t, group: '인물' }))),
+        ...[...store.memories].filter(m => !m.disabled && !(m.tags || []).includes('episode_raw')).sort((a, b) => b.turnIndex - a.turnIndex).slice(0, 80).map(m => ({ head: `${KIND_LABELS[m.kind] || m.kind} · t${m.turnIndex}`, text: m.summary, group: '기억' })),
+        ...store.locks.filter(l => l.status !== 'resolved').map(l => ({ head: LOCK_LABELS[normLockKind(l.kind)] || l.kind, text: l.summary, group: '서약' })),
+    ];
+    if (!entries.length) return toastr.info('읽을 기록이 없습니다.', 'Memoria');
+    const $box = $(`<div class="memoria-pop">
+        <h3>읽는 말로 보기</h3>
+        <div class="memoria-pop__bar">
+            <select class="text_pole memoria-pop__lang">${Object.entries(READER_LANGS).map(([k]) => `<option value="${k}">${{ ko: '한국어', en: 'English', 'zh-CN': '中文' }[k] || k}</option>`).join('')}</select>
+            <span class="memoria-pop__meta memoria-pop__status"></span>
+        </div>
+        <div class="memoria-pop__reader"></div>
+    </div>`);
+    $box.find('.memoria-pop__lang').val(lang);
+    let run = 0;
+    const draw = async () => {
+        const my = ++run;
+        const want = String($box.find('.memoria-pop__lang').val());
+        getSettings().readerLang = want;
+        saveSettingsDebounced();
+        const items = readerItems();
+        const $r = $box.find('.memoria-pop__reader').empty();
+        let group = '';
+        const cells = entries.map(e => {
+            if (e.group !== group) { group = e.group; $r.append(`<h4>${group}</h4>`); }
+            const key = readerKey(e.text, want);
+            const hit = items[key];
+            const $c = $(`<div class="memoria-pop__entry"><small>${esc(e.head)}</small><p></p></div>`);
+            $c.find('p').text(hit ? hit.t : e.text);
+            if (hit) hit.at = Date.now();
+            $r.append($c);
+            return { e, key, hit, $p: $c.find('p') };
+        });
+        const todo = [...new Set(cells.filter(c => !c.hit && needsReading(c.e.text, want)).map(c => c.e.text))];
+        if (!todo.length) { $box.find('.memoria-pop__status').text(''); saveReaderItems(items); return; }
+        const names = castNames(store);
+        const batches = packBatches(todo);
+        let done = 0;
+        for (const batch of batches) {
+            if (my !== run) return;
+            $box.find('.memoria-pop__status').text(`옮기는 중 ${done}/${todo.length}`);
+            let out = batch.map(() => null);
+            try { out = readReply(await callAuxLLM(readerSystem(want), readerUser(batch, names), { task: 'light', maxTokens: auxTokens(replyBudget(batch)) }), batch); }
+            catch (e) { $box.find('.memoria-pop__status').text(`옮기지 못했습니다: ${e?.message || e}`); return; }
+            batch.forEach((t, i) => {
+                if (!out[i]) return;
+                const key = readerKey(t, want);
+                items[key] = { t: out[i], at: Date.now() };
+                for (const c of cells) if (c.key === key) c.$p.text(out[i]);
+            });
+            done += batch.length;
+            saveReaderItems(items);
+        }
+        if (my === run) $box.find('.memoria-pop__status').text('');
+    };
+    $box.find('.memoria-pop__lang').on('change', draw);
+    draw();
+    await showPopup($box);
+    run++;
+}
+
+/* ---------- 메시지 — 중요 장면 · 이 메시지의 기억 ---------- */
+function turnOfMes(store, mesId) {
+    const t = store.turns.find(x => x.mesId === mesId);
+    if (t) return t;
+    const m = chat[mesId];
+    if (m?.is_user) return store.turns.filter(x => x.mesId > mesId && findPrecedingUserMessage(x.mesId) === m).sort((a, b) => a.mesId - b.mesId)[0] || null;
+    return null;
+}
+function starTurn(store, mesId, on) {
+    const t = turnOfMes(store, mesId);
+    if (!t) return false;
+    if (on) { t.star = true; t.importance = Math.max(Number(t.importance) || 0, 0.8); } else delete t.star;
+    for (const m of store.memories) {
+        if (m.turnIndex !== t.turnIndex || m.manual) continue;
+        if (on) { m.star = true; if (!(m.tags || []).includes('episode_raw')) m.importance = Math.max(Number(m.importance) || 0, 0.75); } else delete m.star;
+    }
+    return true;
+}
+function decorateMessageButtons($mes, mesId) {
+    const $extra = $mes.find('.extraMesButtons');
+    if (!$extra.length || !getSettings().enabled) return;
+    const mes = chat[mesId];
+    if (!mes || mes.is_system) return;
+    if (!$extra.find('.memoria-mes-of').length) $extra.prepend('<div class="mes_button memoria-mes-of fa-solid fa-book-bookmark" title="이 메시지의 기억 (Memoria)"></div>');
+    if (!mes.is_user && !$extra.find('.memoria-mes-star').length) $extra.prepend('<div class="mes_button memoria-mes-star fa-solid fa-star" title="중요 장면 표시 — 요약이 빠뜨리지 않고 정리에서 지킵니다 (Memoria)"></div>');
+    $extra.find('.memoria-mes-star').toggleClass('is-on', !!mes.extra?.memoria_star);
+}
+async function toggleStar(mesId) {
+    const mes = chat[mesId];
+    if (!mes || mes.is_user) return;
+    if (typeof mes.extra !== 'object' || !mes.extra) mes.extra = {};
+    const on = !mes.extra.memoria_star;
+    if (on) mes.extra.memoria_star = true; else delete mes.extra.memoria_star;
+    getContext().saveChatDebounced?.();
+    const store = getStore();
+    const had = starTurn(store, mesId, on);
+    if (had) persistStore();
+    decorateCheck(mesId);
+    toastr.success(!on ? `#${mesId} 중요 장면 표시를 뺐습니다.` : had ? `#${mesId}를 중요 장면으로 표시했습니다.` : `#${mesId}를 중요 장면으로 표시했습니다. 기록될 때 반영됩니다.`, 'Memoria');
+}
+async function showMessageMemories(mesId) {
+    const store = getStore();
+    const t = turnOfMes(store, mesId);
+    if (!t) return toastr.info(`#${mesId}는 아직 기록되지 않았습니다.`, 'Memoria');
+    const rows = store.memories.filter(m => m.turnIndex === t.turnIndex);
+    const html = `<div class="memoria-pop">
+        <h3>#${t.mesId}의 기억 <small>t${t.turnIndex}${t.star ? ' ★' : ''}</small></h3>
+        ${t.summary ? `<p>${esc(t.summary)}</p>` : ''}
+        ${(t.beats || []).length ? `<section><h4>장면 카드</h4><ul>${t.beats.map(b => `<li>${b.major ? '★ ' : ''}${esc(b.text)}${b.q ? ` <small>${b.by ? `${esc(b.by)}: ` : ''}"${esc(b.q)}"</small>` : ''}</li>`).join('')}</ul></section>` : ''}
+        <section><h4>기억 ${rows.length}개</h4>${rows.length ? `<ul>${rows.map(m => `<li><small>${KIND_LABELS[m.kind] || m.kind}</small> ${esc(m.summary)}${m.retired ? ' <small>지나감</small>' : ''}</li>`).join('')}</ul>` : '<p class="memoria-pop__meta">없음</p>'}</section>
+    </div>`;
+    await showPopup(html);
+}
+
+/* ---------- #N 뒤의 기록 걷기 ---------- */
+async function cutRecordsAfter(n) {
+    const store = getStore();
+    const gone = store.turns.filter(t => t.mesId >= n).sort((a, b) => b.turnIndex - a.turnIndex);
+    if (!gone.length) { toastr.info(`#${n} 뒤로 기록이 없습니다.`, 'Memoria'); return 0; }
+    const ctx = popupCtx();
+    const ok = await ctx.callGenericPopup(`#${n}부터의 기록 ${gone.length}턴을 걷어 내고 그 앞 모습으로 되돌릴까요? 메시지는 그대로이고, 걷어 낸 구간은 자동 기록이나 색인이 새로 적습니다.`, ctx.POPUP_TYPE.CONFIRM);
+    if (!ok) return 0;
+    checkpointBeforeChange(store, `#${n} 뒤 기록 걷기`);
+    const idx = gone.map(t => t.turnIndex);
+    for (const t of gone) removeDerivedForTurn(store, t.turnIndex);
+    const dead = new Set(gone);
+    store.turns = store.turns.filter(t => !dead.has(t));
+    dropAffectedSummaries(store, idx);
+    renumberTurns(store);
+    persistStore();
+    if (await restoreStrayHidden()) getContext().saveChatDebounced?.();
+    renderAllPanels(); updateInjection({ quiet: true });
+    toastr.success(`#${n} 뒤의 기록 ${gone.length}턴을 걷었습니다.`, 'Memoria');
+    return gone.length;
+}
+
+function bindExtraUI() {
+    $('#memoria_people_open').on('click', openPeople);
+    $('#memoria_name_tidy').on('click', openNameTidy);
+    $('#memoria_tracker_add').on('click', () => editTracker(null));
+    $('#memoria_date_fix').on('click', fixStoryDate);
+    $('#memoria_veil_plans').on('click', veilPlans);
+    $('#memoria_recall_test').on('click', openRecallTest);
+    $('#memoria_reader_open').on('click', openReader);
+    $('#memoria_wipe_open').on('click', openWipe);
+    $('#memoria_settings').on('click', '.memoria-tracker-edit', function () { editTracker(String($(this).closest('.memoria__row').data('id'))); });
+    $('#memoria_settings').on('click', '.memoria-tracker-delete', function () {
+        const store = getStore();
+        const id = String($(this).closest('.memoria__row').data('id'));
+        store.trackers = (store.trackers || []).filter(t => t.id !== id);
+        if (!store.trackers.length) delete store.trackers;
+        persistStore(); renderTrackersPanel(); updateInjection({ quiet: true });
+    });
+    $('#memoria_settings').on('click', '.memoria-lock-veil', function () { editVeil(String($(this).closest('.memoria__row').data('id'))); });
+    $('#memoria_settings').on('click', '.memoria-mem-knowers', function () { editKnowers(String($(this).closest('.memoria__mem-card').data('id'))); });
+    $(document).on('click', '.memoria-mes-star', function () { toggleStar(Number($(this).closest('.mes').attr('mesid'))); });
+    $(document).on('click', '.memoria-mes-of', function () { showMessageMemories(Number($(this).closest('.mes').attr('mesid'))); });
 }
 
 /* ============================================================

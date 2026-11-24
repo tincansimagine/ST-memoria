@@ -165,6 +165,14 @@
                             <p>대화에 등장한 인물의 프로필입니다. <b>바탕</b>은 한 번 적히면 사서가 다시 쓰지 못하는 기준이고, 이야기 속에서 생긴 변화와 실제로 한 대사는 따로 쌓입니다. 모두 직접 고칠 수 있습니다.</p>
                         </div>
                         <div class="memoria__compact-actions">
+                            <div class="menu_button" id="memoria_people_open" title="인물마다 지금 모습·관계·아는 것·모르는 것·약속을 모아 봅니다">
+                                <i class="fa-solid fa-id-card"></i>
+                                <span>인물별</span>
+                            </div>
+                            <div class="menu_button" id="memoria_name_tidy" title="같은 사람인데 이름이 갈라진 카드를 찾아 합칩니다">
+                                <i class="fa-solid fa-signature"></i>
+                                <span>이름 정리</span>
+                            </div>
                             <div class="menu_button" id="memoria_character_add" title="인물 추가">
                                 <i class="fa-solid fa-user-plus"></i>
                                 <span>추가</span>
@@ -211,6 +219,10 @@
                             <p>비밀·미해결 떡밥·건너뛰면 안 되는 전개 등, 이야기가 지켜야 할 약속. 토큰이 부족해도 가장 마지막까지 유지됩니다.</p>
                         </div>
                         <div class="memoria__compact-actions">
+                            <div class="menu_button" id="memoria_veil_plans" title="가린 줄이 없는 작가 계획에 답을 흘리지 않는 한 줄을 받아 적습니다 (호출 1회)">
+                                <i class="fa-solid fa-mask"></i>
+                                <span>가리기</span>
+                            </div>
                             <div class="menu_button" id="memoria_lock_add" title="서약 추가">
                                 <i class="fa-solid fa-plus"></i>
                                 <span>추가</span>
@@ -218,6 +230,26 @@
                         </div>
                     </div>
                     <div id="memoria_locks_list" class="memoria__row-list"></div>
+                </div>
+                <div class="memoria__section">
+                    <div class="memoria__section-head">
+                        <div>
+                            <h4>날 세기</h4>
+                            <p>사귄 지 며칠째, 시험까지 D-몇, 주기처럼 작중 날짜로 세는 것. 저장한 날짜에서 그때그때 세므로 숫자가 낡지 않습니다. 날짜는 상태창의 달력 날짜에서 읽습니다.</p>
+                        </div>
+                        <div class="memoria__compact-actions">
+                            <div class="menu_button" id="memoria_date_fix" title="작중 날짜가 틀렸으면 고칩니다 — 그 메시지부터 그 날짜로 이어집니다">
+                                <i class="fa-solid fa-calendar-day"></i>
+                                <span>날짜</span>
+                            </div>
+                            <div class="menu_button" id="memoria_tracker_add" title="날 세기 추가">
+                                <i class="fa-solid fa-plus"></i>
+                                <span>추가</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div id="memoria_tracker_today" class="memoria__hint"></div>
+                    <div id="memoria_trackers_list" class="memoria__row-list"></div>
                 </div>
                 <div class="memoria__section">
                     <div class="memoria__section-head">
@@ -830,6 +862,19 @@
 
             <!-- ===== 도구 ===== -->
             <section class="memoria__panel" data-panel="tools">
+                <div class="memoria__section">
+                    <div class="memoria__section-head">
+                        <div>
+                            <h4>서고 살펴보기</h4>
+                            <p>회상 시험은 모델을 부르지 않습니다. 읽는 말로 보기는 처음 볼 때만 번역을 부르고, 한 번 옮긴 글은 기억해 둡니다.</p>
+                        </div>
+                    </div>
+                    <div class="memoria__button-row">
+                        <div class="menu_button" id="memoria_recall_test" title="이 말을 보내면 무엇이 떠오르는지 미리 봅니다"><i class="fa-solid fa-magnifying-glass"></i><span>회상 시험</span></div>
+                        <div class="menu_button" id="memoria_reader_open" title="기억·요약·인물 카드를 고른 말로 옮겨 읽습니다"><i class="fa-solid fa-language"></i><span>읽는 말로</span></div>
+                        <div class="menu_button" id="memoria_wipe_open" title="기억·인물·요약 같은 선반을 골라서 비웁니다 (복구 지점이 남습니다)"><i class="fa-solid fa-broom"></i><span>골라 지우기</span></div>
+                    </div>
+                </div>
                 <div class="memoria__section">
                     <div class="memoria__section-head">
                         <div>

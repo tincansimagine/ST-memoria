@@ -1617,3 +1617,30 @@ body[data-memoria-paper="dark"] :is(#memoria_settings.memoria, .memoria-library,
 .mmv-view > *, .mmv-results { min-width: 0; max-width: 100%; }
 .mmv-results { overflow-x: auto; }
 .mmv-tools > * { min-width: 0; }
+
+/* ---------- 인물별 · 이름 정리 · 날 세기 · 회상 시험 · 읽는 말로 (팝업) ---------- */
+.memoria-pop { text-align: left; display: grid; gap: 10px; min-width: 0; max-width: 100%; overflow-wrap: anywhere; }
+.memoria-pop h3 { margin: 0; font-size: 1.1em; }
+.memoria-pop h3 small, .memoria-pop small { font-weight: 400; opacity: .65; }
+.memoria-pop h4 { margin: 4px 0; font-size: .82em; font-weight: 600; opacity: .7; }
+.memoria-pop section { min-width: 0; }
+.memoria-pop ul { margin: 0; padding-left: 18px; display: grid; gap: 3px; }
+.memoria-pop p { margin: 0; }
+.memoria-pop pre { margin: 0; white-space: pre-wrap; word-break: break-word; font-size: .85em; }
+.memoria-pop__meta { font-size: .85em; opacity: .7; }
+.memoria-pop__list { display: grid; gap: 4px; max-height: 60vh; overflow: auto; }
+.memoria-pop__person { display: flex; flex-direction: column; align-items: flex-start; gap: 1px; padding: 7px 10px; border: 1px solid color-mix(in srgb, currentColor 15%, transparent); border-radius: 8px; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; min-width: 0; }
+.memoria-pop__person.is-here { border-color: color-mix(in srgb, currentColor 40%, transparent); }
+.memoria-pop__person small { opacity: .65; }
+.memoria-pop__pair { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px; padding: 6px 0; border-bottom: 1px dashed color-mix(in srgb, currentColor 15%, transparent); }
+.memoria-pop__acts { display: flex; flex-wrap: wrap; gap: 4px; }
+.memoria-pop .menu_button { width: auto; white-space: nowrap; margin: 0; padding: 3px 10px; }
+.memoria-pop--form label { display: grid; gap: 3px; font-size: .9em; }
+.memoria-pop__check { display: flex !important; align-items: center; gap: 6px; }
+.memoria-pop__bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.memoria-pop__bar select { width: auto; margin: 0; }
+.memoria-pop__reader { display: grid; gap: 6px; max-height: 62vh; overflow: auto; }
+.memoria-pop__entry { padding: 6px 8px; border-radius: 6px; background: color-mix(in srgb, currentColor 5%, transparent); }
+.memoria-pop__entry p { white-space: pre-wrap; }
+.memoria__mem-who { font-size: .8em; opacity: .7; }
+.memoria-mes-star.is-on { color: #e0b44a; opacity: 1; }
