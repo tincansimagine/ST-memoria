@@ -52,8 +52,8 @@ test('a secret that came out is said to be out; one closed without a stated way 
         lock('s3', 'loose_end', '사라진 열쇠의 행방', { resolution: '창고에서 찾았다' }),
         lock('s4', 'keep_secret', '금고 비밀번호', { status: 'active' }));
     const packet = (await a.buildPacketWithinBudget('등대', null)).text;
-    const out = packet.split('## No Longer Secret')[1].split('\n## ')[0];
-    assert.match(out, /아리아가 왕녀라는 사실을 보라에게 숨긴다 — out: 보라가 인장 반지를 보고 알아챘다/);
+    const out = packet.split('## Overtaken by the Story')[1].split('\n## ')[0];
+    assert.match(out, /\(was hidden\) 아리아가 왕녀라는 사실을 보라에게 숨긴다 — out: 보라가 인장 반지를 보고 알아챘다/);
     assert.doesNotMatch(out, /민호는 등대의|사라진 열쇠|금고 비밀번호/);
     assert.match(packet.split('## Pledges')[1].split('\n## ')[0], /금고 비밀번호/);
 });
