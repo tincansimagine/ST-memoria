@@ -282,19 +282,29 @@ export function parseBundleFile(text, defaults) {
 /**
  * 얼려 둔 안정 구간과 지금의 안정 구간을 항목 단위로 비교한다.
  * entries: [{ id, sec, line }]
- * 반환: { changed: 바뀌었거나 새로 생긴 항목들, removed: 사라진 항목 수 }
+ * stillStands(entry): 이번에는 뽑히지 않았지만 서고에 그대로 있는 항목인가 (true, 또는 지금의 줄) — 인물이 열 명을 넘는 채팅에서 누가 장면에 들어오면
+ * 다른 인물 카드가 상한에 밀려 이번 목록에서 빠진다. 그 카드는 지워진 게 아니라 자리가 없었을 뿐이므로, 얼려 둔 장부의 그 줄은 그대로 맞다.
+ * 반환: { changed: 바뀌었거나 새로 생긴 항목들, removed: 정말 사라진 항목 수, held: 빠졌지만 그대로 둔 항목 수 }
  */
-export function diffStableEntries(frozen, current) {
-    const before = new Map((frozen || []).map(e => [e.id, e.line]));
+export function diffStableEntries(frozen, current, stillStands = null) {
+    const before = new Map((frozen || []).map(e => [e.id, e]));
     const now = new Set();
     const changed = [];
     for (const e of current || []) {
         now.add(e.id);
-        if (before.get(e.id) !== e.line) changed.push(e);
+        if (before.get(e.id)?.line !== e.line) changed.push(e);
     }
     let removed = 0;
-    for (const id of before.keys()) if (!now.has(id)) removed++;
-    return { changed, removed };
+    let held = 0;
+    for (const [id, e] of before) {
+        if (now.has(id)) continue;
+        // true: 얼려 둔 줄 그대로 맞다 · 글: 그 줄이 지금은 이렇게 달라졌다 (달라진 줄로 알린다) · 그 밖: 정말 사라졌다
+        const v = stillStands ? stillStands(e) : false;
+        if (typeof v === 'string') { if (v !== e.line) changed.push({ ...e, line: v }); held++; }
+        else if (v) held++;
+        else removed++;
+    }
+    return { changed, removed, held };
 }
 
 /**
@@ -361,6 +371,16 @@ export function findRivalExtensions(names, disabled = []) {
  * ------------------------------------------------------------ */
 
 export const THREAD_KINDS = Object.freeze(['keep_unresolved', 'loose_end', 'foreshadow', 'feeling']);
+/** 숨겨야 하는 것(비밀·정보 격차) — 떡밥처럼 저절로 닫히지 않는다. 끝난 뒤에도 "지켜야 할 것"으로 남으면 모델이 옛 비밀을 지금 일처럼 꺼낸다 */
+export const SECRET_KINDS = Object.freeze(['keep_secret', 'knowledge_gap']);
+
+/**
+ * 사서가 "풀린 듯"이라고 본 서약은 사용자가 확정하기 전에도 싣지 않는다 — 끝난 비밀을 확정을 기다리며 매 턴 "지킬 것"으로 싣는 쪽이 더 해롭다.
+ * 지우지 않는다 (세계 탭에서 ✔로 확정하거나 「아직 유효」로 되돌린다). 직접 적은 서약과 최우선(P1)은 그대로 싣는다.
+ */
+export function pledgeHeldBack(l) {
+    return !!l && l.status === 'active' && l.suggestResolved === true && !l.manual && (l.priority ?? 2) > 1;
+}
 
 /**
  * 요약 응답 끝의 "CLOSED: o2, o5" 줄을 떼어 낸다.
@@ -439,13 +459,41 @@ export function sleepStaleThreads(locks, turnNow, after = 60) {
 }
 
 /**
+ * 아주 오래 아무도 건드리지 않은 비밀·정보 격차를 잠재운다 (지우지 않는다 — 다시 언급되면 깨어나고, 세계 탭에서 깨울 수 있다).
+ * 비밀은 떡밥과 달리 저절로 닫히지 않아, 그 비밀이 걸린 대목이 오래전에 끝났어도 "지켜야 할 것"으로 매 턴 실렸다.
+ * 조용히 지켜지는 비밀도 있으므로 떡밥보다 훨씬 오래 기다리고, 잠재우기 전에 그사이의 기록(seenIn: [{ turn, text }] — 턴 요약·기억)을 훑는다:
+ * 이야기에서 계속 오간 비밀이면 "본 턴"만 적고 그대로 둔다. 직접 적은 것과 최우선(P1)은 건드리지 않는다. kindOf: 서약 종류를 정식 이름으로. 반환: 잠재운 수
+ */
+export function sleepStaleSecrets(locks, turnNow, after, seenIn = [], kindOf = (k) => k) {
+    if (!(after > 0)) return 0;
+    let slept = 0;
+    for (const l of locks || []) {
+        if (l.status !== 'active' || l.manual || !SECRET_KINDS.includes(kindOf(l.kind)) || (l.priority ?? 2) <= 1) continue;
+        const since = threadTouched(l);
+        if (turnNow - since < after) continue;
+        const text = `${l.summary} ${l.latest?.text || ''}`;
+        let seen = 0;
+        for (const r of seenIn) if (r.turn > since && r.turn <= turnNow && r.turn > seen && mentionsThread(text, r.text)) seen = r.turn;
+        if (seen) {
+            l.seenPrev = l.seenTurn ?? null;
+            l.seenTurn = seen;
+            if (turnNow - seen < after) continue;
+        }
+        l.status = 'dormant';
+        l.sleptTurn = turnNow;
+        slept++;
+    }
+    return slept;
+}
+
+/**
  * 이번 턴에 실을 서약 고르기.
  * 비밀·동의 경계·세계 제약처럼 늘 지켜야 하는 것은 그대로 싣고, 떡밥은 지금 장면과 닿아 있거나
  * 최근 것이거나 최우선일 때만 싣는다 — 무관한 옛 떡밥이 매 턴 자리를 차지하면 모델이 억지로 꺼낸다.
  * overlap(a, b): 두 글의 겹침(0~1)
  */
 export function pickPledges(locks, { turnNow = 0, sceneText = '', overlap = () => 0, cap = 8, threadCap = 4, fresh = 24 } = {}) {
-    const active = (locks || []).filter(l => l.status === 'active').sort((a, b) => (a.priority ?? 2) - (b.priority ?? 2));
+    const active = (locks || []).filter(l => l.status === 'active' && !pledgeHeldBack(l)).sort((a, b) => (a.priority ?? 2) - (b.priority ?? 2));
     const standing = active.filter(l => !THREAD_KINDS.includes(l.kind));
     const threads = active.filter(l => THREAD_KINDS.includes(l.kind)).map((l) => {
         const age = turnNow - threadTouched(l);
@@ -576,7 +624,8 @@ export function noteThreadSightings(locks, text, turn) {
     let woke = 0;
     if (!String(text ?? '').trim()) return { seen, woke };
     for (const l of locks || []) {
-        if (!THREAD_KINDS.includes(l.kind) || !['active', 'dormant'].includes(l.status)) continue;
+        // 잠든 비밀·정보 격차도 다시 언급되면 깨운다
+        if (!(THREAD_KINDS.includes(l.kind) || SECRET_KINDS.includes(l.kind)) || !['active', 'dormant'].includes(l.status)) continue;
         if (!mentionsThread(`${l.summary} ${l.latest?.text || ''}`, text)) continue;
         if (l.seenTurn !== turn) { l.seenPrev = l.seenTurn ?? null; l.seenTurn = turn; seen++; }
         if (l.status === 'dormant') { l.status = 'active'; l.wokeTurn = turn; woke++; }

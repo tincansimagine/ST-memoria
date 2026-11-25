@@ -257,6 +257,51 @@ function pickAddressLines(rows, present, { minCount = 2, perPair = 2, max = 6, k
   }
   return [...pairs.values()].sort((a, b) => b.last - a.last || a.from.localeCompare(b.from)).slice(0, max).map((p) => ({ from: p.from, to: p.to, terms: p.rows.sort((a, b) => b.last - a.last || b.count - a.count).slice(0, perPair).map((r) => r.term) })).sort((a, b) => a.from.localeCompare(b.from) || a.to.localeCompare(b.to));
 }
+const VAGUE_TITLES = /* @__PURE__ */ new Set(["당신", "자기", "자기야", "바보", "멍청아", "아기", "애기", "baby", "babe", "dear", "love", "honey", "darling", "sweetheart", "kid"]);
+const isTitleWord = (t) => !!t && !VAGUE_TITLES.has(t) && (TITLE_WORDS.has(t) || /^[가-힣]{1,5}님$/.test(t));
+const TITLE_TAIL = "(?:에게서|한테서|이라고|께서|에게|한테|이랑|하고|이야|라고|으로|부터|까지|처럼|보다|이|가|은|는|을|를|도|의|와|과|랑|야|아|께|로|만)?";
+/**
+ * 관계선의 "부르는 말" 한 칸에서 호칭만 골라낸다 — "민준 형" → 형, "선배 / 형" → 선배·형.
+ * 이름·대명사·풀어 쓴 설명("예전에는 오빠")은 버린다. nameForms: 불리는 사람의 이름들
+ */
+function titlesInCalls(calls, nameForms = []) {
+  const forms = nameForms.map(lowc).filter((f) => f.length >= 2), out = /* @__PURE__ */ new Set();
+  for (const raw of String(calls ?? "").split(/[,，、/·|;()（）→]+|\s+(?:or|또는|혹은)\s+/)) {
+    const t = lowc(raw).replace(/^["“”'‘’「」『』\s]+|["“”'‘’「」『』\s.]+$/g, "");
+    if (isTitleWord(t)) {
+      out.add(t);
+      continue;
+    }
+    for (let i = 2; i < t.length; i++) {
+      const head = t.slice(0, i).trim().replace(/이$/, ""), tail = t.slice(i).trim();
+      if (head.length >= 2 && isTitleWord(tail) && forms.some((f) => f.includes(head))) {
+        out.add(tail);
+        break;
+      }
+    }
+  }
+  return [...out];
+}
+/** 글에 그 호칭이 낱말로 나오는가 — "형, " · "형이 " · "선배님!" 은 맞고 "인형" · "형편" 은 아니다 */
+function saysTitle(text, title) {
+  const t = lowc(title);
+  if (!t) return false;
+  return new RegExp(`(?:^|[^\\p{L}\\p{N}])${esc(t)}${[...t].length >= 2 && !t.endsWith("님") ? "님?" : ""}${TITLE_TAIL}(?![\\p{L}\\p{N}])`, "u").test(lowc(text));
+}
+/**
+ * 글에 나온 호칭이 가리키는 사람들. bonds: 말한 사람에게서 나가는 관계선 [{ to, calls(부르는 말), forms(그 사람의 다른 이름) }].
+ * 호칭 하나가 두 사람 이상에게 적혀 있으면 누구인지 알 수 없으므로 고르지 않는다. 반환: [{ to, title }]
+ */
+function titleTargets(text, bonds) {
+  const by = /* @__PURE__ */ new Map();
+  for (const b of bonds) for (const t of titlesInCalls(b.calls, [b.to, ...b.forms || []])) {
+    if (!by.has(t)) by.set(t, /* @__PURE__ */ new Map());
+    by.get(t).set(lowc(b.to), b.to);
+  }
+  const out = [];
+  for (const [title, tos] of by) if (tos.size === 1 && saysTitle(text, title)) out.push({ to: [...tos.values()][0], title });
+  return out;
+}
 function dueLabel(remaining) {
   if (!Number.isFinite(remaining)) return "";
   if (remaining > 0.75) return `D-${Math.max(1, Math.round(remaining))}`;
@@ -306,7 +351,10 @@ export {
   personNowLine,
   pickAddressLines,
   pickDeadlines,
+  saysTitle,
   speakerOfSpan,
   storyDays,
-  tallyAddress
+  tallyAddress,
+  titleTargets,
+  titlesInCalls
 };

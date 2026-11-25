@@ -131,7 +131,19 @@ test('stable diff reports changed and added lines, and counts removals', () => {
     const diff = diffStableEntries(frozen, [{ id: 'a', sec: 'Canon', line: '- a = 2' }, { id: 'c', sec: 'Cast', line: '- C' }]);
     assert.deepEqual(diff.changed.map(e => e.id), ['a', 'c']);
     assert.equal(diff.removed, 1);
-    assert.deepEqual(diffStableEntries(frozen, frozen), { changed: [], removed: 0 });
+    assert.deepEqual(diffStableEntries(frozen, frozen), { changed: [], removed: 0, held: 0 });
+});
+
+test('an entry that only dropped out of this turn\'s pick, but still stands in the archive, is not a removal', () => {
+    const frozen = [{ id: 'Cast:a', sec: 'Cast', line: '- A' }, { id: 'Cast:b', sec: 'Cast', line: '- B' }, { id: 'Bonds:x', sec: 'Bonds', line: '- A → B: 친구' }, { id: 'Canon:k', sec: 'Canon', line: '- k = 1' }];
+    const now = [{ id: 'Cast:a', sec: 'Cast', line: '- A' }, { id: 'Cast:c', sec: 'Cast', line: '- C' }];
+    // 인물이 상한을 넘는 채팅: C가 장면에 들어와 B 카드가 이번 목록에서 밀렸다. B는 서고에 그대로 있다
+    const stands = (e) => (e.id === 'Cast:b' ? true : e.id === 'Bonds:x' ? '- A → B: 연인' : false);
+    const diff = diffStableEntries(frozen, now, stands);
+    assert.equal(diff.removed, 1, 'only the canon line is really gone');
+    assert.equal(diff.held, 2);
+    assert.deepEqual(diff.changed.map(e => [e.id, e.line]), [['Cast:c', '- C'], ['Bonds:x', '- A → B: 연인']], 'a held line that moved on is sent as an update');
+    assert.equal(diffStableEntries(frozen, now).removed, 3, 'without the check every missing entry counts');
 });
 
 test('refreeze only when the frozen block can no longer stand in', () => {
