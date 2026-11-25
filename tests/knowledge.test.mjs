@@ -70,14 +70,14 @@ test('a secret is known only to people who were there or are named in the exchan
     assert.ok(a.run('activityLog').list().some(r => /그 자리에 없던 인물 1명/.test(r.text)));
 });
 
-test('hidden knowledge names the people in the scene who do not know it', async () => {
+test('who does not know a secret is left to the writer: the line carries the librarian\'s record of who knows, nothing guessed from the scene', async () => {
     const a = await app();
     const store = a.getStore();
     store.turnCounter = 10;
     store.characters.push(card('아리아'), card('보라'), card('민호'));
     a.context.chat.push({ is_user: true, mes: '보라와 함께 등대로 갔다', name: '여행자' }, { is_user: false, mes: '보라는 계단 아래에서 기다렸다. 아리아는 위층 창을 열었다.', name: '아리아' });
-    store.memories.push(memory('sec', { kind: 'secret', summary: '편지를 쓴 사람은 아리아다', visibility: 'secret', owner: '아리아', knowers: [], pinned: true }));
+    store.memories.push(memory('sec', { kind: 'secret', visibility: 'secret', owner: '아리아', knowers: ['민호'], summary: '편지를 쓴 사람은 아리아다', pinned: true }));
     const packet = (await a.buildPacketWithinBudget('편지', null)).text;
-    assert.match(packet, /\[secret:아리아 · not known to 보라\] 편지를 쓴 사람은 아리아다/);
-    assert.doesNotMatch(packet, /not known to[^\]]*민호/, 'someone outside the scene is not listed');
+    assert.match(packet, /\[secret:아리아 · also known to 민호\] 편지를 쓴 사람은 아리아다/);
+    assert.doesNotMatch(packet, /not known to/);
 });

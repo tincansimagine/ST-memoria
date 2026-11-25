@@ -2821,32 +2821,6 @@ function upsertWorldRule(store, rule, turnIndex) {
  * 한쪽은 최신 상태 · 다른 쪽은 며칠 전에서 멈춘 채 둘 다 주입돼 응답이 오락가락한다.
  * ------------------------------------------------------------ */
 
-/* ------------------------------------------------------------
- * 성을 뺀 이름 — 카드는 "차유원"인데 이야기는 "유원"이라고 부른다
- *
- * 세 글자 한국 이름은 이야기 속에서 거의 늘 성을 빼고 불린다. 카드 이름만 찾으면 "유원이 웃었다"에서 그 사람을 못 알아봐,
- * 그 사람이 장면에 들어와도 카드가 짧은 줄로만 실리고 그 사람의 실제 말투(남긴 말)도 실리지 않는다.
- * 다른 카드와 겹치지 않을 때만 성을 뺀 이름도 그 사람의 이름으로 친다.
- * ------------------------------------------------------------ */
-const givenNameOf = (name) => { const t = String(name || '').trim(); return /^[가-힣]{3}$/.test(t) ? t.slice(1) : ''; };
-/** 한 사람을 가리키는 이름들 — 카드 이름, 다른 이름, 그리고 성을 뺀 이름(겹치지 않을 때) */
-function personForms(store, c) {
-    const forms = [c.name, ...(c.aliases || [])].filter(Boolean);
-    const given = givenNameOf(c.name);
-    if (given && !forms.some(f => entityKey(f) === entityKey(given))
-        && !(store.characters || []).some(o => o !== c && !o.disabled && [o.name, ...(o.aliases || []), givenNameOf(o.name)].some(f => f && entityKey(f) === entityKey(given)))) forms.push(given);
-    return forms;
-}
-/** 글(소문자)에 이 사람이 나오는가. 성을 뺀 두 글자 이름은 낱말 첫머리일 때만 센다 ("차유원"의 "유원"이 아니라 "유원이"·"유원 형") */
-function mentionsPerson(store, hayLower, c) {
-    const given = givenNameOf(c.name);
-    return personForms(store, c).some((f) => {
-        const n = String(f || '').toLowerCase();
-        if (n.length < 2) return false;
-        return f === given ? new RegExp(`(?:^|[^가-힣])${n}`).test(hayLower) : hayLower.includes(n);
-    });
-}
-
 /** 비교용 정규화 — 대소문자·공백·구두점 무시 (kkang / Kkang / 깡 은 각각 자기 형태로 유지) */
 function entityKey(s) {
     return String(s || '').toLowerCase().replace(/[\s._\-'"`]+/g, '').trim();
@@ -3720,7 +3694,7 @@ async function commitTurns(mesIds, { silent = true, force = false, retry = 1 } =
     ])];
     const hereKeys = new Set(presentNames.map(entityKey));
     const wasHere = (name) => { const c = canonEntityName(store, name); return hereKeys.has(entityKey(c)) || witnessed(name); };
-    const people = store.characters.filter(c => !c.disabled).map(c => ({ name: c.name, forms: personForms(store, c).slice(1) }));
+    const people = store.characters.filter(c => !c.disabled).map(c => ({ name: c.name, forms: c.aliases || [] }));
     for (const n of speakersNow) if (n && !people.some(p => entityKey(p.name) === entityKey(n))) people.push({ name: n, forms: [] });
     const knownPerson = (n) => { if (!n) return ''; const c = canonEntityName(store, n); return people.some(p => entityKey(p.name) === entityKey(c)) ? c : ''; };
     const soloChat = !selected_group;
@@ -4900,7 +4874,8 @@ async function retrieveMemories(queryText, recentUserTexts, sceneText = '') {
     const presentEntities = new Set();
     for (const c of store.characters || []) {
         if (c.disabled) continue;
-        if (mentionsPerson(store, presenceText, c)) {
+        const names = [c.name, ...(c.aliases || [])];
+        if (names.some(n => n && String(n).length >= 2 && presenceText.includes(String(n).toLowerCase()))) {
             presentEntities.add(String(c.name).toLowerCase());
         }
     }
@@ -5449,7 +5424,7 @@ const absentNotes = new Map();
 const addressCache = new WeakMap();
 /** 대사에서 모은 부름말 — 저장하지 않는다 (매번 대화에서 다시 센다: 스와이프·삭제·편집이 저절로 반영된다) */
 function addressRows(store) {
-    const people = store.characters.filter(c => !c.disabled).map(c => ({ name: c.name, forms: personForms(store, c).slice(1) }));
+    const people = store.characters.filter(c => !c.disabled).map(c => ({ name: c.name, forms: c.aliases || [] }));
     const me = name1 ? canonEntityName(store, name1) : '';
     const lead = name2 ? canonEntityName(store, name2) : '';
     for (const n of [me, lead]) if (n && !people.some(p => entityKey(p.name) === entityKey(n))) people.push({ name: n, forms: [] });
@@ -5624,7 +5599,9 @@ async function buildPacketSections(query, supervisorPlan) {
     const sceneHay = `${recentSceneText}\n${filedPresent}`;
     // 이름 없이 호칭으로만 불린 사람 ("형", "선배") — 관계선에 적힌 부르는 말로 누구인지 찾는다
     const referred = titleReferred(store, `${recentSceneText}\n${String(query || '').toLowerCase()}`);
-    const inScene = (c) => mentionsPerson(store, sceneHay, c) || referred.has(entityKey(c.name));
+    const inScene = (c) => sceneHay.includes(String(c.name).toLowerCase())
+        || (c.aliases || []).some(a => a.length >= 2 && sceneHay.includes(String(a).toLowerCase()))
+        || referred.has(entityKey(c.name));
     // 상태 보드: 지금 장면과 닿는 것부터, 그다음 최근에 바뀐 것. 예전에는 저장 순서의 끝 10개를 실어
     // 장면과 무관한 인물의 묵은 상태가 자리를 차지하고 정작 눈앞 인물의 상태가 밀려났다.
     const stateInScene = (s) => {
@@ -5665,16 +5642,9 @@ async function buildPacketSections(query, supervisorPlan) {
         .map(x => ({ ...x.c, sceneNow: x.scene === 1 }));
     // 관계선: 장면에 있는 인물이 얽힌 줄을 먼저, 그다음 최근에 움직인 줄
     const sceneNames = new Set(characters.filter(c => c.sceneNow).flatMap(c => [c.name, ...(c.aliases || [])]).map(entityKey));
-    // 지금 장면에 있는데 이 비밀·속사정을 모르는 사람 — 모델이 그 사람에게 새어 나가게 쓰지 않도록 이름으로 짚어 준다
+    // 누가 모르는지는 사서가 적은 "아는 사람"을 보고 글을 쓰는 모델이 가린다 — Memoria가 장면 인물을 짐작해 "X는 모른다"를 덧붙이지 않는다
+    // (짐작이 빗나가면 엉뚱한 사람이 비밀에서 따돌려진 바깥사람처럼 읽혔다)
     unawareNotes.clear();
-    for (const m of protectedRecall) {
-        // 속마음은 누가 모르는지 짚지 않는다 — 남의 속마음은 원래 아무도 모른다. "X는 모른다"가 붙으면 그 사람이 비밀에서 따돌려진 바깥사람처럼 읽힌다
-        if (m.kind === 'impression') continue;
-        // 짐작하는 사람은 "모르는 사람"으로 짚지 않는다 (따로 적힌다)
-        const knows = new Set([m.owner, ...(m.knowers || []), ...(m.guessers || [])].filter(Boolean).map(n => entityKey(canonEntityName(store, n))));
-        const unaware = characters.filter(c => c.sceneNow && !knows.has(entityKey(c.name)) && !(c.aliases || []).some(x => knows.has(entityKey(x)))).map(c => c.name);
-        if (unaware.length) unawareNotes.set(m.id, unaware.slice(0, 4));
-    }
     const bonds = (store.bonds || [])
         .filter(b => !b.disabled && bondNow(b))
         .map(b => ({ b, scene: (sceneNames.has(entityKey(b.from)) ? 1 : 0) + (sceneNames.has(entityKey(b.to)) ? 1 : 0), turn: bondNow(b).turn || 0 }))
@@ -5685,7 +5655,7 @@ async function buildPacketSections(query, supervisorPlan) {
     // 장면 속 인물의 실제 남긴 말 — 요약된 원문이 숨겨져도 말투를 붙잡아 둔다
     const banned = bannedPhrases();
     const voiceCount = Math.max(0, Math.min(4, Math.round(Number(settings.voiceSamples) || 0)));
-    const voices = voiceCount ? characters.filter(c => c.sceneNow && keepsLinesFor(c)).slice(0, 4).map(c => {
+    const voices = voiceCount ? characters.filter(c => keepsLinesFor(c)).sort((a, b) => (b.sceneNow ? 1 : 0) - (a.sceneNow ? 1 : 0)).slice(0, 4).map(c => {
         const usable = (c.lines || []).filter(l => !hasPhrase(l.text, banned));
         const picked = [...usable.filter(l => l.pinned), ...usable.filter(l => !l.pinned).reverse()].slice(0, voiceCount);
         return picked.length ? { name: c.name, lines: picked.map(l => l.text) } : null;
@@ -5752,26 +5722,12 @@ async function buildPacketSections(query, supervisorPlan) {
     // ── 지금 무대 위의 사정 (모두 모델 호출 없음) ──
     const meName = name1 ? canonEntityName(store, name1) : '';
     const inSceneCast = characters.filter(c => c.sceneNow && entityKey(c.name) !== entityKey(meName));
-    // 그 자리에 없던 사람: 공개된 사건이라도 그때 장면에 없던 사람이 지금 장면에 있으면 이름으로 짚는다 (본 사람이 적힌 기억만)
-    // 그 일이 있던 때 아직 이야기에 나오지도 않은 사람은 짚지 않는다 — "그 자리에 없었다"가 붙으면 모델이 그 사람을 옛 장면과 엮는다
-    const awayFrom = (names, at = Infinity) => {
-        if (!names || names.length < 2) return [];
-        const saw = new Set(names.map(n => entityKey(canonEntityName(store, n))));
-        return inSceneCast.filter(c => (c.firstTurn ?? 0) <= at && !saw.has(entityKey(c.name)) && !(c.aliases || []).some(a => saw.has(entityKey(a)))).map(c => c.name).slice(0, 3);
-    };
     absentNotes.clear();
-    if (settings.guardSecrets !== false) for (const m of publicRecallDeduped) { const away = awayFrom(m.witnesses, m.turnIndex || 0); if (away.length) absentNotes.set(m.id, away); }
     // 장면 인물의 지금 모습 — 상태 보드의 칸들을 사람마다 한 줄로 묶어 앞에 싣는다
     const nowIds = new Set(settings.presentNow !== false ? states.filter(s => String(s.entity || '').toLowerCase() !== 'scene' && s.claim !== 'belief' && stateInScene(s)).map(s => s.id) : []);
-    // 서로 부르는 말 — 대사에서 모은다. 장면에 함께 있는 둘 사이의 것만
-    let address = [];
-    if (settings.addressTerms !== false) {
-        const present = new Set([...characters.filter(c => c.sceneNow).map(c => String(c.name).toLowerCase()), ...(meName ? [meName.toLowerCase()] : [])]);
-        const callsOf = (from, to) => { const b = (store.bonds || []).find(x => !x.disabled && entityKey(x.from) === entityKey(from) && entityKey(x.to) === entityKey(to)); return b ? bondNow(b)?.calls || '' : ''; };
-        // 오래전에 쓰던 부름말은 그때의 사정(변장·거리감·옛 관계)일 수 있다 — 최근 대화에서 쓴 것만 "지금 부르는 말"로 싣는다
-        const freshFrom = chat.length - 80;
-        if (present.size >= 2) address = pickAddressLines(addressRows(store).filter(r => r.last >= freshFrom), present, { known: callsOf });
-    }
+    // 서로 부르는 말은 사서가 관계선에 적는다 ("calls them") — 코드가 대사를 세어 따로 만든 목록은 싣지 않는다
+    // (모델이 한 번 잘못 쓴 호칭이 세어져 "지켜라"로 되돌아오곤 했다)
+    const address = [];
     // 약속·기한 — 작중 시간으로 센다
     const deadlines = settings.dueDates !== false && settings.storyClock ? pickStoryDeadlines(store) : [];
     // 장면 카드: 떠올린 옛 묶음(없으면 가장 잘 맞은 회상이 든 구간)에서 있었던 일을 순서대로 — 아직 원문으로 실리는 구간은 펼치지 않는다
@@ -5792,10 +5748,10 @@ async function buildPacketSections(query, supervisorPlan) {
             if (to >= store.turnCounter - 1 || used.some(([a, b]) => from <= b && to >= a)) continue;
             const span = store.turns.filter(t => t.turnIndex >= from && t.turnIndex <= to).sort((a, b) => a.turnIndex - b.turnIndex);
             if (span.some(t => t.mesId >= onScreenFrom && chat[t.mesId] && !chat[t.mesId].is_system)) continue;
-            const picked = pickBeats(span.flatMap(t => (Array.isArray(t.beats) ? t.beats : []).map(b => ({ ...b, turn: t.turnIndex }))), 8);
+            const picked = pickBeats(span.flatMap(t => Array.isArray(t.beats) ? t.beats : []), 8);
             if (picked.length < 2) continue;
             const lines = beatLines(picked, {
-                away: b => (settings.guardSecrets !== false ? awayFrom(b.with, b.turn ?? Infinity) : []),
+                away: () => [],   // 그 자리에 누가 있었는지는 줄에 적힌 대로 두고, 코드가 "없던 사람"을 짐작해 덧붙이지 않는다
                 quote: b => (settings.recallQuotes !== false && b.q && !hasPhrase(b.q, banned) ? b.q : ''),
             });
             const first = span.find(t => t.when || t.where);
@@ -5827,18 +5783,16 @@ async function buildPacketSections(query, supervisorPlan) {
     const returning = [];
     {
         const hay = `${sceneHay}\n${String(query || '').toLowerCase()}`;
-        const named = (c) => referred.has(entityKey(c.name)) || mentionsPerson(store, hay, c);
-        // 마지막으로 나온 때: 카드가 고쳐진 턴 · 장면에 있던 턴 · 턴 요약에 이름이 나온 턴 가운데 가장 늦은 것
-        // (카드가 고쳐진 턴만 보면, 늘 나오지만 카드가 한동안 그대로인 사람이 "오랜만에 나온 사람"이 된다)
+        const named = (c) => referred.has(entityKey(c.name)) || [c.name, ...(c.aliases || [])].some(n => String(n).length >= 2 && hay.includes(String(n).toLowerCase()));
         const lastSeen = (c) => {
             const keys = new Set([c.name, ...(c.aliases || [])].map(entityKey));
             let t = c.updatedTurn || c.firstTurn || 0;
-            for (const x of store.turns) if ((x.present || []).some(n => keys.has(entityKey(n))) || (x.summary && mentionsPerson(store, String(x.summary).toLowerCase(), c))) t = Math.max(t, x.turnIndex);
+            for (const x of store.turns) if ((x.present || []).some(n => keys.has(entityKey(n)))) t = Math.max(t, x.turnIndex);
             return t;
         };
         const sceneKeys = new Set([...characters.filter(c => c.sceneNow).map(c => entityKey(c.name)), entityKey(meName), entityKey(name2 ? canonEntityName(store, name2) : '')].filter(Boolean));
         for (const c of store.characters) {
-            if (c.disabled || returning.length >= 3 || entityKey(c.name) === entityKey(meName) || (name2 && entityKey(c.name) === entityKey(canonEntityName(store, name2))) || !named(c)) continue;
+            if (c.disabled || returning.length >= 3 || entityKey(c.name) === entityKey(meName) || !named(c)) continue;
             const gap = store.turnCounter - lastSeen(c);
             if (gap < 12) continue;
             const keys = new Set([c.name, ...(c.aliases || [])].map(entityKey));
@@ -5899,7 +5853,7 @@ function formatCharacterLine(c) {
     const bits = [];
     // 외형은 지금 장면에 있는 인물(묘사에 필요)과 미확인 인물(외형이 곧 식별자)만 —
     // 장면 밖 인물의 키·머리색까지 매 턴 실을 필요는 없다. voice·관계가 훨씬 중요하다.
-    if (c.appearance && (c.sceneNow || c.provisional)) bits.push(c.appearance);
+    if (c.appearance) bits.push(c.appearance);
     // 바탕은 변하지 않는 기준, 달라진 점은 그 위에 천천히 얹히는 것 — 둘을 따로 적어야
     // 모델이 장면 하나의 기분을 성격으로 굳히지 않는다
     if (c.core) bits.push(`core (constant — the story does not rewrite this): ${c.core}`);
@@ -5975,19 +5929,9 @@ function renderPacket(parts, { withExcerpts = true, excerptLimit = Infinity, rec
     if (chars.length) {
         stable.push('## Cast (who they are — constant core, voice, and what the story has changed)');
         // 온전한 인물 노트는 장면에 있는 인물(고정 장부에서는 가장 최근에 움직인 넷)에게만
-        chars.forEach((c, i) => entry('Cast', c.id || c.name, formatCharacterLine(stableMode
-            ? { ...c, sceneNow: false, brief: i >= 4 }
-            : { ...c, brief: !c.sceneNow && i >= 2 })));
-        // 성만 같은 두 사람 — 모델은 "차도겸"과 "차유원"을 친척처럼 엮거나 닮은꼴로 그린다. 이야기가 가족이라고 하지 않았으면 남이라고 적는다
-        const kin = /형제|자매|남매|사촌|친척|가족|부모|아버지|어머니|아들|딸|삼촌|이모|고모|조카|brother|sister|cousin|family|father|mother|son|daughter|uncle|aunt/i;
-        const hangul3 = chars.filter(c => /^[가-힣]{3}$/.test(String(c.name)));
-        for (let i = 0; i < hangul3.length; i++) for (let j = i + 1; j < hangul3.length; j++) {
-            const [x, y] = [hangul3[i], hangul3[j]];
-            if (x.name[0] !== y.name[0]) continue;
-            const ties = [...(x.relationships || []).filter(r => entityKey(r.target) === entityKey(y.name)), ...(y.relationships || []).filter(r => entityKey(r.target) === entityKey(x.name))];
-            if (ties.some(r => kin.test(r.relation))) continue;
-            entry('Cast', `surname:${x.name}|${y.name}`, `(${x.name} and ${y.name} only share the surname ${x.name[0]} — they are not related and do not look alike unless the story says so.)`);
-        }
+        // 누가 장면에 있는지는 글을 쓰는 모델이 지금 대화를 보고 가린다 — Memoria가 이름으로 짐작해 카드를 줄이지 않는다
+        // (짐작이 빗나가면 정작 장면에 들어온 사람이 한 줄로만 실렸다). 자리가 모자라면 예산 단계가 인물 수를 줄인다
+        chars.forEach((c) => entry('Cast', c.id || c.name, formatCharacterLine({ ...c, sceneNow: false, brief: false })));
     }
     const bonds = takeLast(parts.bonds || [], charLimit === Infinity ? Infinity : Math.max(2, charLimit));
     if (bonds.length) {
