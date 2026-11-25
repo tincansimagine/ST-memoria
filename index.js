@@ -4742,6 +4742,26 @@ async function restoreStrayHidden(keep) {
     return back.length;
 }
 
+/**
+ * 이 확장이 자동 숨김으로 가려 둔 메시지만 다시 보인다 (직접 숨긴 메시지는 그대로). 반환: 보이게 한 수.
+ * 숨김은 채팅 파일에 남는다 — Memoria를 끄거나 자동 숨김을 꺼도 그대로 숨은 채라, 요약도 장부도 없이 최근 몇 개만 보인 모델이
+ * 이야기 첫머리(캐릭터 설명의 시작 설정)로 돌아갔다. 끄는 순간 되돌린다.
+ */
+async function unhideMemoriaHidden() {
+    const idx = [];
+    chat.forEach((m, i) => { if (m?.is_system && m.extra?.memoria_hidden) idx.push(i); });
+    if (!idx.length) return 0;
+    let start = idx[0];
+    for (let k = 1; k <= idx.length; k++) {
+        if (k < idx.length && idx[k] === idx[k - 1] + 1) continue;
+        await hideChatMessageRange(start, idx[k - 1], true);
+        if (k < idx.length) start = idx[k];
+    }
+    for (const i of idx) if (chat[i]?.extra) delete chat[i].extra.memoria_hidden;
+    getContext().saveChatDebounced?.();
+    return idx.length;
+}
+
 async function unhideAllMessages() {
     if (!chat.length) return;
     try {
@@ -9891,9 +9911,15 @@ function bindUI() {
     });
 
     // ── 설정
-    $('#memoria_enabled').on('change', function () {
-        getSettings().enabled = $(this).prop('checked');
+    $('#memoria_enabled').on('change', async function () {
+        const on = $(this).prop('checked');
+        getSettings().enabled = on;
         saveSettingsDebounced(); updateStatusUI(); updateInjection();
+        // 끄면 요약이 더는 실리지 않는다 — 요약 대신 숨겨 둔 원문을 되살려야 모델이 이야기를 잃지 않는다. 다시 켜면 다시 숨긴다
+        try {
+            if (!on) { const n = await unhideMemoriaHidden(); if (n) toastr.info(`Memoria를 꺼서, 요약 대신 숨겨 두었던 메시지 ${n}개를 다시 보이게 했습니다.`, 'Memoria'); }
+            else if (getSettings().autoHide) await applyAutoHide();
+        } catch (e) { console.error(`[${MODULE_NAME}] 숨김 되돌리기 실패:`, e); }
     });
     $('#memoria_auto_record').on('change', function () {
         getSettings().autoRecord = $(this).prop('checked');
@@ -9923,6 +9949,10 @@ function bindUI() {
         if (on) {
             await applyAutoHide();
             toastr.info('요약이 커버한 옛 메시지를 숨겼습니다. 도구 탭에서 언제든 해제할 수 있습니다.', 'Memoria');
+        } else {
+            // 끄면 숨겨 둔 것도 되돌린다 — 꺼도 숨긴 채로 남아 있으면 끈 게 아니다
+            try { const n = await unhideMemoriaHidden(); if (n) toastr.info(`자동 숨김을 꺼서, 숨겨 두었던 메시지 ${n}개를 다시 보이게 했습니다.`, 'Memoria'); }
+            catch (e) { console.error(`[${MODULE_NAME}] 숨김 되돌리기 실패:`, e); }
         }
     });
     $('#memoria_summary_language').on('change', function () {

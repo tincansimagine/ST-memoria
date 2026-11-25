@@ -509,3 +509,19 @@ test('a character the story has changed: the opening temperament is labelled as 
     assert.match(text, /- 보라 — core \(constant — the story does not rewrite this\): 말수가 적다/);
     assert.match(text, /## Cast \(who they are — how they began, their voice, and what the story has changed; where the story has changed someone, that is how they are now\)/);
 });
+
+test('messages Memoria hid are brought back when it is switched off — ones the user hid stay hidden', async () => {
+    const a = await runtime();
+    a.getStore();
+    const chat = a.context.chat;
+    for (let i = 0; i < 10; i++) chat.push({ is_user: i % 2 === 0, is_system: i < 6, mes: `${i}`, name: 'x', extra: i < 6 && i !== 2 ? { memoria_hidden: true } : {} });
+    const calls = [];
+    a.run('hideChatMessageRange = async (from, to, unhide) => { for (let i = from; i <= to; i++) chat[i].is_system = !unhide; __calls.push([from, to, unhide]); };');
+    a.context.__calls = calls;
+    assert.equal(await a.run('unhideMemoriaHidden')(), 5);
+    assert.deepEqual(calls.map(c => [...c]), [[0, 1, true], [3, 5, true]], 'each run of Memoria-hidden messages, skipping the one the user hid');
+    assert.equal(chat[2].is_system, true, 'hidden by the user — left alone');
+    assert.ok(chat.every((m, i) => i === 2 || !m.is_system));
+    assert.ok(chat.every(m => !m.extra?.memoria_hidden));
+    assert.equal(await a.run('unhideMemoriaHidden')(), 0);
+});
