@@ -3887,7 +3887,17 @@ async function commitTurns(mesIds, { silent = true, force = false, retry = 1 } =
     await maybeConsolidate(store);
     await maybeConsolidateArcs(store);
     await maybeFoldEras(store);
-    const slept = sleepStaleThreads(store.locks, store.turnCounter, Number(getSettings().threadSleepTurns) || 0);
+    let slept = sleepStaleThreads(store.locks, store.turnCounter, Number(getSettings().threadSleepTurns) || 0);
+    // 비밀·정보 격차도 아주 오래(떡밥의 두 배) 아무도 건드리지 않았으면 재운다 — 이미 끝난 비밀이 "지켜야 할 것"으로 영영 실리지 않게.
+    // 직접 적은 것과 최우선(P1)은 그대로 두고, 다시 언급되면 깨어난다
+    {
+        const after = (Number(getSettings().threadSleepTurns) || 0) * 2;
+        if (after > 0) for (const l of store.locks) {
+            if (l.status !== 'active' || l.manual || (l.priority ?? 2) <= 1 || !SOFT_LOCK_KINDS.includes(normLockKind(l.kind))) continue;
+            if (store.turnCounter - threadTouched(l) < after) continue;
+            l.status = 'dormant'; l.sleptTurn = store.turnCounter; slept++;
+        }
+    }
     if (slept) logActivity('summary', `오래 진전 없는 떡밥 ${slept}개를 잠재웠어요 (세계 탭에서 깨울 수 있어요)`);
     if (store.chunkSummaries.length + store.arcSummaries.length !== chunksBefore) logActivity('summary', '지금까지의 이야기 요약을 갱신했어요');
     persistStore();
@@ -5469,7 +5479,8 @@ async function buildPacketSections(query, supervisorPlan) {
     // 무관한 옛 떡밥이 매 턴 자리를 차지하면 모델이 억지로 꺼내 든다 (서고에는 그대로 남는다)
     const threadScene = `${query}\n${lastAssistantText}`.slice(0, 3000);
     // 작가 계획은 서약 줄로 싣지 않는다 — 문구가 곧 답이라, 가린 줄만 따로 싣는다
-    const locks = pickPledges(store.locks.filter(l => normLockKind(l.kind) !== 'author_plan').map(l => (l.kind === normLockKind(l.kind) ? l : { ...l, kind: normLockKind(l.kind) })),
+    // 사서가 "풀린 듯"이라고 본 서약은 확정 전이라도 싣지 않는다 — 끝난 비밀을 계속 지키라고 하면 모델이 끝난 일을 다시 무대에 올린다
+    const locks = pickPledges(store.locks.filter(l => normLockKind(l.kind) !== 'author_plan' && !(l.suggestResolved && !l.manual)).map(l => (l.kind === normLockKind(l.kind) ? l : { ...l, kind: normLockKind(l.kind) })),
         { turnNow: store.turnCounter, sceneText: threadScene, overlap: textOverlap });
     const plans = store.locks.filter(l => normLockKind(l.kind) === 'author_plan' && l.status === 'active' && l.veil).slice(-4).map(l => ({ id: l.id, veil: String(l.veil) }));
     const rules = store.worldRules.slice(-8);
@@ -5650,7 +5661,9 @@ async function buildPacketSections(query, supervisorPlan) {
     if (settings.addressTerms !== false) {
         const present = new Set([...characters.filter(c => c.sceneNow).map(c => String(c.name).toLowerCase()), ...(meName ? [meName.toLowerCase()] : [])]);
         const callsOf = (from, to) => { const b = (store.bonds || []).find(x => !x.disabled && entityKey(x.from) === entityKey(from) && entityKey(x.to) === entityKey(to)); return b ? bondNow(b)?.calls || '' : ''; };
-        if (present.size >= 2) address = pickAddressLines(addressRows(store), present, { known: callsOf });
+        // 오래전에 쓰던 부름말은 그때의 사정(변장·거리감·옛 관계)일 수 있다 — 최근 대화에서 쓴 것만 "지금 부르는 말"로 싣는다
+        const freshFrom = chat.length - 80;
+        if (present.size >= 2) address = pickAddressLines(addressRows(store).filter(r => r.last >= freshFrom), present, { known: callsOf });
     }
     // 약속·기한 — 작중 시간으로 센다
     const deadlines = settings.dueDates !== false && settings.storyClock ? pickStoryDeadlines(store) : [];
@@ -5701,9 +5714,44 @@ async function buildPacketSections(query, supervisorPlan) {
     }
     // 원문 회상: 옛일을 되짚는 말일 때만, 지금은 원문으로 실리지 않는 옛 대화에서 그 대목을 한 곳 찾는다
     const transcript = settings.recallQuotes !== false ? transcriptRecall(store, [query], { onScreenFrom }) : [];
+    // 오랜만에 다시 나온 사람: 인물 카드가 오래 움직이지 않았는데 지금 장면(최근 대화·이번 입력)에 이름이 나온 사람.
+    // 이런 사람은 상한에 밀려 카드가 빠지거나 짧은 줄로만 실려서, 모델이 처음 보는 사람처럼 굴거나 관계·호칭을 지어낸다.
+    // 누구인지, 장면 속 사람들과 어떤 사이인지, 마지막으로 무슨 일이 있었는지를 매 턴 바뀌는 구간에 따로 싣는다 (모델 호출 없음)
+    const returning = [];
+    {
+        const hay = `${sceneHay}\n${String(query || '').toLowerCase()}`;
+        const named = (c) => [c.name, ...(c.aliases || [])].some(n => String(n).length >= 2 && hay.includes(String(n).toLowerCase()));
+        const lastSeen = (c) => {
+            const keys = new Set([c.name, ...(c.aliases || [])].map(entityKey));
+            let t = c.updatedTurn || c.firstTurn || 0;
+            for (const x of store.turns) if ((x.present || []).some(n => keys.has(entityKey(n)))) t = Math.max(t, x.turnIndex);
+            return t;
+        };
+        const sceneKeys = new Set([...characters.filter(c => c.sceneNow).map(c => entityKey(c.name)), entityKey(meName), entityKey(name2 ? canonEntityName(store, name2) : '')].filter(Boolean));
+        for (const c of store.characters) {
+            if (c.disabled || returning.length >= 3 || entityKey(c.name) === entityKey(meName) || !named(c)) continue;
+            const gap = store.turnCounter - lastSeen(c);
+            if (gap < 12) continue;
+            const keys = new Set([c.name, ...(c.aliases || [])].map(entityKey));
+            const is = (n) => keys.has(entityKey(n));
+            const ties = [];
+            for (const b of (store.bonds || [])) {
+                if (b.disabled || !bondNow(b) || !(is(b.from) || is(b.to))) continue;
+                const other = is(b.from) ? b.to : b.from;
+                if (!sceneKeys.has(entityKey(canonEntityName(store, other))) && ties.length >= 2) continue;
+                ties.push(formatBondLine(b, { path: false }).replace(/^- /, ''));
+            }
+            for (const r of (c.relationships || [])) if (ties.length < 5) ties.push(`${c.name} — ${r.target}: ${r.relation}`);
+            for (const o of store.characters) for (const r of (o.relationships || [])) if (o !== c && is(r.target) && ties.length < 6) ties.push(`${o.name} — ${c.name}: ${r.relation}`);
+            const last = store.memories.filter(m => !m.disabled && (m.visibility || 'public') === 'public' && !(m.tags || []).includes('episode_raw') && (m.entities || []).some(is))
+                .sort((a, b) => b.turnIndex - a.turnIndex)[0];
+            returning.push({ name: c.name, gap, who: [c.role, c.occupation].filter(Boolean).join(', '), core: c.core ? cleanStr(c.core, 120) : '', ties: ties.slice(0, 6),
+                last: last ? { text: last.summary, retired: last.retired?.now || '', back: store.turnCounter - last.turnIndex } : null });
+        }
+    }
     const trackerLine = store.trackers?.length ? trackerLine0(store, [...inSceneCast.map(c => c.name), meName].filter(Boolean)) : '';
 
-    return { recordLag, bonds, plans, nowIds, address, deadlines, cards, minds, transcript, trackerLine, voice: String(settings.recallVoice || 'natural'), voices, banned, styleGuard: settings.styleGuard !== false, recallQuotes: settings.recallQuotes !== false, banTell: settings.banTell === true,
+    return { recordLag, returning, bonds, plans, nowIds, address, deadlines, cards, minds, transcript, trackerLine, voice: String(settings.recallVoice || 'natural'), voices, banned, styleGuard: settings.styleGuard !== false, recallQuotes: settings.recallQuotes !== false, banTell: settings.banTell === true,
         publicRecall: publicRecallDeduped, protectedRecall, hiddenProtected, locks, rules, scene, states, characters, milestones, items, summaries, supervisorPlan, narratorMode, turnNow: store.turnCounter, storyAges, storyTotalDays, nowNote, sources: await pickDossierExcerpts(query, recallContext), recallCandidates, trace };
 }
 
@@ -5990,6 +6038,14 @@ function renderPacket(parts, { withExcerpts = true, excerptLimit = Infinity, rec
         if (volatile.length) {
             if (persistent.length) lines.push('(scene-volatile — verify against the visible chat before relying on these:)');
             for (const s of volatile) lines.push(fmtState(s));
+        }
+    }
+    if (parts.returning?.length) {
+        lines.push('## Back in the Scene (people this story already knows, returning after a long absence. Nobody is meeting them for the first time: the ties below still stand as written, and everyone speaks to them as they always have. What happened around them back then is over unless the visible chat reopens it)');
+        for (const r of parts.returning) {
+            lines.push(`- ${r.name}${r.who ? ` (${r.who})` : ''} — last on the page ${r.gap} exchanges back${r.core ? `. ${r.core}` : ''}`);
+            for (const t of r.ties) lines.push(`  · ${t}`);
+            if (r.last) lines.push(`  · last recorded with them (${r.last.back} exchanges back — the past): ${r.last.text}${r.last.retired ? ` [no longer current — now: ${r.last.retired}]` : ''}`);
         }
     }
     if (parts.minds?.length && protectedLimit > 0 && stateLimit > 0) {
