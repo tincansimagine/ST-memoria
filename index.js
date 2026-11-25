@@ -313,7 +313,9 @@ const DEFAULT_SETTINGS = Object.freeze({
     defaultPerspective: null, // 첫 실제 채팅의 기존 선택을 한 번 이어받은 뒤 계정 공통값으로 유지
     summaryLanguage: 'auto',  // auto | ko | en | ja | hybrid
     autoHide: false,          // 요약이 커버한 옛 메시지를 채팅에서 숨겨 토큰 절약
-    preserveRecent: 6,        // 자동 숨김 시 항상 남길 최근 메시지 수
+    preserveRecent: 6,        // 자동 숨김 시 항상 남길 최근 메시지 수 (아래 단계와 상관없이 이만큼은 늘 보인다)
+    hideStep: 30,             // 자동 숨김 단계 — 답변이 이 수만큼 쌓일 때마다
+    hidePerStep: 10,          //   가장 오래된 답변을 이 수만큼 더 숨긴다 (30턴 → 10턴, 60턴 → 20턴, 90턴 → 30턴 …)
     characterTracking: true,  // 인물 도감 자동 기록
     lockEditedCharacters: true, // 사용자가 직접 고친 인물 카드는 자동으로 프로필 잠금
     eventTracking: false,     // 이벤트 연표 자동 기록 (결정적 전환점만)
@@ -4670,33 +4672,53 @@ async function maybeConsolidate(store) {
  * ============================================================ */
 
 /**
- * "지금까지의 이야기" 요약이 커버한 턴까지의 메시지를 숨긴다.
- * 최근 preserveRecent개 메시지는 항상 남긴다. 요약이 없으면 아무것도 숨기지 않는다.
+ * 자동 숨김이 숨길 마지막 메시지 번호 (-1 = 숨길 것 없음).
+ * 요약이 다룬 것을 다 숨기지 않는다 — 답변이 hideStep개 쌓일 때마다 가장 오래된 답변을 hidePerStep개씩 더 숨긴다
+ * (기본: 30턴 → 10턴, 60턴 → 20턴). 요약이 다 덮은 메시지를 전부 숨기면 모델이 최근 몇 개와 요약에만 기대게 되고,
+ * 요약이 흔들리면(다시 색인했을 때처럼) 이야기를 통째로 잃는다. 요약이 아직 다루지 않은 것과 최근 preserveRecent개는 숨기지 않는다.
  */
+function autoHideEnd(store = getStore()) {
+    const settings = getSettings();
+    const covered = summaryCoveredMesId(store);
+    if (covered < 0) return -1;
+    const replies = [];
+    chat.forEach((m, i) => { if (m && !m.is_user && !isSideMessage(m) && (!m.is_system || m.extra?.memoria_hidden)) replies.push(i); });
+    const step = Math.max(1, Math.round(Number(settings.hideStep) || 30));
+    const per = Math.max(0, Math.round(Number(settings.hidePerStep ?? 10)));
+    const hideTurns = Math.min(replies.length, Math.floor(replies.length / step) * per);
+    if (!hideTurns) return -1;
+    const keepFrom = chat.length - Math.max(1, Number(settings.preserveRecent) || 1);
+    return Math.min(replies[hideTurns - 1], covered, keepFrom - 1);
+}
+
+/**
+ * 원문이 모델에게 확실히 보이는 첫 메시지 번호 — 그 뒤의 일은 회상·요약으로 한 번 더 싣지 않는다.
+ * 숨기지 않은 메시지라도 너무 옛것은 컨텍스트 한도에서 잘릴 수 있으니, 최근 몇십 개만 "확실히 보인다"고 친다
+ * (보이는 것을 한 번 더 싣는 편이, 잘린 것을 빼먹는 편보다 낫다)
+ */
+function visibleFrom(store = getStore()) {
+    const settings = getSettings();
+    const recent = chat.length - Math.max(24, (Number(settings.preserveRecent) || 0) + 2);
+    return settings.autoHide ? Math.max(autoHideEnd(store) + 1, recent) : chat.length - 24;
+}
+
+/** 자동 숨김을 맞춘다: 숨길 범위는 숨기고, 그 밖인데 이 확장이 숨겨 둔 것은 되돌린다 (예전 판이 더 많이 숨겼거나 요약이 걷혔을 때) */
 async function applyAutoHide() {
     const settings = getSettings();
     if (!settings.enabled || !settings.autoHide || !getCurrentChatId()) return;
     const store = getStore();
-
-    const coveredTurn = Math.max(
-        0,
-        ...store.chunkSummaries.map(c => c.toTurn),
-        ...store.arcSummaries.filter(a => !a.carried).map(a => a.toTurn),
-    );
-    if (!coveredTurn) return;
-
-    // 커버된 턴들 중 가장 마지막 어시스턴트 메시지 index
-    let maxCoveredMesId = -1;
-    for (const t of store.turns) {
-        if (t.turnIndex <= coveredTurn && t.mesId > maxCoveredMesId) maxCoveredMesId = t.mesId;
-    }
-    if (maxCoveredMesId < 0) return;
-
-    const keepFrom = chat.length - Math.max(1, settings.preserveRecent);
-    const hideEnd = Math.min(maxCoveredMesId, keepFrom - 1);
-    if (hideEnd < 0) return;
-
+    const hideEnd = autoHideEnd(store);
     try {
+        const back = [];
+        chat.forEach((m, i) => { if (i > hideEnd && m?.is_system && m.extra?.memoria_hidden) back.push(i); });
+        let start = back[0];
+        for (let k = 1; k <= back.length; k++) {
+            if (k < back.length && back[k] === back[k - 1] + 1) continue;
+            await hideChatMessageRange(start, back[k - 1], true);
+            if (k < back.length) start = back[k];
+        }
+        for (const i of back) delete chat[i].extra.memoria_hidden;
+        if (hideEnd < 0) return;
         // 이 확장이 숨긴 것에만 표시를 남긴다 — 나중에 요약이 걷히면 이것만 되돌린다 (직접 숨긴 메시지는 건드리지 않는다)
         for (let i = 0; i <= hideEnd; i++) {
             const m = chat[i];
@@ -5510,7 +5532,7 @@ function transcriptRecall(store, queries, { force = false, max = 1, onScreenFrom
     const settings = getSettings();
     const qs = (queries || []).map(q => String(q || '')).filter(q => q.trim());
     if (settings.rawRecall === 'off' || chat.length < 8 || !qs.length || (!force && !PAST_QUERY_RE.test(qs.join('\n')))) return [];
-    const from = onScreenFrom ?? (chat.length - (settings.autoHide ? Math.max(1, settings.preserveRecent) + 2 : 24));
+    const from = onScreenFrom ?? visibleFrom(store);
     const lines = [], terms = new Map();
     for (let i = 0; i < chat.length; i++) {
         const m = chat[i];
@@ -5569,7 +5591,7 @@ async function buildPacketSections(query, supervisorPlan) {
     const protectedRecall = [];
     // 아직 AI가 원문으로 보고 있는 메시지의 기억은 싣지 않는다 — 같은 일이 원문과 요약으로 두 번 들어가고,
     // 요약 쪽이 "회상"이라는 이름으로 장면 바로 앞에 놓여 모델이 몇 턴 전 일에 다시 반응하게 만든다.
-    const onScreenFrom = chat.length - (settings.autoHide ? Math.max(1, settings.preserveRecent) + 2 : 24);
+    const onScreenFrom = visibleFrom(store);
     const onScreen = (m) => {
         const id = Number(m.mesId);
         return Number.isInteger(id) && id >= onScreenFrom && chat[id] && !chat[id].is_system;
@@ -5707,7 +5729,7 @@ async function buildPacketSections(query, supervisorPlan) {
     // 요약은 원문과 겹치므로 싣지 않는다. 숨겨진 옛 구간의 요약만 원문을 대신한다.
     let preservedFromTurn = Infinity;
     if (settings.autoHide) {
-        const keepFrom = chat.length - Math.max(1, settings.preserveRecent);
+        const keepFrom = visibleFrom(store);
         for (const t of store.turns) {
             if (t.mesId >= keepFrom && t.turnIndex < preservedFromTurn) preservedFromTurn = t.turnIndex;
         }
@@ -8703,6 +8725,8 @@ function renderSettingsPanel() {
     $('#memoria_summary_language').val(s.summaryLanguage || 'auto');
     $('#memoria_summary_context').val(s.summaryContextCount);
     $('#memoria_preserve_recent').val(s.preserveRecent);
+    $('#memoria_hide_step').val(s.hideStep ?? 30);
+    $('#memoria_hide_per_step').val(s.hidePerStep ?? 10);
     $('#memoria_depth').val(s.injectDepth);
     $('#memoria_record_delay').val(s.recordDelay ?? 0);
     $('#memoria_record_batch').val(s.recordBatch ?? 4);
@@ -10097,6 +10121,10 @@ function bindUI() {
     numBind('#memoria_response_tokens', 'responseTokens', 256, 65536);
     numBind('#memoria_reasoning_headroom', 'reasoningHeadroom', 0, 32768);
     numBind('#memoria_preserve_recent', 'preserveRecent', 1, 500);
+    numBind('#memoria_hide_step', 'hideStep', 1, 500);
+    numBind('#memoria_hide_per_step', 'hidePerStep', 0, 500);
+    // 숨김 단계를 바꾸면 바로 맞춘다 (줄였으면 숨겨 둔 것도 되돌린다)
+    $('#memoria_preserve_recent, #memoria_hide_step, #memoria_hide_per_step').on('change', () => { applyAutoHide().then(() => updateInjection({ quiet: true })).catch(() => {}); });
     numBind('#memoria_record_delay', 'recordDelay', 0, 20);
     numBind('#memoria_record_batch', 'recordBatch', 1, 12);
     numBind('#memoria_consolidate_every', 'consolidateEvery', 0, 200);
@@ -11258,7 +11286,8 @@ function bindEvents() {
         getStore();
         reconcileWithChat();
         // 분기한 방·밖에서 메시지가 지워진 방: 요약이 걷혔는데 숨김만 남은 원문을 되돌린다 (끝의 4개는 어떤 경우에도 숨겨 두지 않는다)
-        restoreStrayHidden(4).then(n => { if (n) getContext().saveChatDebounced?.(); }).catch(() => {});
+        // 그다음 숨김 단계를 맞춘다 — 예전 규칙으로 너무 많이 숨겨 둔 채팅도 여기서 되돌아온다
+        restoreStrayHidden(4).then(n => { if (n) getContext().saveChatDebounced?.(); }).then(() => applyAutoHide()).catch(() => {});
         renderAllPanels();
         // 채팅을 열기만 해서는 임베딩을 부르지 않는다 — 첫 메시지를 주고받을 때 제대로 짓는다
         updateInjection({ quiet: true });

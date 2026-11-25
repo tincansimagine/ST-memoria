@@ -1,7 +1,7 @@
 <div id="memoria_settings" class="memoria">
     <div class="inline-drawer">
         <div class="inline-drawer-toggle inline-drawer-header">
-            <b><i class="fa-solid fa-book-bookmark"></i> Memoria — 장기기억 서고 <span class="memoria__version">v2.10.8</span></b>
+            <b><i class="fa-solid fa-book-bookmark"></i> Memoria — 장기기억 서고 <span class="memoria__version">v2.11.0</span></b>
             <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
         </div>
         <div class="inline-drawer-content">
@@ -380,7 +380,7 @@
                     </label>
                     <label class="memoria__toggle-row" for="memoria_auto_hide">
                         <input type="checkbox" id="memoria_auto_hide">
-                        <span><strong>요약된 메시지 자동 숨김</strong><small>"지금까지의 이야기" 요약이 커버한 옛 메시지를 채팅에서 <b>숨김</b> 처리해 컨텍스트 토큰을 절약합니다. 삭제가 아니라 숨김이며, 도구 탭의 "숨긴 메시지 모두 표시"로 되돌릴 수 있습니다. 최근 메시지는 아래 설정만큼 항상 남깁니다.</small></span>
+                        <span><strong>요약된 메시지 자동 숨김</strong><small>옛 메시지를 채팅에서 <b>숨김</b> 처리해 컨텍스트 토큰을 절약합니다. 요약된 것을 한꺼번에 다 숨기지 않고, 답변이 쌓이는 만큼 가장 오래된 쪽부터 조금씩 숨깁니다 (기본: 30턴마다 10턴씩 — 30턴이면 10턴, 60턴이면 20턴). 삭제가 아니라 숨김이며, 도구 탭의 "숨긴 메시지 모두 표시"로 되돌릴 수 있고, 이 설정이나 Memoria를 끄면 바로 되돌립니다.</small></span>
                     </label>
                     <label class="memoria__toggle-row" for="memoria_ref_profile">
                         <input type="checkbox" id="memoria_ref_profile">
@@ -410,6 +410,14 @@
                             <input type="number" id="memoria_preserve_recent" min="1" max="500" step="1">
                         </div>
                         <div class="memoria__field">
+                            <label for="memoria_hide_step" title="자동 숨김: 답변이 이 수만큼 쌓일 때마다 가장 오래된 답변을 한 묶음씩 더 숨깁니다">숨김 단계(턴)</label>
+                            <input type="number" id="memoria_hide_step" min="1" max="500" step="1">
+                        </div>
+                        <div class="memoria__field">
+                            <label for="memoria_hide_per_step" title="한 단계마다 더 숨길 답변 수 (0 = 숨기지 않음)">단계마다 숨길 턴</label>
+                            <input type="number" id="memoria_hide_per_step" min="0" max="500" step="1">
+                        </div>
+                        <div class="memoria__field">
                             <label for="memoria_record_batch" title="이 턴 수만큼 모아서 사서 호출 한 번으로 기록합니다 (1 = 답장마다). 클수록 비용이 줄고, 인물·관계·상태 갱신은 그만큼 늦게 반영됩니다. 그사이 대화는 원문으로 그대로 보입니다.">묶어 기록 (턴 수)</label>
                             <input type="number" id="memoria_record_batch" min="1" max="12" step="1">
                         </div>
@@ -418,7 +426,7 @@
                             <input type="number" id="memoria_record_delay" min="0" max="20" step="1">
                         </div>
                     </div>
-                    <p class="memoria__hint"><b>최근 메시지 보존 수</b>는 "자동 숨김"을 켰을 때만 쓰입니다. 요약은 이 값과 상관없이 요약 주기마다 만들어지고, 옛 메시지는 숨겨져 요약이 대신하며, 최근 N개 메시지는 원문 그대로 남습니다. 이때 <b>원문으로 남아 있는 구간만 다루는 요약은 주입하지 않아</b> 같은 내용이 두 번 들어가지 않습니다.<br>
+                    <p class="memoria__hint"><b>숨김 단계</b>와 <b>최근 메시지 보존 수</b>는 "자동 숨김"을 켰을 때만 쓰입니다. 답변이 「숨김 단계」만큼 쌓일 때마다 가장 오래된 답변을 「단계마다 숨길 턴」만큼 더 숨기고, 숨긴 부분은 요약이 대신합니다. 요약이 아직 다루지 않은 메시지와 최근 N개 메시지는 숨기지 않습니다. 이때 <b>원문으로 남아 있는 구간만 다루는 요약은 주입하지 않아</b> 같은 내용이 두 번 들어가지 않습니다.<br>
                     <b>기록 지연</b>이 0이면 응답이 오자마자 기록합니다. 1 이상이면 그 응답 뒤로 <b>이야기가 N턴 더 진행된 뒤에야</b> 기록해서, 리롤·분석 QR·지운 메시지에 사서 호출을 쓰지 않습니다. 한 턴은 내 답장 또는 새 응답 중 많은 쪽으로 세므로, <b>인풋 없이 전개지시·풀사칭으로만 진행해도</b> 정상 동작합니다. 새 채팅의 <b>그리팅</b>은 이 값과 상관없이 이야기가 한 턴 진행된 뒤에 기록합니다.</p>
                 </div>
                 <div class="memoria__section">
