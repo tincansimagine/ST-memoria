@@ -267,3 +267,16 @@ test('a person who joined the story later is not marked as absent from its old s
     const text = a.renderPacket(back);
     assert.doesNotMatch(text, /유원 not there/);
 });
+
+test('two people who only share a surname are said to be unrelated, unless the story ties them as family', async () => {
+    const a = await app();
+    const store = a.getStore();
+    store.characters.push(card('차도겸'), card('차유원'), card('윤시온'));
+    a.context.chat.push({ is_user: true, mes: '도겸과 유원, 시온이 마주쳤다.', name: '여행자' });
+    let packet = (await a.buildPacketWithinBudget('유원', null)).text;
+    assert.match(packet, /\(차도겸 and 차유원 only share the surname 차 — they are not related and do not look alike unless the story says so\.\)/);
+    assert.doesNotMatch(packet, /윤시온 and/);
+    store.characters[1].relationships = [{ target: '차도겸', relation: '사촌 형' }];
+    packet = (await a.buildPacketWithinBudget('유원', null)).text;
+    assert.doesNotMatch(packet, /only share the surname/);
+});

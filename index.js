@@ -6341,6 +6341,16 @@ function renderPacket(parts, { withExcerpts = true, excerptLimit = Infinity, rec
         chars.forEach((c, i) => entry('Cast', c.id || c.name, formatCharacterLine(stableMode
             ? { ...c, sceneNow: false, brief: i >= 4 }
             : { ...c, brief: !c.sceneNow && i >= 2 })));
+        // 성이 같은 두 사람 — 모델은 "차도겸"과 "차유원"을 친척처럼 엮거나 닮은꼴로 그린다. 이야기가 가족이라고 하지 않았으면 남이라고 적는다
+        const kin = /형제|자매|남매|사촌|친척|가족|부모|아버지|어머니|아들|딸|삼촌|이모|고모|조카|brother|sister|cousin|family|father|mother|son|daughter|uncle|aunt/i;
+        const hangul3 = chars.filter(c => /^[가-힣]{3}$/.test(String(c.name)));
+        for (let i = 0; i < hangul3.length; i++) for (let j = i + 1; j < hangul3.length; j++) {
+            const [x, y] = [hangul3[i], hangul3[j]];
+            if (x.name[0] !== y.name[0]) continue;
+            const ties = [...(x.relationships || []).filter(r => entityKey(r.target) === entityKey(y.name)), ...(y.relationships || []).filter(r => entityKey(r.target) === entityKey(x.name))];
+            if (ties.some(r => kin.test(r.relation))) continue;
+            entry('Cast', `surname:${x.name}|${y.name}`, `(${x.name} and ${y.name} only share the surname ${x.name[0]} — they are not related and do not look alike unless the story says so.)`);
+        }
     }
     const bonds = takeLast(parts.bonds || [], charLimit === Infinity ? Infinity : Math.max(2, charLimit));
     if (bonds.length) {
