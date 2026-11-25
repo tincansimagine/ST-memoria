@@ -3887,6 +3887,7 @@ async function commitTurns(mesIds, { silent = true, force = false, retry = 1 } =
     await maybeConsolidate(store);
     await maybeConsolidateArcs(store);
     await maybeFoldEras(store);
+    await maybeAuditPledges(store);
     let slept = sleepStaleThreads(store.locks, store.turnCounter, Number(getSettings().threadSleepTurns) || 0);
     // 비밀·정보 격차도 아주 오래(떡밥의 두 배) 아무도 건드리지 않았으면 재운다 — 이미 끝난 비밀이 "지켜야 할 것"으로 영영 실리지 않게.
     // 직접 적은 것과 최우선(P1)은 그대로 두고, 다시 언급되면 깨어난다
@@ -5339,6 +5340,83 @@ function currentRecallQuery() {
     return '';
 }
 
+/**
+ * 호칭만으로 불린 사람 찾기 (모델 호출 없음). 관계선의 "부르는 말"이 한 사람만 가리킬 때, 그 말이 최근 글에 부름말로 나오면 그 사람이다.
+ * "형"이 "인형·형태"에 걸리지 않게 낱말 경계를 보고, 누구에게나 쓰는 말(너·당신)과 여러 사람을 가리키는 호칭은 쓰지 않는다. 반환: 인물 열쇠 집합
+ */
+const TITLE_SKIP = new Set(['너', '당신', '자네', '그대', '니', '네', 'you', '이름', '반말', '존댓말', 'name', 'casual', 'formal']);
+function titleReferred(store, hayLower) {
+    const out = new Set();
+    if (!hayLower.trim()) return out;
+    const byTerm = new Map();
+    for (const b of (store.bonds || [])) {
+        const calls = b.disabled ? '' : String(bondNow(b)?.calls || '');
+        if (!calls) continue;
+        const to = entityKey(canonEntityName(store, b.to));
+        for (const raw of calls.replace(/\([^)]*\)|（[^）]*）/g, ' ').split(/[\/,，·;]|\s또는\s|\sor\s/)) {
+            const term = raw.replace(/["'“”‘’]/g, '').trim().toLowerCase();
+            if (!term || [...term].length > 10 || term.split(/\s+/).length > 2 || TITLE_SKIP.has(term)) continue;
+            if (!byTerm.has(term)) byTerm.set(term, new Set());
+            byTerm.get(term).add(to);
+        }
+    }
+    const esc = (t) => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    for (const [term, who] of byTerm) {
+        if (who.size !== 1) continue;
+        // 이름이 든 부름말은 이름 찾기가 이미 맡는다 — 여기서는 호칭만
+        const rx = new RegExp(`(?:^|[^\\p{L}\\p{N}])${esc(term)}(?:아|야|이|가|은|는|을|를|도|의|께|님|한테|에게|이랑|랑|하고)?(?![\\p{L}\\p{N}])`, 'u');
+        if (rx.test(hayLower)) out.add([...who][0]);
+    }
+    return out;
+}
+
+const PLEDGE_AUDIT_PROMPT = `You audit the open-pledge list of a long roleplay against its story records. Each pledge is tagged like [a1]. A pledge is OVER when the records show it has already been settled: the secret came out or stopped mattering, the people it was kept from found out, the promise was kept or dropped, the question was answered, the situation it guarded ended.
+
+For each pledge that is over, quote the few words of the records that show it. If the records do not plainly show it, the pledge is still open — leave it out. Never guess.
+
+Reply with ONE minified JSON object and nothing else:
+{"over":[{"tag":"a1","how":"one clause on how it ended — written in the language of the records","said":"a few words copied character for character from the records"}]}
+Use an empty array when every pledge is still open.`;
+
+/**
+ * 묵은 서약 훑기 — 오래된 서약을 지금까지의 요약과 견주어, 이미 끝난 것에 "해소된 듯"을 붙인다 (붙은 것은 장부에 싣지 않는다. 지우지 않는다).
+ * 채팅마다 한 번, 그 뒤로는 150턴마다 저절로 돈다 (호출 1회). 직접 적은 서약과 P1은 건드리지 않는다. 반환: 표시한 수 (-1 = 훑을 것이 없음)
+ */
+async function auditPledges(store) {
+    const old = store.locks.filter(l => l.status === 'active' && !l.manual && !l.suggestResolved && (l.priority ?? 2) > 1
+        && normLockKind(l.kind) !== 'author_plan' && store.turnCounter - threadTouched(l) >= 20)
+        .sort((a, b) => (a.checkedTurn ?? -1) - (b.checkedTurn ?? -1) || (a.turnIndex || 0) - (b.turnIndex || 0)).slice(0, 24);
+    const records = [...store.arcSummaries, ...store.chunkSummaries].sort((a, b) => a.fromTurn - b.fromTurn).map(x => x.text).join('\n\n');
+    const recent = [...store.turns].sort((a, b) => a.turnIndex - b.turnIndex).slice(-12).map(t => t.summary).filter(Boolean).join('\n');
+    const material = `${records.slice(-14000)}\n\nMost recent turns:\n${recent}`;
+    if (!old.length || material.trim().length < 200) return -1;
+    const tags = new Map(old.map((l, i) => [`a${i + 1}`, l]));
+    const reply = await callAuxLLM(PLEDGE_AUDIT_PROMPT, `Story records, oldest first:\n${material}\n\nOpen pledges:\n${[...tags].map(([t, l]) => `[${t}] (${normLockKind(l.kind)}) ${l.summary}${l.latest?.text ? ` — now: ${l.latest.text}` : ''}`).join('\n')}`, { task: 'summary', maxTokens: auxTokens(1500) });
+    if (getStore() !== store) return 0;
+    const parsed = parseJsonLoose(reply);
+    let n = 0;
+    for (const o of (Array.isArray(parsed?.over) ? parsed.over : [])) {
+        const l = tags.get(String(o?.tag || '').trim().toLowerCase());
+        const how = cleanStr(o?.how, 200);
+        if (!l || l.status !== 'active' || !groundedIn(cleanStr(o?.said, 120), material) || soundsHedged(how)) continue;
+        l.suggestResolved = true;
+        l.suggestTurn = store.turnCounter;
+        if (how) l.suggestHow = how;
+        n++;
+    }
+    for (const l of old) l.checkedTurn = store.turnCounter;
+    return n;
+}
+async function maybeAuditPledges(store) {
+    if (store.pledgeAudit != null && store.turnCounter - store.pledgeAudit < 150) return;
+    if (store.turnCounter < 40) return;
+    store.pledgeAudit = store.turnCounter; // 실패해도 턴마다 다시 부르지 않는다
+    try {
+        const n = await auditPledges(store);
+        if (n > 0) logActivity('summary', `묵은 서약을 훑어 이미 끝난 듯한 ${n}개를 장부에서 뺐어요 (세계 탭에서 ✔로 닫거나 되살릴 수 있어요)`);
+    } catch (e) { console.debug(`[${MODULE_NAME}] 서약 훑기 실패`, e); }
+}
+
 /** 기억 id → 지금 장면에 있지만 그 일이 있을 때 자리에 없던 사람 */
 const absentNotes = new Map();
 
@@ -5519,8 +5597,11 @@ async function buildPacketSections(query, supervisorPlan) {
     // 사서가 적어 둔 "지금 장면에 있는 인물"도 함께 본다 — 최근 몇 메시지에 이름이 안 불려도 자리에 있는 사람
     const filedPresent = String(scene.present || '').toLowerCase();
     const sceneHay = `${recentSceneText}\n${filedPresent}`;
+    // 이름 없이 호칭으로만 불린 사람 ("형", "선배") — 관계선에 적힌 부르는 말로 누구인지 찾는다
+    const referred = titleReferred(store, `${recentSceneText}\n${String(query || '').toLowerCase()}`);
     const inScene = (c) => sceneHay.includes(String(c.name).toLowerCase())
-        || (c.aliases || []).some(a => a.length >= 2 && sceneHay.includes(String(a).toLowerCase()));
+        || (c.aliases || []).some(a => a.length >= 2 && sceneHay.includes(String(a).toLowerCase()))
+        || referred.has(entityKey(c.name));
     // 상태 보드: 지금 장면과 닿는 것부터, 그다음 최근에 바뀐 것. 예전에는 저장 순서의 끝 10개를 실어
     // 장면과 무관한 인물의 묵은 상태가 자리를 차지하고 정작 눈앞 인물의 상태가 밀려났다.
     const stateInScene = (s) => {
@@ -5720,7 +5801,7 @@ async function buildPacketSections(query, supervisorPlan) {
     const returning = [];
     {
         const hay = `${sceneHay}\n${String(query || '').toLowerCase()}`;
-        const named = (c) => [c.name, ...(c.aliases || [])].some(n => String(n).length >= 2 && hay.includes(String(n).toLowerCase()));
+        const named = (c) => referred.has(entityKey(c.name)) || [c.name, ...(c.aliases || [])].some(n => String(n).length >= 2 && hay.includes(String(n).toLowerCase()));
         const lastSeen = (c) => {
             const keys = new Set([c.name, ...(c.aliases || [])].map(entityKey));
             let t = c.updatedTurn || c.firstTurn || 0;
@@ -10997,6 +11078,16 @@ function bindExtraUI() {
     $('#memoria_tracker_add').on('click', () => editTracker(null));
     $('#memoria_date_fix').on('click', fixStoryDate);
     $('#memoria_veil_plans').on('click', veilPlans);
+    $('#memoria_pledge_audit').on('click', async function () {
+        const store = getStore();
+        toastr.info('묵은 서약을 훑는 중…', 'Memoria');
+        try {
+            const n = await auditPledges(store);
+            store.pledgeAudit = store.turnCounter;
+            persistStore(); renderStatePanel(); updateInjection({ quiet: true });
+            toastr.success(n < 0 ? '훑을 묵은 서약이나 요약이 아직 없습니다.' : n ? `끝난 듯한 서약 ${n}개를 장부에서 뺐습니다. 목록에서 ✔로 닫을 수 있어요.` : '끝난 서약을 찾지 못했습니다.', 'Memoria');
+        } catch (e) { toastr.error(`훑지 못했습니다: ${e?.message || e}`, 'Memoria'); }
+    });
     $('#memoria_recall_test').on('click', openRecallTest);
     $('#memoria_reader_open').on('click', openReader);
     $('#memoria_wipe_open').on('click', openWipe);
