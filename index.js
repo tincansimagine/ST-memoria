@@ -314,8 +314,8 @@ const DEFAULT_SETTINGS = Object.freeze({
     summaryLanguage: 'auto',  // auto | ko | en | ja | hybrid
     autoHide: false,          // 요약이 커버한 옛 메시지를 채팅에서 숨겨 토큰 절약
     preserveRecent: 6,        // 자동 숨김 시 항상 남길 최근 메시지 수 (아래 단계와 상관없이 이만큼은 늘 보인다)
-    hideStep: 30,             // 자동 숨김 단계 — 답변이 이 수만큼 쌓일 때마다
-    hidePerStep: 10,          //   가장 오래된 답변을 이 수만큼 더 숨긴다 (30턴 → 10턴, 60턴 → 20턴, 90턴 → 30턴 …)
+    keepTurns: 40,            // 자동 숨김 — 최근 답변은 늘 이만큼 원문으로 보이게 두고,
+    hideUnit: 20,             //   그보다 오래된 답변은 이 수만큼씩 묶어서 숨긴다 (보이는 답변이 40~59개 사이를 오간다)
     characterTracking: true,  // 인물 도감 자동 기록
     lockEditedCharacters: true, // 사용자가 직접 고친 인물 카드는 자동으로 프로필 잠금
     eventTracking: false,     // 이벤트 연표 자동 기록 (결정적 전환점만)
@@ -4673,9 +4673,10 @@ async function maybeConsolidate(store) {
 
 /**
  * 자동 숨김이 숨길 마지막 메시지 번호 (-1 = 숨길 것 없음).
- * 요약이 다룬 것을 다 숨기지 않는다 — 답변이 hideStep개 쌓일 때마다 가장 오래된 답변을 hidePerStep개씩 더 숨긴다
- * (기본: 30턴 → 10턴, 60턴 → 20턴). 요약이 다 덮은 메시지를 전부 숨기면 모델이 최근 몇 개와 요약에만 기대게 되고,
- * 요약이 흔들리면(다시 색인했을 때처럼) 이야기를 통째로 잃는다. 요약이 아직 다루지 않은 것과 최근 preserveRecent개는 숨기지 않는다.
+ * 요약이 다룬 것을 다 숨기지 않는다 — 최근 keepTurns개 답변은 늘 원문으로 두고, 그보다 오래된 답변을 hideUnit개씩 묶어서 숨긴다
+ * (기본 40·20: 60턴이면 20턴, 80턴이면 40턴을 숨겨 보이는 답변이 40~59개 사이를 오간다. 답변마다 숨김이 바뀌지 않아 프롬프트 캐시도 덜 깨진다).
+ * 요약이 다 덮은 메시지를 전부 숨기면 모델이 최근 몇 개와 요약에만 기대게 되고, 요약이 흔들리면(다시 색인했을 때처럼) 이야기를 통째로 잃는다.
+ * 요약이 아직 다루지 않은 것과 최근 preserveRecent개 메시지는 숨기지 않는다.
  */
 function autoHideEnd(store = getStore()) {
     const settings = getSettings();
@@ -4683,9 +4684,9 @@ function autoHideEnd(store = getStore()) {
     if (covered < 0) return -1;
     const replies = [];
     chat.forEach((m, i) => { if (m && !m.is_user && !isSideMessage(m) && (!m.is_system || m.extra?.memoria_hidden)) replies.push(i); });
-    const step = Math.max(1, Math.round(Number(settings.hideStep) || 30));
-    const per = Math.max(0, Math.round(Number(settings.hidePerStep ?? 10)));
-    const hideTurns = Math.min(replies.length, Math.floor(replies.length / step) * per);
+    const keep = Math.max(1, Math.round(Number(settings.keepTurns) || 40));
+    const unit = Math.max(1, Math.round(Number(settings.hideUnit) || 20));
+    const hideTurns = replies.length > keep ? Math.floor((replies.length - keep) / unit) * unit : 0;
     if (!hideTurns) return -1;
     const keepFrom = chat.length - Math.max(1, Number(settings.preserveRecent) || 1);
     return Math.min(replies[hideTurns - 1], covered, keepFrom - 1);
@@ -8725,8 +8726,8 @@ function renderSettingsPanel() {
     $('#memoria_summary_language').val(s.summaryLanguage || 'auto');
     $('#memoria_summary_context').val(s.summaryContextCount);
     $('#memoria_preserve_recent').val(s.preserveRecent);
-    $('#memoria_hide_step').val(s.hideStep ?? 30);
-    $('#memoria_hide_per_step').val(s.hidePerStep ?? 10);
+    $('#memoria_keep_turns').val(s.keepTurns ?? 40);
+    $('#memoria_hide_unit').val(s.hideUnit ?? 20);
     $('#memoria_depth').val(s.injectDepth);
     $('#memoria_record_delay').val(s.recordDelay ?? 0);
     $('#memoria_record_batch').val(s.recordBatch ?? 4);
@@ -10121,10 +10122,10 @@ function bindUI() {
     numBind('#memoria_response_tokens', 'responseTokens', 256, 65536);
     numBind('#memoria_reasoning_headroom', 'reasoningHeadroom', 0, 32768);
     numBind('#memoria_preserve_recent', 'preserveRecent', 1, 500);
-    numBind('#memoria_hide_step', 'hideStep', 1, 500);
-    numBind('#memoria_hide_per_step', 'hidePerStep', 0, 500);
+    numBind('#memoria_keep_turns', 'keepTurns', 1, 1000);
+    numBind('#memoria_hide_unit', 'hideUnit', 1, 500);
     // 숨김 단계를 바꾸면 바로 맞춘다 (줄였으면 숨겨 둔 것도 되돌린다)
-    $('#memoria_preserve_recent, #memoria_hide_step, #memoria_hide_per_step').on('change', () => { applyAutoHide().then(() => updateInjection({ quiet: true })).catch(() => {}); });
+    $('#memoria_preserve_recent, #memoria_keep_turns, #memoria_hide_unit').on('change', () => { applyAutoHide().then(() => updateInjection({ quiet: true })).catch(() => {}); });
     numBind('#memoria_record_delay', 'recordDelay', 0, 20);
     numBind('#memoria_record_batch', 'recordBatch', 1, 12);
     numBind('#memoria_consolidate_every', 'consolidateEvery', 0, 200);

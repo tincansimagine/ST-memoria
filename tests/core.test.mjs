@@ -526,40 +526,39 @@ test('messages Memoria hid are brought back when it is switched off — ones the
     assert.equal(await a.run('unhideMemoriaHidden')(), 0);
 });
 
-test('auto-hide hides the oldest replies in steps (10 more every 30), never what no summary covers, and brings back what an older rule hid', async () => {
+test('auto-hide keeps the latest replies in view and hides older ones in blocks, never what no summary covers, and brings back what an older rule hid', async () => {
     const a = await runtime();
     const store = a.getStore();
     const s = a.getSettings();
     s.autoHide = true; s.preserveRecent = 6;
-    assert.deepEqual([s.hideStep, s.hidePerStep], [30, 10]);
+    assert.deepEqual([s.keepTurns, s.hideUnit], [40, 20]);
     const chat = a.context.chat;
     a.run('hideChatMessageRange = async (from, to, unhide) => { for (let i = from; i <= to; i++) chat[i].is_system = !unhide; };');
     const replies = (n) => { chat.length = 0; for (let i = 0; i < n; i++) chat.push({ is_user: false, mes: `${i}번째 답변`, name: '아리아', extra: {} }); };
     const end = () => a.run('autoHideEnd')(store);
-    store.turns = Array.from({ length: 95 }, (_, i) => ({ id: `t${i + 1}`, mesId: i, turnIndex: i + 1, summary: `${i + 1}` }));
-    store.chunkSummaries = [{ id: 'c', fromTurn: 1, toTurn: 88, text: '요약' }];
+    store.turns = Array.from({ length: 130 }, (_, i) => ({ id: `t${i + 1}`, mesId: i, turnIndex: i + 1, summary: `${i + 1}` }));
+    store.chunkSummaries = [{ id: 'c', fromTurn: 1, toTurn: 128, text: '요약' }];
 
-    replies(29);
-    assert.equal(end(), -1, 'under 30 replies nothing is hidden');
-    replies(30);
-    assert.equal(end(), 9, '30 replies → the oldest 10');
+    replies(59);
+    assert.equal(end(), -1, 'under 60 replies nothing is hidden');
     replies(60);
-    assert.equal(end(), 19, '60 → 20');
-    replies(89);
-    assert.equal(end(), 19, '89 → still 20');
-    replies(95);
-    assert.equal(end(), 29, '90+ → 30');
+    assert.equal(end(), 19, '60 → the oldest 20, 40 in view');
+    replies(79);
+    assert.equal(end(), 19, '79 → still 20, 59 in view');
+    replies(80);
+    assert.equal(end(), 39, '80 → 40, 40 in view');
+    replies(129);
+    assert.equal(end(), 79, '129 → 80, 49 in view — the visible window stays between 40 and 59');
     store.chunkSummaries = [{ id: 'c', fromTurn: 1, toTurn: 12, text: '요약' }];
     assert.equal(end(), 11, 'never past what a summary covers');
-    store.chunkSummaries = [{ id: 'c', fromTurn: 1, toTurn: 88, text: '요약' }];
+    store.chunkSummaries = [{ id: 'c', fromTurn: 1, toTurn: 128, text: '요약' }];
 
-    // 예전 규칙이 최근 6개 빼고 다 숨겨 둔 채팅 — 맞추면 오래된 30개만 숨은 채로 남는다
-    replies(95);
-    chat.forEach((m, i) => { if (i < 89) { m.is_system = true; m.extra.memoria_hidden = true; } });
+    // 예전 규칙이 최근 6개 빼고 다 숨겨 둔 채팅 — 맞추면 오래된 20개만 숨은 채로 남는다
+    replies(65);
+    chat.forEach((m, i) => { if (i < 59) { m.is_system = true; m.extra.memoria_hidden = true; } });
     chat[50].extra = {};   // 사용자가 직접 숨긴 것
     await a.run('applyAutoHide')();
-    assert.equal(chat.filter(m => m.is_system).length, 31);
-    assert.ok(chat.slice(0, 30).every(m => m.is_system));
+    assert.equal(chat.filter(m => m.is_system).length, 21);
+    assert.ok(chat.slice(0, 20).every(m => m.is_system));
     assert.equal(chat[50].is_system, true, 'one the user hid stays hidden');
-    assert.ok(chat.slice(30).every((m, i) => i + 30 === 50 || !m.is_system));
 });
