@@ -342,9 +342,10 @@ const DEFAULT_SETTINGS = Object.freeze({
     recallCooldown: true,     // 회상 쉬어가기 — 앞선 답변들에 연달아 실린 기억은 순서를 미룬다 (직접 꺼내면 그대로 나온다)
     recallQuotes: true,       // 회상에 옛 원문 대사 인용을 싣는다 (옛 말투가 돌아오면 끈다)
     readerLang: 'ko',         // 읽는 말로 보기의 말
-    rawRecall: 'auto',        // 원문 회상 — 옛일을 되짚는 말일 때만 숨긴 옛 대화에서 그 대목을 한 곳 찾아 싣는다 (모델 호출 없음. 'off' = 끔)
-    sceneCards: 1,            // 떠올린 옛 구간을 장면 카드(순서대로의 일 · 원문 대사)로 펼치는 수 — 기록 호출에 함께 받아 두므로 호출은 늘지 않는다 (0 = 끔)
-    mindLines: 2,             // 장면 속 인물마다 마음에 둔 것(속마음 기억)을 이 줄 수까지 따로 싣는다 (0 = 끔)
+    rawRecall: 'off',         // 원문 회상 — 옛일을 되짚는 말일 때만 숨긴 옛 대화에서 그 대목을 한 곳 찾아 싣는다 (모델 호출 없음. 'off' = 끔)
+                              // 기본 끔: 옛 원문을 통째로 최근 대화 옆에 실으면 모델이 그 시절로 되돌아간다
+    sceneCards: 0,            // (기본 끔 — 옛 장면을 펼쳐 실으면 모델이 그 시절로 되돌아간다)  떠올린 옛 구간을 장면 카드(순서대로의 일 · 원문 대사)로 펼치는 수 — 기록 호출에 함께 받아 두므로 호출은 늘지 않는다 (0 = 끔)
+    mindLines: 0,             // (기본 끔 — 오래된 속마음이 지금 마음처럼 실린다)  장면 속 인물마다 마음에 둔 것(속마음 기억)을 이 줄 수까지 따로 싣는다 (0 = 끔)
     recallVoice: 'natural',   // 지난 일을 꺼내는 정도: quiet | natural | active
     skipOoc: true,            // OOC 로 시작하는 내 말과 그에 대한 AI 의 이야기 밖 대답은 기록하지 않는다
     presentNow: true,         // 장면에 있는 인물의 위치·옷차림·다친 곳·기분을 사람마다 한 줄로
@@ -372,7 +373,8 @@ const DEFAULT_SETTINGS = Object.freeze({
     bundleBase: null,         // 세트가 적용된 동안 맡아 둔 기본 설정
     noticed: {},              // 한 번만 띄우는 안내를 이미 봤는지
     promptRev: 23,
-    settingsRev: 3,
+    settingsRev: 4,
+    chapterRecall: false,     // 옛 챕터 떠올리기 — 지금 말과 맞는 아주 옛 챕터 요약을 하나 더 싣는다 (기본 끔: 끝난 시절을 지금처럼 끌어온다)
     fossil: { settling: 12, fossilized: 40, deep: 120 },
     prompts: {
         archivist: DEFAULT_ARCHIVIST_PROMPT,
@@ -436,6 +438,14 @@ function getSettings() {
     if (s.settingsRev < 3) {
         if (s.tokenBudget === 4000) s.tokenBudget = 8000;
         s.settingsRev = 3;
+    }
+    // rev 4: 옛 기록을 최근 대화 옆에 끌어오는 회상 덧붙이기를 기본으로 끈다 — 켜 두면 모델이 끝난 시절(이야기 첫머리)로 되돌아갔다.
+    // 옛 기본값 그대로인 것만 끈다 (직접 바꾼 값은 둔다)
+    if (s.settingsRev < 4) {
+        if (s.rawRecall === 'auto') s.rawRecall = 'off';
+        if (s.sceneCards === 1) s.sceneCards = 0;
+        if (s.mindLines === 2) s.mindLines = 0;
+        s.settingsRev = 4;
     }
     return s;
 }
@@ -5693,7 +5703,7 @@ async function buildPacketSections(query, supervisorPlan) {
     ];
     // 챕터 회상: 주입 창(최근 3개)에서 밀려난 옛 챕터도 지금 질의와 강하게 맞으면 한 자리 소환 —
     // 기억 조각은 파편이지만 챕터 레코드는 그 시절의 연결된 맥락을 준다
-    const recalledChapter = await pickRecalledChapter(store, query, lastAssistantText);
+    const recalledChapter = settings.chapterRecall === true ? await pickRecalledChapter(store, query, lastAssistantText) : null;
     if (recalledChapter) summaries.unshift({ ...recalledChapter, level: 'chunk', recalled: true });
 
     // 서사 시계 지도 (기억 줄의 "얼마나 옛일" 표기용)
