@@ -648,6 +648,49 @@ function getStore() {
  * 이야기가 아닌 메시지인가 — QR이 롤플을 멈추고 뽑은 퀴즈·인터뷰·운세 같은 막간, /comment 결과.
  * 기록·회상 질의·연속성 검사·상태창에서 모두 뺀다. 사용자가 분류 창에서 정한 값이 자동 판정보다 우선한다.
  */
+/**
+ * 다른 확장(백그라운드 답변)이 채팅을 떠난 사이 받아 둔 반쪽짜리 답. 완성본은 나중에 따로 도착한다 — 기록과 점검은 그때 한다
+ * (반쪽을 적어 두면 완성본이 왔을 때 같은 턴을 한 번 더 적느라 호출만 는다)
+ */
+function isPartialReply(mes) {
+    if (!mes) return false;
+    if (mes.extra?.bg_reply) return true;
+    const info = Array.isArray(mes.swipe_info) ? mes.swipe_info[Number(mes.swipe_id ?? 0)] : null;
+    return !!info?.extra?.bg_reply;
+}
+
+/**
+ * 숨긴 대화가 아니라 원래부터 프롬프트에 들어가지 않는 메시지 (/comment 메모, 실리태번 안내문).
+ * 숨김 표시(is_system)가 같아서, 구간째로 숨김을 풀면 이것까지 '보이는 대화'가 되어 모델에게 넘어간다.
+ */
+function isSystemNote(m) {
+    if (!m?.is_system || m.extra?.memoria_hidden) return false;
+    const type = m.extra?.type;
+    return !!(m.extra?.isSmallSys || (type && type !== 'narrator') || m.name === 'SillyTavern System');
+}
+
+/** 이 확장이 마지막으로 숨김을 바꾼 때 — 사용자가 직접 숨긴 것과 구분한다 */
+let ownHideAt = 0;
+
+async function setHiddenRange(start, end, unhide) {
+    ownHideAt = Date.now();
+    try { await hideChatMessageRange(start, end, unhide); } finally { ownHideAt = Date.now(); }
+}
+
+/** 고른 번호만 숨김을 푼다 (이어진 구간끼리 묶어서). 메모·안내문이 사이에 끼어 있어도 건드리지 않는다 */
+async function unhideIndexes(idx) {
+    const list = [...new Set(idx)].sort((a, b) => a - b);
+    if (!list.length) return 0;
+    let start = list[0];
+    for (let k = 1; k <= list.length; k++) {
+        if (k < list.length && list[k] === list[k - 1] + 1) continue;
+        await setHiddenRange(start, list[k - 1], true);
+        if (k < list.length) start = list[k];
+    }
+    for (const i of list) if (chat[i]?.extra) delete chat[i].extra.memoria_hidden;
+    return list.length;
+}
+
 function isSideMessage(mes) {
     const mode = getSettings().qrMode || 'side';
     if (!mes) return false;
@@ -3494,6 +3537,7 @@ async function commitTurns(mesIds, { silent = true, force = false, retry = 1 } =
         // 숨김(is_system) 메시지는 기본적으로 건너뛰되, 자동 숨김으로 가려진 기존 턴의 재기록(force)은 허용
         if (mes.is_system && !force) continue;
         if (isSideMessage(mes)) continue; // 막간은 이야기가 아니다
+        if (isPartialReply(mes)) continue; // 반쪽짜리 답 — 완성본이 오면 그때 적는다
         const userMes = findPrecedingUserMessage(id);
         // 사서에게는 화면에 보이는 이야기만 보여준다 — 다른 확장의 숨은 패킷·상태창 잔해 차단
         const text = visibleProse(mes.mes);
@@ -4954,7 +4998,7 @@ async function applyAutoHide() {
         let start = back[0];
         for (let k = 1; k <= back.length; k++) {
             if (k < back.length && back[k] === back[k - 1] + 1) continue;
-            await hideChatMessageRange(start, back[k - 1], true);
+            await setHiddenRange(start, back[k - 1], true);
             if (k < back.length) start = back[k];
         }
         for (const i of back) delete chat[i].extra.memoria_hidden;
@@ -4966,7 +5010,7 @@ async function applyAutoHide() {
             if (typeof m.extra !== 'object' || !m.extra) m.extra = {};
             m.extra.memoria_hidden = true;
         }
-        await hideChatMessageRange(0, hideEnd, false);
+        await setHiddenRange(0, hideEnd, false);
     } catch (e) {
         console.error(`[${MODULE_NAME}] 자동 숨김 실패:`, e);
     }
@@ -4996,7 +5040,7 @@ async function restoreStrayHidden(keep) {
     let start = back[0];
     for (let k = 1; k <= back.length; k++) {
         if (k < back.length && back[k] === back[k - 1] + 1) continue;
-        try { await hideChatMessageRange(start, back[k - 1], true); } catch (e) { console.warn(`[${MODULE_NAME}] 숨김 되돌리기 실패`, e); }
+        try { await setHiddenRange(start, back[k - 1], true); } catch (e) { console.warn(`[${MODULE_NAME}] 숨김 되돌리기 실패`, e); }
         start = back[k];
     }
     for (const i of back) if (chat[i]?.extra) delete chat[i].extra.memoria_hidden;
@@ -5016,7 +5060,7 @@ async function unhideMemoriaHidden() {
     let start = idx[0];
     for (let k = 1; k <= idx.length; k++) {
         if (k < idx.length && idx[k] === idx[k - 1] + 1) continue;
-        await hideChatMessageRange(start, idx[k - 1], true);
+        await setHiddenRange(start, idx[k - 1], true);
         if (k < idx.length) start = idx[k];
     }
     for (const i of idx) if (chat[i]?.extra) delete chat[i].extra.memoria_hidden;
@@ -5024,12 +5068,41 @@ async function unhideMemoriaHidden() {
     return idx.length;
 }
 
+/**
+ * 숨김 해제. 이 확장이 숨긴 것과 직접 숨긴 것을 나눠 고르게 하고, 메모·안내문은 어느 쪽에서도 건드리지 않는다.
+ */
 async function unhideAllMessages() {
-    if (!chat.length) return;
+    const mine = [];
+    const yours = [];
+    let notes = 0;
+    chat.forEach((m, i) => {
+        if (!m?.is_system) return;
+        if (isSystemNote(m)) { notes++; return; }
+        (m.extra?.memoria_hidden ? mine : yours).push(i);
+    });
+    const noteLine = notes ? `메모·안내문 ${notes}개는 원래 프롬프트에 들어가지 않는 것이라 그대로 둡니다.` : '';
+    if (!mine.length && !yours.length) {
+        toastr.info(`숨긴 메시지가 없습니다.${noteLine ? ` ${noteLine}` : ''}`, 'Memoria');
+        return;
+    }
+    let pick = mine.length && yours.length ? '' : (mine.length ? 'mine' : 'yours');
+    if (!pick) {
+        const $dlg = $(`<div class="memoria-pop memoria-pop--form">
+            <h3>숨김 해제</h3>
+            <p class="memoria-pop__meta">어느 쪽을 다시 보이게 할지 고릅니다.${noteLine ? ` ${noteLine}` : ''}${getSettings().autoHide ? ' 자동 숨김이 켜져 있으면 Memoria가 숨긴 것은 다음 기록 때 다시 숨겨집니다.' : ''}</p>
+            <label class="memoria-pop__check"><input type="radio" name="memoria_unhide_pick" value="all" checked> 전부 <small>${mine.length + yours.length}개</small></label>
+            <label class="memoria-pop__check"><input type="radio" name="memoria_unhide_pick" value="mine"> Memoria가 숨긴 것 <small>${mine.length}개</small></label>
+            <label class="memoria-pop__check"><input type="radio" name="memoria_unhide_pick" value="yours"> 직접 숨긴 것 <small>${yours.length}개</small></label>
+        </div>`);
+        const ok = await showPopup($dlg, { type: popupCtx().POPUP_TYPE.CONFIRM, okButton: '표시', cancelButton: '취소' });
+        if (!ok) return;
+        pick = String($dlg.find('input:checked').val() || 'all');
+    }
+    const idx = pick === 'mine' ? mine : pick === 'yours' ? yours : [...mine, ...yours];
     try {
-        await hideChatMessageRange(0, chat.length - 1, true);
-        for (const m of chat) if (m?.extra) delete m.extra.memoria_hidden;
-        toastr.success('숨긴 메시지를 모두 표시했습니다.', 'Memoria');
+        const n = await unhideIndexes(idx);
+        getContext().saveChatDebounced?.();
+        toastr.success(`숨긴 메시지 ${n}개를 다시 표시했습니다.`, 'Memoria');
     } catch (e) {
         console.error(`[${MODULE_NAME}] 숨김 해제 실패:`, e);
         toastr.error('숨김 해제에 실패했습니다.', 'Memoria');
@@ -8042,7 +8115,9 @@ async function resetMemory() {
     // 숨긴 채로 두면 재색인이 전부 건너뛰어 "색인할 새 메시지가 없습니다"가 된다
     if (chat.length) {
         try {
-            await hideChatMessageRange(0, chat.length - 1, true);
+            const hidden = [];
+            chat.forEach((m, i) => { if (m?.is_system && !isSystemNote(m)) hidden.push(i); });
+            await unhideIndexes(hidden);
         } catch (e) {
             console.error(`[${MODULE_NAME}] 초기화 후 숨김 해제 실패:`, e);
         }
@@ -11464,7 +11539,34 @@ function bindExtraUI() {
  * 이벤트 & 초기화
  * ============================================================ */
 
+/**
+ * 메시지를 손으로 숨기거나 되살리는 일은 실리태번이 따로 알려 주지 않는다 (화면의 표시만 바뀐다).
+ * "직접 숨긴 메시지 잊기"를 켰다면 그 표시가 바뀌는 순간 기록을 맞춘다 — 안 그러면 다음 삭제·채팅 전환 때까지 숨긴 턴의 기록이 계속 실린다.
+ */
+let hideWatcher = null;
+let hideWatchTimer = null;
+function watchManualHide() {
+    const node = document.getElementById('chat');
+    if (!node || hideWatcher || typeof MutationObserver !== 'function') return;
+    hideWatcher = new MutationObserver((records) => {
+        if (Date.now() - ownHideAt < 1200) return; // 이 확장이 바꾼 것
+        const settings = getSettings();
+        if (!settings.enabled || settings.forgetHidden !== true) return;
+        if (!records.some(r => r.target?.classList?.contains('mes'))) return;
+        clearTimeout(hideWatchTimer);
+        hideWatchTimer = setTimeout(() => {
+            if (Date.now() - ownHideAt < 1200 || !getCurrentChatId()) return;
+            try {
+                if (reconcileWithChat()) renderAllPanels();
+                updateInjection({ quiet: true });
+            } catch (e) { console.warn(`[${MODULE_NAME}] 숨김 변경 반영 실패`, e); }
+        }, 600);
+    });
+    hideWatcher.observe(node, { subtree: true, attributes: true, attributeFilter: ['is_system'] });
+}
+
 function bindEvents() {
+    watchManualHide();
     // 이벤트를 처리하다 오류가 나도 실리태번의 흐름(생성·전송)을 막지 않는다 — 기록에 남기고 넘어간다
     const on = (type, handler) => {
         if (!type) return; // 구버전 실리태번에 없는 이벤트
@@ -11485,6 +11587,7 @@ function bindEvents() {
         const id = Number(mesId);
         const mes = chat[id];
         if (!mes || mes.is_user || mes.is_system) return;
+        if (isPartialReply(mes)) return; // 반쪽짜리 답은 완성본이 따로 도착한다
         if (tagSideMessage(id, type) || isSideMessage(mes)) return; // 막간은 기록도 점검도 하지 않는다
         auditRecallEcho(mes, id); // 직전 주입 기억의 반영 여부 채점 (기록보다 먼저, 원본 감사표 기준)
         if (settings.replyCheck && type !== 'first_message' && type !== 'command') queueCheck(id);
