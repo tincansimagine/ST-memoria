@@ -1044,7 +1044,7 @@
 .memoria__activity--error > i { color: var(--mm-danger); }
 .memoria__activity--defer > i, .memoria__activity--ledger > i { color: var(--mm-accent); }
 
-.memoria__bundle-dialog, .memoria__repeat-dialog { text-align: left; display: grid; gap: 12px; }
+.memoria__bundle-dialog, .memoria__repeat-dialog { text-align: left; display: grid; gap: 12px; overflow-wrap: anywhere; word-break: keep-all; }
 .memoria__bundle-dialog h3, .memoria__repeat-dialog h3 { margin: 0; }
 .memoria__bundle-dialog .memoria__hint, .memoria__repeat-dialog .memoria__hint { margin: 0; }
 .memoria__bundle-dialog select { width: 100%; min-width: 0; }
@@ -1694,7 +1694,7 @@ body[data-memoria-paper="dark"] :is(#memoria_settings.memoria, .memoria-library,
 .mmv-tools > * { min-width: 0; }
 
 /* ---------- 인물별 · 이름 정리 · 날 세기 · 회상 시험 · 읽는 말로 (팝업) ---------- */
-.memoria-pop { text-align: left; display: grid; gap: 10px; min-width: 0; max-width: 100%; overflow-wrap: anywhere; }
+.memoria-pop { text-align: left; display: grid; gap: 10px; min-width: 0; max-width: 100%; overflow-wrap: anywhere; word-break: keep-all; }
 .memoria-pop h3 { margin: 0; font-size: 1.1em; }
 .memoria-pop h3 small, .memoria-pop small { font-weight: 400; opacity: .65; }
 .memoria-pop h4 { margin: 4px 0; font-size: .82em; font-weight: 600; opacity: .7; }
