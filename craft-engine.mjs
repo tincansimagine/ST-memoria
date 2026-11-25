@@ -841,3 +841,141 @@ export {
   strayHidden,
   transcriptTerms
 };
+
+/* ------------------------------------------------------------
+ * 가벼운 모델의 답 읽기 — 형식이 조금 어긋나도 버리지 않는다
+ *
+ * 작은 모델은 지시한 칸 이름을 제멋대로 바꾸고("summary" 대신 "text"), 목록 대신 쉼표 글을 내고,
+ * 따옴표 없는 키나 끝에 남은 쉼표가 든 JSON을 낸다. 답 하나가 통째로 버려지면 그 턴은 기록 실패가 되고
+ * 다시 부르는 값이 든다. 뜻이 분명한 어긋남은 여기서 받아 준다.
+ * ------------------------------------------------------------ */
+
+/** 처음으로 값이 있는 칸 (칸 이름이 바뀌어 와도 받는다) */
+export function firstOf(obj, ...keys) {
+    for (const k of keys) {
+        const v = obj?.[k];
+        if (v !== undefined && v !== null && v !== '') return v;
+    }
+    return undefined;
+}
+
+/** 목록으로 — 목록이면 그대로, 쉼표로 이은 글이면 나누고, 낱개 객체면 한 칸짜리 목록으로 */
+export function listOf(v) {
+    if (Array.isArray(v)) return v;
+    if (typeof v === 'string') return v.trim() ? v.split(/[,，、;]+/).map(s => s.trim()).filter(Boolean) : [];
+    return v && typeof v === 'object' ? [v] : [];
+}
+
+/** 여러 값이 온 칸을 한 줄 글로 (["아리아","보라"] → "아리아, 보라") */
+export function joinValue(v) {
+    return Array.isArray(v) ? v.map(x => String(x ?? '').trim()).filter(Boolean).join(', ') : v;
+}
+
+/**
+ * 무게·중요도를 0~1로. 0~1로 달라고 해도 "4/5", 4, 80 같은 값이 온다 — 버리거나 1로 뭉개지 않고 눈금을 맞춘다.
+ * 읽을 수 없으면 dflt
+ */
+export function clampScore(x, dflt = 0.5) {
+    if (typeof x === 'string') {
+        const frac = x.match(/(\d+(?:\.\d+)?)\s*\/\s*(\d+(?:\.\d+)?)/);
+        if (frac && Number(frac[2]) > 0) return Math.max(0, Math.min(1, Number(frac[1]) / Number(frac[2])));
+        const num = x.match(/-?\d+(?:\.\d+)?/);
+        if (!num) return dflt;
+        x = Number(num[0]);
+    }
+    const n = Number(x);
+    if (!Number.isFinite(n)) return dflt;
+    if (n <= 1) return Math.max(0, n);
+    if (n <= 5) return n / 5;
+    if (n <= 10) return n / 10;
+    return Math.min(1, n / 100);
+}
+
+/** "깡→린", "깡 -> 린", "깡 - > 린", "깡 => 린" 을 { from, to } 로. 양방향("<->")이면 both. 못 읽으면 null */
+export function splitPair(raw) {
+    const key = String(raw ?? '').replace(/\s+/g, ' ').trim();
+    if (!key) return null;
+    const both = /\s*(?:<-+>|<=+>|↔|⇔)\s*/;
+    if (both.test(key)) {
+        const p = key.split(both).map(x => x.trim()).filter(Boolean);
+        return p.length === 2 ? { from: p[0], to: p[1], both: true } : null;
+    }
+    const p = key.split(/\s*(?:-\s*-?>|=+>|→|⇒|➔|➜|>>)\s*/).map(x => x.trim()).filter(Boolean);
+    return p.length === 2 ? { from: p[0], to: p[1], both: false } : null;
+}
+
+/**
+ * 어긋난 JSON을 손본 판들 — 원문 그대로 읽히지 않을 때만 차례로 써 본다 (앞의 것일수록 덜 건드린다).
+ * 1) 끝에 남은 쉼표  2) 따옴표 없는 키 · 파이썬 값(True/False/None) · 객체 사이에 빠진 쉼표  3) 둥근 따옴표
+ * 둥근 따옴표는 맨 마지막이다 — 글 안의 “대사”를 곧은 따옴표로 바꾸면 멀쩡한 JSON이 깨진다
+ */
+export function jsonRepairVariants(text) {
+    const t = String(text ?? '');
+    const noTrailing = t.replace(/,\s*([\]}])/g, '$1');
+    const keyed = noTrailing
+        .replace(/([{,]\s*)([A-Za-z_][A-Za-z0-9_]*)\s*:/g, '$1"$2":')
+        .replace(/:\s*True\b/g, ': true').replace(/:\s*False\b/g, ': false').replace(/:\s*None\b/g, ': null')
+        .replace(/}\s*\n\s*{/g, '},\n{');
+    const straight = keyed.replace(/[“”]/g, '"').replace(/[‘’]/g, "'");
+    const out = [];
+    for (const v of [noTrailing, keyed, straight]) if (v !== t && !out.includes(v)) out.push(v);
+    return out;
+}
+
+/* ------------------------------------------------------------
+ * 요약 레코드의 줄 이름 — 번역되거나 꾸며져 와도 알아본다
+ *
+ * 요약은 WHEN / PLOT / SHIFTS / OPEN 줄로 짜인다. 한국어로 요약하게 하면 작은 모델은 줄 이름까지 옮겨
+ * "줄거리:", "미해결:"로 쓰거나 **PLOT:** 처럼 꾸민다. 그러면 이야기 이어쓰기를 잘라내는 판정도,
+ * 옛 요약의 미해결 줄을 떼는 처리도 그 줄을 못 알아본다. 저장하기 전에 원래 이름으로 돌려놓는다.
+ * ------------------------------------------------------------ */
+const RECORD_LABEL_ALIASES = [
+    ['WHEN', 'when|언제|시점|시기|때|작중\\s*시간|시간|作中時間|いつ|时间|時間'],
+    ['PLOT', 'plot|줄거리|사건|전개|내용|플롯|あらすじ|出来事|情节|剧情|經過|经过'],
+    ['SHIFTS', 'shifts?|변화|관계\\s*변화|달라진\\s*점|変化|变化|變化'],
+    ['OPEN', 'open|미해결|열린\\s*것|남은\\s*것|남은\\s*일|떡밥|未解決|未解决|悬念'],
+];
+const RECORD_LABEL_FIX = RECORD_LABEL_ALIASES.map(([name, alts]) => [name, new RegExp(`^[ \\t]*(?:[#>]+[ \\t]*)?(?:\\*\\*|__)?[ \\t]*(?:${alts})[ \\t]*(?:\\*\\*|__)?[ \\t]*[:：][ \\t]*(?:\\*\\*|__)?[ \\t]*`, 'i')]);
+
+export function normalizeRecordLabels(text) {
+    return String(text ?? '').split('\n').map((line) => {
+        // 불릿으로 시작하는 줄은 내용이다 ("- 시간: 저녁" 같은 줄을 줄 이름으로 읽지 않는다)
+        if (/^\s*(?:[-•·]|\*(?!\*))\s/.test(line)) return line;
+        for (const [name, rx] of RECORD_LABEL_FIX) {
+            const m = line.match(rx);
+            if (m) { const rest = line.slice(m[0].length); return `${name}:${rest ? ` ${rest}` : ''}`; }
+        }
+        return line;
+    }).join('\n');
+}
+
+/* ------------------------------------------------------------
+ * 관계의 갈래 — 관계도의 선 색 (모델을 부르지 않는다)
+ *
+ * 관계선에는 "마지못한 신뢰", "오랜 앙숙" 같은 단계 글이 적힌다. 그 글에서 갈래를 가려 선 색으로 쓴다.
+ * 사서가 갈래를 함께 적었으면 그것을 먼저 쓰고, 없거나 모르는 값이면 글에서 가린다. 못 가리면 'other'
+ * ------------------------------------------------------------ */
+export const BOND_KINDS = Object.freeze({
+    love: '사랑', crush: '호감·짝사랑', family: '가족', friend: '우정', ally: '동료·편', rival: '라이벌', hostile: '적대', work: '일·계약', mixed: '복잡', other: '그 밖',
+});
+const BOND_KIND_ALIASES = { complicated: 'mixed', complex: 'mixed', enemy: 'hostile', enemies: 'hostile', lover: 'love', lovers: 'love', romance: 'love', romantic: 'love', friends: 'friend', friendship: 'friend', colleague: 'ally', partner: 'ally', business: 'work', contract: 'work' };
+// 앞의 것이 이긴다: 뒤섞인 감정은 먼저, 미움은 사랑보다 먼저 본다 ("사랑했지만 이제는 증오" → 적대)
+const BOND_KIND_RULES = [
+    ['mixed', /애증|복잡|미묘|뒤섞|갈팡|혼란스러운|love[- ]hate|complicated|conflicted|mixed feelings|torn/i],
+    ['hostile', /적대|원수|증오|혐오|앙숙|적으로|원한|복수|살의|경멸|hostil|enemy|enemies|hatred|hates?\b|loath|despis|nemesis|vengeance|resent/i],
+    ['rival', /라이벌|경쟁|맞수|숙적|rival|competit/i],
+    ['crush', /짝사랑|호감|설렘|설레|반했|반하|끌리|끌림|동경|썸|crush|infatuat|smitten|attract|pining|fancy|fond of/i],
+    ['love', /사랑|연인|애인|부부|약혼|결혼|연애|사귀|남편|아내|lover|in love|romantic|dating|married|spouse|husband|wife|fianc|betroth|courting/i],
+    ['family', /가족|부모|남매|형제|자매|모녀|부자|부녀|모자|아버지|어머니|아들|딸|오빠|누나|언니|동생|삼촌|이모|조카|입양|혈육|family|parent|father|mother|sibling|brother|sister|daughter|\bson\b|uncle|aunt|cousin|adopt|kin\b/i],
+    ['work', /계약|고용|상사|부하|주종|주인|하인|의뢰|거래|스승|제자|선생|학생|후견|employ|contract|\bboss\b|servant|master|client|mentor|teacher|student|subordinate|superior|business|transaction/i],
+    ['friend', /친구|우정|벗|단짝|소꿉|죽마고우|friend|buddy|\bpal\b|companion/i],
+    ['ally', /동료|동맹|한편|같은 편|협력|전우|동지|신뢰|믿|의지|ally|allies|comrade|partner|teammate|trust|rely|loyal|protect/i],
+];
+export function bondKindOf(text, given = '') {
+    const g = String(given || '').toLowerCase().trim();
+    if (g && g !== 'other' && BOND_KINDS[g]) return g;
+    if (BOND_KIND_ALIASES[g]) return BOND_KIND_ALIASES[g];
+    const s = String(text ?? '');
+    for (const [kind, rx] of BOND_KIND_RULES) if (rx.test(s)) return kind;
+    return 'other';
+}

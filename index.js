@@ -40,7 +40,7 @@ import { ARGUMENT_TYPE, SlashCommandArgument } from "../../../slash-commands/Sla
 import { MacrosParser } from "../../../../scripts/macros.js";
 import { NARRATOR_PERSPECTIVE, isSharedPerspective, hasChatPerspective, resolvePerspective, findAssociations, sameKnowledgeScope, archiveSnapshot, validateArchive, addCheckpoint, archiveChanges, packetSections } from './archive-engine.mjs';
 import { showArchiveLibrary } from './library-ui.mjs';
-import { withDeadline, parsePhraseList, stripPhrases, hasPhrase, findRepeatedPhrases, pickBundleValues, resolveBundleName, switchBundle, saveBundle, deleteBundle, renameBundle, exportBundle, parseBundleFile, diffStableEntries, shouldRefreeze, createActivityLog, findRivalExtensions, splitClosedLine, sleepStaleThreads, pickPledges, stripOpenLines, THREAD_KINDS, recallCooldown, pushRecallHistory, isEndedValue, ungroundedFigures, roughTokens, noteUsage, usageTotals, groundedIn, soundsHedged, noteThreadSightings, threadTouched, rareQueryWords, findConflicts, looksRefused, looksBlocked, strayHidden, pickTranscript, transcriptTerms, crossScriptPairs, crossScriptSame, pickPledgesToCheck, ensembleLabel } from './craft-engine.mjs';
+import { withDeadline, parsePhraseList, stripPhrases, hasPhrase, findRepeatedPhrases, pickBundleValues, resolveBundleName, switchBundle, saveBundle, deleteBundle, renameBundle, exportBundle, parseBundleFile, diffStableEntries, shouldRefreeze, createActivityLog, findRivalExtensions, splitClosedLine, sleepStaleThreads, pickPledges, stripOpenLines, THREAD_KINDS, recallCooldown, pushRecallHistory, isEndedValue, ungroundedFigures, roughTokens, noteUsage, usageTotals, groundedIn, soundsHedged, noteThreadSightings, threadTouched, rareQueryWords, findConflicts, looksRefused, looksBlocked, strayHidden, pickTranscript, transcriptTerms, crossScriptPairs, crossScriptSame, pickPledgesToCheck, ensembleLabel, firstOf, listOf, joinValue, clampScore, splitPair, jsonRepairVariants, normalizeRecordLabels, BOND_KINDS, bondKindOf } from './craft-engine.mjs';
 import { isOocText, looksOocReply, attributeQuote, addressTermsIn, tallyAddress, pickAddressLines, personNowLine } from './stage-engine.mjs';
 import { parseStoryDate, storyDatesOf, isIsoDate, trackerText, trackerLineOf, pickBeats, beatLines, veilLeaks } from './calendar-engine.mjs';
 import { peopleList, matchPerson, personPage, nameSuggestions, planMerge, pairKey, WIPE_KINDS, wipeCounts, NOW_ORDER } from './people-engine.mjs';
@@ -91,12 +91,27 @@ const LOCK_LABELS = {
     consent_boundary: '동의 경계', world_constraint: '세계 제약', open_thread: '열린 떡밥',
 };
 
-function normKind(k) { return MEMORY_KINDS.includes(k) ? k : (LEGACY_KIND_MAP[k] || 'fact'); }
+// 가벼운 모델은 정해 준 값을 복수형·비슷한 말·요약 언어로 바꿔 쓴다 — 뜻이 분명하면 받는다
+const KIND_ALIASES = {
+    events: 'event', scene: 'event', relation: 'relationship', relations: 'relationship', relationships: 'relationship', bond: 'relationship',
+    facts: 'fact', info: 'fact', preferences: 'preference', like: 'preference', likes: 'preference', taste: 'preference',
+    promises: 'promise', vow: 'promise', oath: 'promise', goals: 'goal', objective: 'goal', plan: 'goal', items: 'item', object: 'item', objects: 'item',
+    places: 'place', secrets: 'secret', impressions: 'impression', feeling: 'impression', feelings: 'impression', emotion: 'impression', thought: 'impression', thoughts: 'impression',
+    사건: 'event', 관계: 'relationship', 사실: 'fact', 취향: 'preference', 약속: 'promise', 목표: 'goal', 물건: 'item', 장소: 'place', 비밀: 'secret', 인상: 'impression', 감정: 'impression', 속마음: 'impression',
+};
+const LOCK_KIND_ALIASES = {
+    thread: 'loose_end', threads: 'loose_end', hook: 'foreshadow', hint: 'foreshadow', mystery: 'keep_unresolved', unresolved: 'keep_unresolved',
+    secret: 'keep_secret', gap: 'knowledge_gap', boundary: 'consent', limit: 'world_limit', rule: 'world_limit', feelings: 'feeling', emotion: 'feeling',
+    '미해결 유지': 'keep_unresolved', '비밀 유지': 'keep_secret', '정보 격차': 'knowledge_gap', '동의 경계': 'consent', '세계 제약': 'world_limit', '열린 떡밥': 'loose_end', 떡밥: 'loose_end', 복선: 'foreshadow', '풀리지 않은 감정': 'feeling',
+};
+const VIS_ALIASES = { open: 'public', shared: 'public', personal: 'private', hidden: 'secret', 공개: 'public', 개인: 'private', 비공개: 'private', 비밀: 'secret' };
+const enumKey = (k) => String(k ?? '').trim().toLowerCase();
+function normKind(k) { const v = enumKey(k); return MEMORY_KINDS.includes(v) ? v : (LEGACY_KIND_MAP[v] || KIND_ALIASES[v] || 'fact'); }
 /** 묶음 요약 때 함께 살펴보지만 저절로 닫지는 않는 서약 종류 · 목록에 붙이는 표시 */
 const SOFT_LOCK_KINDS = ['keep_secret', 'knowledge_gap'];
 const LOCK_MARK = { keep_secret: ' (secret)', knowledge_gap: ' (gap)', feeling: ' (feeling)' };
-function normLockKind(k) { return LOCK_KINDS.includes(k) ? k : (LEGACY_LOCK_MAP[k] || 'loose_end'); }
-function normVisibility(v) { return VISIBILITIES.includes(v) ? v : (LEGACY_VIS_MAP[v] || 'public'); }
+function normLockKind(k) { const v = enumKey(k); return LOCK_KINDS.includes(v) ? v : (LEGACY_LOCK_MAP[v] || LOCK_KIND_ALIASES[v] || 'loose_end'); }
+function normVisibility(v) { const k = enumKey(v); return VISIBILITIES.includes(k) ? k : (LEGACY_VIS_MAP[k] || VIS_ALIASES[k] || 'public'); }
 
 /* ============================================================
  * 기본 프롬프트
@@ -206,13 +221,13 @@ Each entry in "ops" is one of these shapes:
 {"op":"status","entity":"<name>","slot":"<slot name>","value":"<corrected value>","claim":"objective|belief","owner":"<name, empty string if not a belief>"}
 {"op":"clock","fromTurn":<int>,"toTurn":<int>,"totalDays":<number>}
 {"op":"addMemory","kind":"event|relationship|fact|preference|promise|goal|item|place|secret|impression","summary":"<new memory text>","importance":0.5}
-{"op":"editMemory","id":"<memory id copied exactly from the archive below>","summary":"<corrected text>"}
-{"op":"deleteMemory","id":"<memory id copied exactly from the archive below>"}
-{"op":"editSummary","id":"<summary id copied exactly from the archive below>","text":"<corrected text>"}
-{"op":"deleteSummary","id":"<summary id copied exactly from the archive below>"}
+{"op":"editMemory","id":"<the short id shown in brackets before that memory in the archive below, like M3>","summary":"<corrected text>"}
+{"op":"deleteMemory","id":"<the short id shown in brackets before that memory in the archive below, like M3>"}
+{"op":"editSummary","id":"<the short id shown in brackets before that summary in the archive below, like S2>","text":"<corrected text>"}
+{"op":"deleteSummary","id":"<the short id shown in brackets before that summary in the archive below, like S2>"}
 {"op":"addPledge","kind":"keep_unresolved|keep_secret|knowledge_gap|consent|world_limit|loose_end","summary":"<pledge text>","priority":2,"owner":"<name, empty string if none>"}
-{"op":"editPledge","id":"<pledge id copied exactly from the archive below>","summary":"<corrected text>","status":"active|resolved","priority":2}
-{"op":"deletePledge","id":"<pledge id copied exactly from the archive below>"}
+{"op":"editPledge","id":"<the short id shown in brackets before that pledge in the archive below, like P1>","summary":"<corrected text>","status":"active|resolved","priority":2}
+{"op":"deletePledge","id":"<the short id shown in brackets before that pledge in the archive below, like P1>"}
 {"op":"character","name":"<character name>","patch":{"role":"...","age":"...","occupation":"...","appearance":"...","core":"...","voice":"...","traits":["..."]}}
 {"op":"bond","from":"<name>","to":"<name>","stage":"<where from now stands toward to, a few plain words>","basis":"<what shows it, or empty string>","calls":"<what from calls to, or empty string>","unsaid":"<what from is holding back, or empty string>"}
 
@@ -454,6 +469,16 @@ function getSettings() {
 
 function languageDirective() {
     return LANG_DIRECTIVES[getSettings().summaryLanguage] || LANG_DIRECTIVES.auto;
+}
+
+/**
+ * 보내는 글 맨 끝에 한 번 더 붙이는 언어 지시 (요약 언어를 정해 뒀을 때만).
+ * 긴 지시문 속의 한 줄은 다른 언어로 된 긴 원문에 밀린다 — 채팅이 길어지면 요약이 채팅 언어로 새고,
+ * 한 번 섞인 기록은 다음 요약이 그 언어를 따라 쓰며 굳는다. 모델이 답하기 직전에 읽는 자리에 다시 적는다.
+ */
+function languageTail() {
+    const lang = getSettings().summaryLanguage;
+    return lang && lang !== 'auto' && LANG_DIRECTIVES[lang] ? `\n\n(${LANG_DIRECTIVES[lang]} This holds even where the material above is in another language: translate it, never copy sentences over.)` : '';
 }
 
 /** 이벤트/아이템 추적이 켜졌을 때 사서 프롬프트에 덧붙일 지시 */
@@ -1916,10 +1941,29 @@ function parseJsonLoose(text) {
     // 스타일·스크립트의 중괄호를 JSON 시작으로 오인하지 않게
     t = t.replace(/<(style|script)\b[^>]*>[\s\S]*?<\/\1>/gi, ' ');
 
-    // 여는 중괄호 후보를 앞에서부터 차례로 시도한다. 첫 { 가 JSON이 아닌 경우
-    // (상태창 CSS, 설명문 속 예시 등) 첫 후보만 보던 예전 방식은 응답 전체를 버렸다.
-    // 각 후보마다 "뒤에서 줄이기 → 강제 닫기"를 끝까지 해 본 뒤에야 다음 후보로 넘어간다 —
-    // 잘린 응답에서 바깥 객체를 복구하기 전에 안쪽 조각 객체를 답으로 집는 일이 없게.
+    // 1) 그대로 읽는다  2) 뜻이 분명한 어긋남(끝에 남은 쉼표 · 따옴표 없는 키 · True/None)만 손봐서 읽는다
+    // 3) 그래도 안 되면 출력 한도에서 잘린 답으로 보고 닫아서 읽는다 (그대로 → 손본 판 순서)
+    // 손본 판을 잘린 답 복구보다 먼저 보는 까닭: 쉼표 하나 때문에 복구가 뒤쪽 내용을 통째로 버리지 않게.
+    parseJsonLoose.repaired = false;
+    const variants = [t, ...jsonRepairVariants(t)];
+    for (const v of variants) {
+        const hit = parseJsonCandidates(v, false);
+        if (hit) return hit;
+    }
+    for (const v of variants) {
+        const hit = parseJsonCandidates(v, true);
+        if (hit) { parseJsonLoose.repaired = true; return hit; }
+    }
+    return null;
+}
+
+/**
+ * 여는 중괄호 후보를 앞에서부터 차례로 시도한다. 첫 { 가 JSON이 아닌 경우(상태창 CSS, 설명문 속 예시 등)
+ * 첫 후보만 보던 예전 방식은 응답 전체를 버렸다. repair: 끝이 잘린 답을 닫아서 읽어 본다.
+ * 각 후보마다 끝까지 해 본 뒤에야 다음 후보로 넘어간다 — 잘린 응답에서 바깥 객체를 복구하기 전에
+ * 안쪽 조각 객체를 답으로 집는 일이 없게.
+ */
+function parseJsonCandidates(t, repair) {
     const starts = [];
     for (let i = t.indexOf('{'); i >= 0 && starts.length < 12; i = t.indexOf('{', i + 1)) starts.push(i);
     const isObj = (v) => v && typeof v === 'object' && !Array.isArray(v);
@@ -1931,8 +1975,10 @@ function parseJsonLoose(text) {
                 if (isObj(v)) return v;
             } catch { /* keep shrinking */ }
         }
-        const repaired = repairTruncatedJson(t.slice(start));
-        if (isObj(repaired)) return repaired;
+        if (repair) {
+            const repaired = repairTruncatedJson(t.slice(start));
+            if (isObj(repaired)) return repaired;
+        }
         // JSON처럼 생긴 후보({ 뒤에 바로 "키")가 끝내 안 읽히면 더 안쪽 후보로 내려가지 않는다 —
         // 안쪽 조각 객체를 답으로 집으면 기록이 빈 채로 "성공" 처리돼 재시도조차 안 된다
         if (/^\{\s*"/.test(t.slice(start, start + 24))) break;
@@ -2179,7 +2225,8 @@ const RECORD_DIALOGUE_RE = /^\s*["“「『'‘(]/;
  * 계속 쓰거나, 다른 확장이 시킨 태그 블록을 덧붙이는 일이 있다.
  */
 function sanitizeRecordOutput(raw) {
-    const cleaned = stripTagBlocks(raw).replace(/\r/g, '');
+    // 줄 이름이 번역되거나 꾸며져 왔으면(줄거리: · **PLOT:**) 원래 이름으로 돌려놓고 본다
+    const cleaned = normalizeRecordLabels(stripTagBlocks(raw).replace(/\r/g, ''));
     const lines = cleaned.split('\n');
     const start = lines.findIndex(l => RECORD_LABEL_RE.test(l));
     // 구조 자체가 없는 응답이면 태그만 걷어내고 그대로 둔다 —
@@ -2431,32 +2478,33 @@ const DUE_DIRECTIVE = '\n\nDEADLINES: when a pledge you file has a deadline or a
 
 function sanitizeExtraction(raw, userText, assistantText, { memoryCap = 12 } = {}) {
     const out = {
-        turnSummary: clipStr(raw?.digest ?? raw?.turn_summary, 700),
-        importance: clamp01(raw?.weight ?? raw?.importance, 0.4),
-        elapsedDays: parseDurationDays(raw?.time_passed),
+        turnSummary: clipStr(firstOf(raw, 'digest', 'turn_summary', 'summary', 'synopsis', 'recap'), 700),
+        importance: clampScore(firstOf(raw, 'weight', 'importance', 'significance'), 0.4),
+        elapsedDays: parseDurationDays(firstOf(raw, 'time_passed', 'elapsed', 'time_elapsed', 'duration')),
         // 이 교환이 끝난 지금이 이야기 며칠째인지 — 칸 이름이나 꼴이 달라도 받는다
         clockDay: raw?.clock ?? raw?.clock_day ?? raw?.story_day ?? raw?.story_clock ?? raw?.day ?? raw?.now ?? null,
         memories: [], worldRules: [], entityStates: [], locks: [], characters: [], milestones: [], items: [], bonds: [],
     };
 
-    for (const m of (Array.isArray(raw?.memories) ? raw.memories : []).slice(0, memoryCap)) {
-        const summary = clipStr(m?.summary, 400);
+    // 칸 이름이 바뀌어 와도(text · type · characters…), 목록 대신 쉼표 글이나 낱개 객체로 와도 받는다
+    for (const m of listOf(firstOf(raw, 'memories', 'memory', 'facts')).slice(0, memoryCap)) {
+        const summary = clipStr(typeof m === 'string' ? m : firstOf(m, 'summary', 'text', 'content', 'fact', 'description'), 400);
         if (!summary) continue;
         out.memories.push({
-            kind: normKind(m?.kind),
+            kind: normKind(firstOf(m, 'kind', 'type', 'category')),
             summary,
             n: Number.isInteger(Number(m?.n)) ? Number(m.n) : null, // 묶어 기록할 때: 몇 번째 교환에서 나온 기억인지
-            excerpt: validExcerpt(m?.quote ?? m?.excerpt, userText, assistantText),
-            importance: clamp01(m?.importance, 0.5),
-            entities: (Array.isArray(m?.entities) ? m.entities : []).map(e => cleanStr(e, 60)).filter(Boolean).slice(0, 6),
-            tags: (Array.isArray(m?.tags) ? m.tags : []).map(toSnake).filter(Boolean).slice(0, 6),
-            hints: (Array.isArray(m?.recall) ? m.recall : []).map(h => cleanStr(h, 40)).filter(Boolean).slice(0, 5),
-            visibility: normVisibility(m?.visibility),
+            excerpt: validExcerpt(firstOf(m, 'quote', 'excerpt', 'line'), userText, assistantText),
+            importance: clampScore(m?.importance, 0.5),
+            entities: listOf(firstOf(m, 'entities', 'characters', 'people', 'who')).map(e => cleanStr(e, 60)).filter(Boolean).slice(0, 6),
+            tags: listOf(m?.tags).map(toSnake).filter(Boolean).slice(0, 6),
+            hints: listOf(firstOf(m, 'recall', 'cues', 'keywords', 'hints')).map(h => cleanStr(h, 40)).filter(Boolean).slice(0, 5),
+            visibility: normVisibility(firstOf(m, 'visibility', 'privacy')),
             owner: cleanStr(m?.owner, 60) || null,
             // 누가 아는가 — 소유자 말고도 이 비밀·속사정을 아는 인물 (공개 기억에는 의미가 없다)
-            knowers: (Array.isArray(m?.known_by) ? m.known_by : []).map(e => cleanStr(e, 60)).filter(Boolean).slice(0, 6),
+            knowers: listOf(firstOf(m, 'known_by', 'knownBy', 'known_to', 'knowers')).map(e => cleanStr(e, 60)).filter(Boolean).slice(0, 6),
             // 짐작만 하는 사람 · 온전히 기억하지 못하는 사람 · 인용한 말을 한 사람과 들은 사람
-            guessers: (Array.isArray(m?.guess_by) ? m.guess_by : []).map(e => cleanStr(e, 60)).filter(Boolean).slice(0, 4),
+            guessers: listOf(firstOf(m, 'guess_by', 'guessBy', 'suspected_by')).map(e => cleanStr(e, 60)).filter(Boolean).slice(0, 4),
             dim: (Array.isArray(m?.forgets) ? m.forgets : []).map(f => ({ who: cleanStr(f?.who, 60), level: f?.level === 'none' ? 'none' : 'partial', kept: naStr(f?.kept, 160) })).filter(f => f.who).slice(0, 4),
             by: naStr(m?.by, 60), to: naStr(m?.to, 60),
         });
@@ -2474,7 +2522,7 @@ function sanitizeExtraction(raw, userText, assistantText, { memoryCap = 12 } = {
     // "p1" 또는 {"tag":"p1","how":"어떻게 풀렸는지"} — 복선은 어떻게 회수됐는지가 기록의 절반이다.
     out.settledHow = {};
     out.settledSaid = {};
-    out.settledPledges = (Array.isArray(raw?.settled) ? raw.settled : [])
+    out.settledPledges = listOf(firstOf(raw, 'settled', 'resolved', 'closed'))
         .map(t => {
             const tag = String((t && typeof t === 'object' ? t.tag : t) || '').trim().toLowerCase();
             const how = t && typeof t === 'object' ? cleanStr(t.how, 200) : '';
@@ -2484,20 +2532,20 @@ function sanitizeExtraction(raw, userText, assistantText, { memoryCap = 12 } = {
             return tag;
         }).filter(Boolean).slice(0, 8);
     // 진전: 아직 열려 있지만 이번 교환에서 움직인 떡밥 — "지금은 어디까지 왔는지" 한 구절
-    out.movedPledges = (Array.isArray(raw?.moved) ? raw.moved : [])
+    out.movedPledges = listOf(firstOf(raw, 'moved', 'progress'))
         .map(t => ({ tag: String(t?.tag || '').trim().toLowerCase(), now: cleanStr(t?.now, 160), dueIn: parseDurationDays(t?.due) }))
         .filter(t => /^p\d{1,2}$/.test(t.tag) && (t.now || t.dueIn > 0)).slice(0, 6);
 
     // 지나간 기억: 프롬프트에 준 [m1] 꼬리표 가운데 이번 교환으로 더는 맞지 않게 된 것.
     // "지금은 어떤지" 한 구절이 없는 항목은 받지 않는다 — 근거 없이 기억을 물리지 않는다.
-    out.outdated = (Array.isArray(raw?.outdated) ? raw.outdated : [])
+    out.outdated = listOf(firstOf(raw, 'outdated', 'stale', 'obsolete'))
         .map(o => ({ tag: String(o?.tag || '').trim().toLowerCase(), now: cleanStr(o?.now, 160), said: cleanStr(o?.said, 120) }))
         .filter(o => /^m\d{1,2}$/.test(o.tag) && o.now).slice(0, 6);
 
-    const rawCanon = Array.isArray(raw?.canon) ? raw.canon : (Array.isArray(raw?.world_rules) ? raw.world_rules : []);
+    const rawCanon = listOf(firstOf(raw, 'canon', 'world_rules', 'rules', 'world', 'lore'));
     for (const r of rawCanon.slice(0, 8)) {
-        const key = toSnake(r?.key);
-        const value = cleanStr(r?.value, 200);
+        const key = toSnake(firstOf(r, 'key', 'name', 'rule'));
+        const value = cleanStr(joinValue(firstOf(r, 'value', 'fact', 'text')), 200);
         if (!key || !value) continue;
         out.worldRules.push({
             scope: RULE_SCOPES.includes(r?.scope) ? r.scope : 'session',
@@ -2506,11 +2554,15 @@ function sanitizeExtraction(raw, userText, assistantText, { memoryCap = 12 } = {
         });
     }
 
-    const rawStatus = Array.isArray(raw?.status) ? raw.status : (Array.isArray(raw?.entity_states) ? raw.entity_states : []);
-    for (const s of rawStatus.slice(0, 10)) {
-        const entity = cleanStr(s?.entity, 60);
-        const slot = canonSlot(toSnake(s?.slot));
-        const value = cleanStr(s?.value, 200);
+    const rawStatus = [...listOf(firstOf(raw, 'status', 'entity_states', 'states', 'state'))];
+    // 장면을 따로 묶어 낸 답 ({"scene":{"location":"…","present":["…"]}}) 도 상태 줄로 받는다
+    if (raw?.scene && typeof raw.scene === 'object' && !Array.isArray(raw.scene)) {
+        for (const [slot, value] of Object.entries(raw.scene)) rawStatus.push({ entity: 'scene', slot, value });
+    }
+    for (const s of rawStatus.slice(0, 12)) {
+        const entity = cleanStr(firstOf(s, 'entity', 'who', 'name', 'character', 'subject'), 60);
+        const slot = canonSlot(toSnake(firstOf(s, 'slot', 'key', 'field', 'attribute')));
+        const value = cleanStr(joinValue(firstOf(s, 'value', 'state', 'val')), 200);
         if (!entity || !slot || !value) continue;
         out.entityStates.push({
             entity, slot, value,
@@ -2519,14 +2571,14 @@ function sanitizeExtraction(raw, userText, assistantText, { memoryCap = 12 } = {
         });
     }
 
-    const rawPledges = Array.isArray(raw?.pledges) ? raw.pledges : (Array.isArray(raw?.locks) ? raw.locks : []);
+    const rawPledges = listOf(firstOf(raw, 'pledges', 'locks', 'threads', 'promises', 'hooks'));
     for (const l of rawPledges.slice(0, 8)) {
-        const summary = cleanStr(l?.summary, 200);
+        const summary = cleanStr(typeof l === 'string' ? l : firstOf(l, 'summary', 'text', 'content', 'description'), 200);
         if (!summary) continue;
         out.locks.push({
-            kind: normLockKind(l?.kind),
+            kind: normLockKind(firstOf(l, 'kind', 'type')),
             summary,
-            status: l?.status === 'resolved' ? 'resolved' : 'active',
+            status: /^(resolved|closed|done|settled)$/i.test(String(l?.status || '').trim()) ? 'resolved' : 'active',
             priority: [1, 2, 3].includes(Number(l?.priority)) ? Number(l.priority) : 2,
             owner: cleanStr(l?.owner, 60) || null,
             dueIn: parseDurationDays(l?.due),
@@ -2539,14 +2591,14 @@ function sanitizeExtraction(raw, userText, assistantText, { memoryCap = 12 } = {
         const t = cleanStr(v, 120);
         return (!t || /^(n\/?a|null|unknown|불명|없음|-)$/i.test(t)) ? null : t;
     };
-    const rawCast = Array.isArray(raw?.cast) ? raw.cast : (Array.isArray(raw?.characters) ? raw.characters : []);
+    const rawCast = listOf(firstOf(raw, 'cast', 'characters', 'people', 'npcs')).filter(c => c && typeof c === 'object');
     for (const c of rawCast.slice(0, 5)) {
         const name = cleanStr(c?.name, 60);
         if (!name) continue;
         out.characters.push({
             name,
             provisional: c?.provisional === true,
-            aka: (Array.isArray(c?.aka) ? c.aka : []).map(a => cleanStr(a, 60)).filter(Boolean).slice(0, 4),
+            aka: listOf(firstOf(c, 'aka', 'aliases', 'alias')).map(a => cleanStr(a, 60)).filter(Boolean).slice(0, 4),
             role: naLike(c?.role),
             age: naLike(c?.age),
             occupation: naLike(c?.occupation),
@@ -2558,8 +2610,8 @@ function sanitizeExtraction(raw, userText, assistantText, { memoryCap = 12 } = {
             line: validLine(c?.line, userText, assistantText),
             // 이야기 속에서 생긴, 원인이 분명하고 오래갈 변화
             growth: naLike(c?.growth) ? cleanStr(c.growth, 200) : null,
-            traits: (Array.isArray(c?.traits) ? c.traits : []).map(t => cleanStr(t, 40)).filter(Boolean).slice(0, 8),
-            relationships: (Array.isArray(c?.relationships) ? c.relationships : [])
+            traits: listOf(c?.traits).map(t => cleanStr(t, 40)).filter(Boolean).slice(0, 8),
+            relationships: listOf(c?.relationships).filter(r => r && typeof r === 'object')
                 .map(r => ({ target: cleanStr(r?.target, 60), relation: cleanStr(r?.relation, 80) }))
                 .filter(r => r.target && r.relation)
                 .slice(0, 8),
@@ -2567,31 +2619,36 @@ function sanitizeExtraction(raw, userText, assistantText, { memoryCap = 12 } = {
     }
 
     // 관계선: 한 사람이 다른 한 사람을 지금 어떻게 대하는가 (방향이 있다 — A→B와 B→A는 다른 줄)
-    for (const b of (Array.isArray(raw?.bonds) ? raw.bonds : []).slice(0, 6)) {
-        const from = cleanStr(b?.from, 60);
-        const to = cleanStr(b?.to, 60);
-        const stage = cleanStr(b?.stage, 120);
+    // 두 사람을 "깡 -> 린"처럼 한 칸에 적거나(화살표 모양이 달라도) a/b · source/target 으로 적어도 받는다
+    for (const b of listOf(firstOf(raw, 'bonds', 'relationships', 'relations')).slice(0, 6)) {
+        const pair = splitPair(firstOf(b, 'key', 'pair', 'between'));
+        const from = cleanStr(firstOf(b, 'from', 'a', 'source', 'who', 'subject') ?? pair?.from, 60);
+        const to = cleanStr(firstOf(b, 'to', 'b', 'target', 'toward', 'object') ?? pair?.to, 60);
+        const stage = cleanStr(firstOf(b, 'stage', 'label', 'status', 'relation', 'value'), 120);
         if (!from || !to || !stage || entityKey(from) === entityKey(to)) continue;
+        const kind = bondKindOf('', firstOf(b, 'kind', 'tone', 'type'));
         out.bonds.push({
             from, to, stage,
-            basis: cleanStr(b?.basis, 200),
+            // 관계의 갈래(사랑 · 우정 · 적대…) — 사서가 적었을 때만. 관계도의 선 색에만 쓴다
+            ...(kind !== 'other' ? { kind } : {}),
+            basis: cleanStr(firstOf(b, 'basis', 'why', 'reason', 'evidence'), 200),
             calls: naLike(b?.calls) ? cleanStr(b.calls, 100) : '',
             unsaid: naLike(b?.unsaid) ? cleanStr(b.unsaid, 160) : '',
         });
     }
 
-    for (const e of (Array.isArray(raw?.milestones) ? raw.milestones : []).slice(0, 4)) {
+    for (const e of listOf(firstOf(raw, 'milestones', 'turning_points')).slice(0, 4)) {
         const title = cleanStr(e?.title, 80);
         if (!title) continue;
         out.milestones.push({
             title,
             summary: cleanStr(e?.summary, 200),
-            participants: (Array.isArray(e?.participants) ? e.participants : []).map(p => cleanStr(p, 60)).filter(Boolean).slice(0, 6),
+            participants: listOf(e?.participants).map(p => cleanStr(p, 60)).filter(Boolean).slice(0, 6),
             grade: e?.grade === 'minor' ? 'minor' : 'major',
         });
     }
 
-    for (const it of (Array.isArray(raw?.items) ? raw.items : []).slice(0, 4)) {
+    for (const it of listOf(firstOf(raw, 'items', 'objects')).filter(x => x && typeof x === 'object').slice(0, 4)) {
         const name = cleanStr(it?.name, 60);
         if (!name) continue;
         out.items.push({
@@ -3159,6 +3216,7 @@ function upsertBond(store, b, turnIndex, { manual = false } = {}) {
     let row = store.bonds.find(x => bondKey(x.from, x.to) === bondKey(from, to));
     if (row?.disabled && !manual) return null; // 사용자가 치운 줄은 사서가 되살리지 않는다
     const entry = { turn: turnIndex, stage: b.stage, basis: b.basis || '', calls: b.calls || '', unsaid: b.unsaid || '' };
+    if (b.kind && BOND_KINDS[b.kind] && b.kind !== 'other') entry.kind = b.kind; // 갈래 (관계도의 선 색) — 적혀 왔을 때만
     if (manual) entry.manual = true;
     if (!row) {
         row = { id: uuidv4(), from, to, log: [entry], manual, disabled: false };
@@ -3170,6 +3228,8 @@ function upsertBond(store, b, turnIndex, { manual = false } = {}) {
     if (last && !manual) {
         if (!entry.calls) entry.calls = last.calls || '';
         if (!entry.basis) entry.basis = last.basis || '';
+        // 단계 글이 그대로면 갈래도 그대로다 (단계가 바뀌었는데 갈래를 안 적었으면 글에서 다시 가린다)
+        if (!entry.kind && last.kind && last.stage === entry.stage) entry.kind = last.kind;
     }
     if (last && last.stage === entry.stage && (last.calls || '') === entry.calls && (last.unsaid || '') === entry.unsaid) return row; // 재확인일 뿐
     if (last && last.turn === turnIndex && !last.manual && !manual) row.log[row.log.length - 1] = { ...entry, was: last.was }; // 같은 턴의 재기록
@@ -3508,7 +3568,7 @@ async function commitTurns(mesIds, { silent = true, force = false, retry = 1 } =
                 `<user name="${userLabel}">\n${userText.slice(0, 4000)}\n</user>`,
                 `<assistant name="${charLabel}">\n${assistantText.slice(0, 6000)}\n</assistant>`]),
         // 긴 원문을 읽고 나면 출력 언어 지시가 흐려진다 — 맨 끝에서 한 번 더 짚는다 (자동일 때는 생략)
-        settings.summaryLanguage && settings.summaryLanguage !== 'auto' ? `\n(${languageDirective()})` : '',
+        languageTail().trimStart(),
     ].filter(Boolean).join('\n');
     const memoryCap = batch ? Math.min(16, 6 + units.length * 2) : 12;
     const batchDirective = batch
@@ -3530,6 +3590,7 @@ async function commitTurns(mesIds, { silent = true, force = false, retry = 1 } =
     const digests = new Map(); // 묶어 기록할 때: 교환 번호 → 그 턴의 요약·무게·흐른 시간
 
     let extracted = null;
+    let cutShort = false;   // 답이 출력 한도에서 잘려, 완성된 부분만 읽었는가
     let clockAsked = false; // 시계가 빠져 한 번 다시 요청했는가
     let nowNote = '';       // 사서가 직접 쓴 "지금이 언제인지" 한 줄
     let replied = false; // 모델이 답은 했는가 (연결 오류와 "읽을 수 없는 답"을 구분한다)
@@ -3545,14 +3606,16 @@ async function commitTurns(mesIds, { silent = true, force = false, retry = 1 } =
                 const response = await callAuxLLM(sysPrompt + nudge, userPrompt);
                 replied = true;
                 const parsed = parseJsonLoose(response);
+                cutShort = parseJsonLoose.repaired;
                 if (parsed) {
                     extracted = sanitizeExtraction(parsed, userText, assistantText, { memoryCap });
                     digests.clear();
-                    for (const d of (batch && Array.isArray(parsed.digests) ? parsed.digests : [])) {
-                        const n = Number(d?.n);
-                        const summary = clipStr(d?.digest ?? d?.summary, 700);
+                    for (const [k, d] of (batch ? listOf(firstOf(parsed, 'digests', 'turns', 'exchanges')) : []).entries()) {
+                        // 번호를 빠뜨렸으면 적힌 차례가 곧 번호다
+                        const n = Number(d?.n ?? d?.exchange ?? k + 1);
+                        const summary = clipStr(firstOf(d, 'digest', 'summary', 'text'), 700);
                         if (Number.isInteger(n) && n >= 1 && n <= units.length && summary) {
-                            digests.set(n, { summary, importance: clamp01(d?.weight ?? d?.importance, 0.4), elapsedDays: parseDurationDays(d?.time_passed ?? d?.elapsed ?? d?.time), day: d?.day ?? d?.clock ?? d?.story_day });
+                            digests.set(n, { summary, importance: clampScore(firstOf(d, 'weight', 'importance'), 0.4), elapsedDays: parseDurationDays(d?.time_passed ?? d?.elapsed ?? d?.time), day: d?.day ?? d?.clock ?? d?.story_day });
                         }
                     }
                     // 시계는 사서가 채워야 한다 — 비워 두면 추측하지 않고 한 번 다시 써 오게 한다 (두 번째도 비면 그대로 받고 일지에 남긴다)
@@ -3599,6 +3662,8 @@ async function commitTurns(mesIds, { silent = true, force = false, retry = 1 } =
     }
 
     const answered = Boolean(extracted);
+    // 잘린 답은 완성된 항목만 살렸다 — 조용히 넘기면 기억이 왜 적게 적혔는지 알 길이 없다
+    if (answered && cutShort) logActivity('error', `${batch ? `#${units[0].mesId}~#${mesId}` : `#${mesId}`} 사서 답이 출력 한도에서 잘려 완성된 부분만 적었어요 (자주 그러면 설정 탭 모델의 응답 토큰 한도·사고 토큰 여유분을 늘려 주세요${batch ? ', 또는 묶어 기록 수를 줄여 주세요' : ''})`);
     if (!extracted) {
         // LLM 실패 시에도 원문 발췌 기억은 남긴다 (fail-open)
         extracted = {
@@ -4105,7 +4170,7 @@ async function maybeFoldEras(store) {
     const directive = '\n\nThese are the OLDEST records of a long story, being folded into its single standing "story so far". Up to 10 PLOT bullets. Spend them on what the whole story still stands on: how the characters met and what they became to each other, the turning points, lasting promises, secrets and who holds them, deaths, and anything still unresolved. Let routine scenes go.';
     let text = '';
     try {
-        text = cleanMultiline(sanitizeRecordOutput(await callAuxLLM(`${getSettings().prompts.arc}${directive}\n\n${languageDirective()}`, folding.map(a => `[t${a.fromTurn}–t${a.toTurn}]\n${a.text}`).join('\n\n'), { task: 'summary', maxTokens: auxTokens(4000) })), 2800);
+        text = cleanMultiline(sanitizeRecordOutput(await callAuxLLM(`${getSettings().prompts.arc}${directive}\n\n${languageDirective()}`, folding.map(a => `[t${a.fromTurn}–t${a.toTurn}]\n${a.text}`).join('\n\n') + languageTail(), { task: 'summary', maxTokens: auxTokens(4000) })), 2800);
     } catch (e) {
         console.debug(`[${MODULE_NAME}] 옛 이야기 접기 실패 — 다음 기회에 다시`, e);
     }
@@ -4199,7 +4264,7 @@ async function maybeSummarizeChunk(store, { flushAll = false, onProgress = null,
         try {
             const refBlock = await buildReferenceBlock({ lean: true });
             const userPrompt = [refBlock, previousSummariesForContext(store), threadBlock, staleBlock, `Turn digests to weave:\n${parts.join('\n')}`]
-                .filter(Boolean).join('\n');
+                .filter(Boolean).join('\n') + languageTail();
             const sysPrompt = `${settings.prompts.chunk}${threadDirective}${staleDirective}\n\n${languageDirective()}`;
             let reply = splitClosedLine(await callAuxLLM(sysPrompt, userPrompt, { task: 'summary', maxTokens: auxTokens(4000) }));
             text = cleanMultiline(sanitizeRecordOutput(reply.text), 2000);
@@ -4350,7 +4415,7 @@ async function pushArcFromChunks(store, merging) {
     const settings = getSettings();
     let text = '';
     try {
-        text = cleanMultiline(sanitizeRecordOutput(await callAuxLLM(`${settings.prompts.arc}\n\n${languageDirective()}`, merging.map(c => `[t${c.fromTurn}–t${c.toTurn}]\n${c.text}`).join('\n\n'), { task: 'summary', maxTokens: auxTokens(4000) })), 2400);
+        text = cleanMultiline(sanitizeRecordOutput(await callAuxLLM(`${settings.prompts.arc}\n\n${languageDirective()}`, merging.map(c => `[t${c.fromTurn}–t${c.toTurn}]\n${c.text}`).join('\n\n') + languageTail(), { task: 'summary', maxTokens: auxTokens(4000) })), 2400);
     } catch (e) {
         console.debug(`[${MODULE_NAME}] 연대기 병합 LLM 실패`, e);
     }
@@ -4438,7 +4503,7 @@ async function mergeArcsIntoOne(store, arcs) {
     const settings = getSettings();
     let text = '';
     try {
-        text = cleanMultiline(sanitizeRecordOutput(await callAuxLLM(`${settings.prompts.arc}\n\n${languageDirective()}`, arcs.map(a => `[t${a.fromTurn}–t${a.toTurn}]\n${a.text}`).join('\n\n'), { task: 'summary', maxTokens: auxTokens(4000) })), 2400);
+        text = cleanMultiline(sanitizeRecordOutput(await callAuxLLM(`${settings.prompts.arc}\n\n${languageDirective()}`, arcs.map(a => `[t${a.fromTurn}–t${a.toTurn}]\n${a.text}`).join('\n\n') + languageTail(), { task: 'summary', maxTokens: auxTokens(4000) })), 2400);
     } catch (e) {
         console.debug(`[${MODULE_NAME}] 아크 재병합 LLM 실패`, e);
     }
@@ -4566,7 +4631,7 @@ async function runConsolidation(store, { review = false } = {}) {
         return `[${tag}] (${m.kind}, t${m.turnIndex}, imp ${Number(m.importance).toFixed(2)}) ${m.summary}`;
     });
 
-    const response = await callAuxLLM(CURATOR_PROMPT, lines.join('\n'), { task: 'summary', maxTokens: auxTokens(8000) });
+    const response = await callAuxLLM(CURATOR_PROMPT, lines.join('\n') + languageTail(), { task: 'summary', maxTokens: auxTokens(8000) });
     const plan = parseJsonLoose(response);
     if (!plan || typeof plan !== 'object') {
         // "모델 응답 오류" 한 줄로는 무엇을 만져야 할지 알 수 없다 — 실제 응답 앞부분을 콘솔에 남기고,
@@ -7184,19 +7249,29 @@ async function askLibrarian(question) {
  * ============================================================ */
 
 /** 편집안(op) 하나를 사람이 읽을 한 줄 설명으로 바꾼다 (미리보기용) */
+/** 편집안이 가리키는 기록을 사람이 알아볼 말로 (id 대신 그 기록의 앞머리) */
+function editorTargetLabel(id) {
+    const store = getStore();
+    const hit = store.memories.find(x => x.id === id) || store.locks.find(x => x.id === id);
+    if (hit) return `"${cleanStr(hit.summary, 36)}"`;
+    const sum = store.chunkSummaries.find(x => x.id === id) || store.arcSummaries.find(x => x.id === id);
+    if (sum) return `t${sum.fromTurn}–t${sum.toTurn}`;
+    return '찾을 수 없는 기록';
+}
+
 function describeEditorOp(op) {
     switch (op.op) {
         case 'canon': return `캐논: ${op.scopeName ? `${op.scopeName}의 ` : ''}${op.key} → "${op.value}"`;
         case 'status': return `상태: ${op.entity}.${op.slot} → "${op.value}"${op.claim === 'belief' ? ` (${op.owner || '누군가'}의 믿음)` : ''}`;
         case 'clock': return `서사시계: t${op.fromTurn}–t${op.toTurn} 구간을 총 ${op.totalDays}일로 재조정`;
         case 'addMemory': return `기억 추가 (${op.kind || 'fact'}) → "${op.summary}"`;
-        case 'editMemory': return `기억 수정 (${op.id}) → "${op.summary}"`;
-        case 'deleteMemory': return `기억 삭제 (${op.id})`;
-        case 'editSummary': return `요약 수정 (${op.id})`;
-        case 'deleteSummary': return `요약 삭제 (${op.id})`;
+        case 'editMemory': return `기억 수정 ${editorTargetLabel(op.id)} → "${op.summary}"`;
+        case 'deleteMemory': return `기억 삭제 ${editorTargetLabel(op.id)}`;
+        case 'editSummary': return `요약 수정 (${editorTargetLabel(op.id)})`;
+        case 'deleteSummary': return `요약 삭제 (${editorTargetLabel(op.id)})`;
         case 'addPledge': return `서약 추가 (${normLockKind(op.kind)}) → "${op.summary}"`;
-        case 'editPledge': return `서약 수정 (${op.id})${op.status ? ` → ${op.status}` : ''}${op.summary ? ` "${op.summary}"` : ''}`;
-        case 'deletePledge': return `서약 삭제 (${op.id})`;
+        case 'editPledge': return `서약 수정 ${editorTargetLabel(op.id)}${op.status ? ` → ${op.status === 'resolved' ? '해결됨' : '활성'}` : ''}${op.summary ? ` → "${op.summary}"` : ''}`;
+        case 'deletePledge': return `서약 삭제 ${editorTargetLabel(op.id)}`;
         case 'character': return `인물 카드: ${op.name} — ${Object.keys(op.patch || {}).join(', ')} 갱신`;
         case 'bond': return `관계선: ${op.from} → ${op.to} = "${op.stage}"`;
         default: return JSON.stringify(op);
@@ -7212,7 +7287,18 @@ function resetEditorChat() {
 
 /** 캐논·상태·서약·인물 전체 + 요청과 관련된 기억/요약(id 포함)을 편집용으로 덤프한다.
  * renderPacket()과 달리 id를 노출해 LLM이 editMemory/editSummary로 정확히 짚을 수 있게 한다. */
+/**
+ * 편집안이 가리키는 기록의 짧은 번호(M1 · S2 · P3) → 진짜 id. 긴 id는 가벼운 모델이 한 글자씩 틀리게 옮겨 적어
+ * 편집이 조용히 빠졌다. 서고를 보여 줄 때마다 새로 매긴다
+ */
+let editorAliases = new Map();
+function resolveEditorId(raw) {
+    const id = String(raw ?? '').trim().replace(/^\[|\]$/g, '');
+    return editorAliases.get(id.toLowerCase()) || id;
+}
+
 async function buildEditorArchiveText(instruction) {
+    editorAliases = new Map();
     const store = getStore();
     const parts = await buildPacketSections(instruction, null);
     const lines = [];
@@ -7227,7 +7313,7 @@ async function buildEditorArchiveText(instruction) {
     }
     if (parts.locks?.length) {
         lines.push('## Pledges');
-        for (const l of parts.locks) lines.push(`- [${l.id}] (${normLockKind(l.kind)}, ${l.status}) ${l.summary}`);
+        parts.locks.forEach((l, i) => { editorAliases.set(`p${i + 1}`, l.id); lines.push(`- [P${i + 1}] (${normLockKind(l.kind)}, ${l.status}) ${l.summary}`); });
     }
     if (parts.characters?.length) {
         lines.push('## Cast');
@@ -7244,12 +7330,12 @@ async function buildEditorArchiveText(instruction) {
     const mem = [...(parts.publicRecall || []), ...(parts.protectedRecall || [])];
     if (mem.length) {
         lines.push('## Memories (id — turn — text)');
-        for (const m of mem) lines.push(`- [${m.id}] (t${m.turnIndex}) ${m.summary}`);
+        mem.forEach((m, i) => { editorAliases.set(`m${i + 1}`, m.id); lines.push(`- [M${i + 1}] (t${m.turnIndex}) ${m.summary}`); });
     }
     const sums = parts.summaries || [];
     if (sums.length) {
         lines.push('## Summaries (id — turn range — text)');
-        for (const s of sums) lines.push(`- [${s.id}] (t${s.fromTurn}–t${s.toTurn}) ${s.text}`);
+        sums.forEach((x, i) => { editorAliases.set(`s${i + 1}`, x.id); lines.push(`- [S${i + 1}] (t${x.fromTurn}–t${x.toTurn}) ${x.text}`); });
     }
     return lines.join('\n');
 }
@@ -7268,7 +7354,8 @@ async function proposeEditorTurn(instruction) {
     const raw = await callAuxLLM(`${EDITOR_PROMPT}\n\n${languageDirective()}`, userPrompt, { task: 'light', maxTokens: auxTokens(3000) });
     const parsed = parseJsonLoose(raw);
     if (!parsed || typeof parsed.reply !== 'string') throw new Error('사서 응답을 이해하지 못했습니다');
-    const ops = Array.isArray(parsed.ops) ? parsed.ops.filter(o => o && typeof o === 'object' && typeof o.op === 'string') : [];
+    const ops = (Array.isArray(parsed.ops) ? parsed.ops.filter(o => o && typeof o === 'object' && typeof o.op === 'string') : [])
+        .map(o => (o.id != null ? { ...o, id: resolveEditorId(o.id) } : o));
 
     editorHistory.push({ role: 'user', content: text });
     editorHistory.push({ role: 'assistant', content: parsed.reply + (ops.length ? ` (변경 ${ops.length}건 제안)` : '') });
