@@ -3220,6 +3220,9 @@ function upsertBond(store, b, turnIndex, { manual = false } = {}) {
     if (last && !manual) {
         if (!entry.calls) entry.calls = last.calls || '';
         if (!entry.basis) entry.basis = last.basis || '';
+        // 부르는 말은 관계가 움직일 때 바뀐다. 단계는 그대로인데 부르는 말만 달라졌다면 답변이 잠깐 흔들린 것이다 —
+        // 그대로 받아 적으면 그 흔들림("유원 씨")이 기록이 되어 다음 답변을 끌고 간다. 사람이 직접 적은 것은 더욱 지킨다
+        if (last.calls && entry.calls !== last.calls && (last.manual || last.stage === entry.stage || sameBondStep(last, entry))) entry.calls = last.calls;
     }
     if (last && last.stage === entry.stage && (last.calls || '') === entry.calls && (last.unsaid || '') === entry.unsaid) return row; // 재확인일 뿐
     if (last && last.turn === turnIndex && !last.manual && !manual) row.log[row.log.length - 1] = { ...entry, was: last.was }; // 같은 턴의 재기록
@@ -6028,8 +6031,21 @@ async function buildPacketSections(query, supervisorPlan) {
     if (settings.addressTerms !== false) {
         const present = new Set([...characters.filter(c => c.sceneNow).map(c => String(c.name).toLowerCase()), ...(meName ? [meName.toLowerCase()] : [])]);
         const callsOf = (from, to) => { const b = (store.bonds || []).find(x => !x.disabled && entityKey(x.from) === entityKey(from) && entityKey(x.to) === entityKey(to)); return b ? bondNow(b)?.calls || '' : ''; };
-        // 오래전에 쓰던 부름말은 그때의 사정(변장·거리감·옛 관계)일 수 있다 — 최근 대화(ADDRESS_SPAN)에서 쓴 것만 "지금 부르는 말"로 싣는다
-        if (present.size >= 2) address = pickAddressLines(addressRows(store), present, { known: callsOf });
+        // 1) 관계선에 적힌 부르는 말이 먼저다 — 장면에 있거나 최근 글·이번 입력에 이름이 나온 사람끼리는 모두 싣는다.
+        //    장면 도중에 들어오는 사람(답변 안에서 처음 등장하는 옛 선배)도 이름이 불리는 순간 이 줄이 있어야 "유원 씨" 같은 먼 호칭으로 새지 않는다
+        const hay = `${sceneHay}\n${String(query || '').toLowerCase()}`;
+        const aroundCard = (name) => {
+            const c = store.characters.find(x => entityKey(x.name) === entityKey(canonEntityName(store, name)));
+            const forms = [name, ...(c ? [c.name, ...(c.aliases || [])] : [])].map(n => String(n).toLowerCase()).filter(n => n.length >= 2);
+            return present.has(String(c?.name || name).toLowerCase()) || forms.some(n => hay.includes(n)) || (c && called.has(entityKey(c.name)));
+        };
+        const filed = (store.bonds || []).filter(b => !b.disabled && bondNow(b)?.calls && aroundCard(b.from) && aroundCard(b.to))
+            .map(b => ({ from: b.from, to: b.to, terms: String(bondNow(b).calls).split(/\s*[,，、/]\s*/).map(t => t.trim()).filter(Boolean).slice(0, 4), filed: true }))
+            .sort((a, z) => a.from.localeCompare(z.from) || a.to.localeCompare(z.to)).slice(0, 8);
+        // 2) 적힌 것이 없는 짝만 대사에서 모은 것으로 채운다 — 적힌 짝까지 대사에서 모으면, 모델이 한 번 잘못 쓴 호칭("유원 씨")이 다음 장부에 "지켜라"로 실려 굳는다
+        const tallied = present.size >= 2 ? pickAddressLines(addressRows(store), present, { known: callsOf })
+            .filter(x => !callsOf(x.from, x.to)) : [];
+        address = [...filed, ...tallied];
     }
     // 약속·기한 — 작중 시간으로 센다
     const deadlines = settings.dueDates !== false && settings.storyClock ? pickStoryDeadlines(store) : [];
@@ -6464,8 +6480,8 @@ function renderPacket(parts, { withExcerpts = true, excerptLimit = Infinity, rec
     if (parts.trackerLine && stateLimit > 0) lines.push(parts.trackerLine);
     if (parts.address?.length && stateLimit > 0) {
         // 서로 부르는 말 — 대사에서 모은 것. 호칭이 흔들리면 관계가 흔들려 보인다
-        lines.push('## How They Address Each Other (from their own dialogue — keep these forms unless the scene changes them)');
-        for (const a of parts.address) lines.push(`- ${a.from} → ${a.to}: ${a.terms.map(x => `"${x}"`).join(', ')}`);
+        lines.push('## How They Address Each Other (use exactly these whenever these people speak to each other — also when one of them enters partway through a scene. Do not slip into a more distant form the record does not show — a surname, a bare name with 씨 or 님, a formal register — unless the scene itself changes it)');
+        for (const a of parts.address) lines.push(`- ${a.from} → ${a.to}: ${a.terms.map(x => `"${x}"`).join(', ')}${a.filed ? '' : ' (from their dialogue)'}`);
     }
     if (parts.voices?.length && stateLimit > 0) {
         // 요약은 서술자 말투로 쓰이고 옛 원문은 숨겨진다 — 장면에 있는 인물이 실제로 했던 말을 몇 줄 보여

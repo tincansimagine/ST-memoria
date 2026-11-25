@@ -112,3 +112,40 @@ test('called by a title alone, the person is found through the speaker\'s own bo
     for (const i of [61, 71, 81]) chat[i - 1].mes = '"형, 이것 좀 봐요."';
     assert.equal(a.run('calledByTitle')(store).size, 0);
 });
+
+test('forms of address on file are carried for anyone in or named in the scene, and a slip in the dialogue does not override them', async () => {
+    const a = await app();
+    const store = a.getStore();
+    a.getSettings().defaultPerspective = '';
+    store.characters.push(card('아리아', { updatedTurn: 60 }), card('유원', { updatedTurn: 58 }), card('여행자', { updatedTurn: 60 }));
+    store.bonds.push(bond('여행자', '유원', '믿고 따르는 선배', '유원 형, 형'), bond('유원', '여행자', '아끼는 후배', '시온아'), bond('아리아', '보라', '친구', '보라야'));
+    const chat = a.context.chat;
+    // 직전 답변 두 개가 "유원 씨"로 잘못 불렀다
+    for (let i = 0; i < 2; i++) chat.push({ is_user: true, mes: '계속', name: '여행자' }, { is_user: false, mes: '"유원 씨, 괜찮아요?" 여행자가 물었다. "유원 씨, 피가 나요."', name: '아리아' });
+    // 이번 입력에서 유원이 처음 언급된다 (장면에 있던 사람이 아니다)
+    chat.push({ is_user: true, mes: '집에 가는 길에 유원을 마주쳤다.', name: '여행자' });
+    const packet = (await a.buildPacketWithinBudget(a.currentRecallQuery(), null)).text;
+    const sec = packet.split('## How They Address Each Other')[1]?.split('\n## ')[0] || '';
+    assert.match(sec, /also when one of them enters partway through a scene[\s\S]*more distant form/);
+    assert.match(sec, /- 여행자 → 유원: "유원 형", "형"/);
+    assert.match(sec, /- 유원 → 여행자: "시온아"/);
+    assert.doesNotMatch(sec, /유원 씨/, 'the slip is not handed back as the form to keep');
+    assert.doesNotMatch(sec, /보라야/, 'a pair nobody in the scene is part of is left out');
+});
+
+test('a bond filed again at the same stage keeps the forms of address on file; a real move may change them', () => {
+    return (async () => {
+        const a = await app();
+        const store = a.getStore();
+        const up = a.run('upsertBond');
+        up(store, { from: '여행자', to: '유원', stage: '믿고 따르는 선배', calls: '유원 형, 형' }, 10);
+        up(store, { from: '여행자', to: '유원', stage: '믿고 따르는 선배', calls: '유원 씨' }, 20);
+        assert.equal(a.run('bondNow')(store.bonds[0]).calls, '유원 형, 형', 'a slip in wording is not filed');
+        up(store, { from: '여행자', to: '유원', stage: '서로 의지하는 연인', calls: '자기, 형' }, 40);
+        assert.equal(a.run('bondNow')(store.bonds[0]).calls, '자기, 형', 'when the relationship moves, the way they call each other may move with it');
+        // 사람이 직접 고친 부르는 말은 사서가 바꾸지 못한다
+        up(store, { from: '유원', to: '여행자', stage: '아끼는 후배', calls: '시온아' }, 41, { manual: true });
+        up(store, { from: '유원', to: '여행자', stage: '각별한 후배', calls: '시온 씨' }, 50);
+        assert.equal(a.run('bondNow')(store.bonds[1]).calls, '시온아');
+    })();
+});
