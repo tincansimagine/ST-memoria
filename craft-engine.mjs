@@ -639,6 +639,78 @@ export function threadTouched(l) {
 }
 
 /* ------------------------------------------------------------
+ * 인물 특성 — 같은 말의 다른 꼴을 한 줄로
+ *
+ * 사서는 카드에 이미 있는 특성을 보지 못한 채 그때그때 적는다. 그래서 "체념"과 "체념적", "다혈질"과 "불같은 다혈질",
+ * "독점욕"과 "독점욕이 강한"이 한 카드에 나란히 쌓이고, 매 턴 장부에 실려 토큰만 먹는다.
+ * ------------------------------------------------------------ */
+
+/** 낱말 끝의 꼴 — "~함 · ~한 · ~적 · ~스러운 · ~성 · ~증 · ~감"을 떼면 같은 말이다 (뗀 뒤 두 글자 이상 남을 때만) */
+const TRAIT_SUFFIX = /(?:스러움|스러운|스럽다|스러워|스럽게|적인|적임|하다|하게|함|한|적|성|증|감)$/;
+/** 꾸미는 말 — 관형형으로 끝나거나("불같은 · 강한 · 많은") 정도를 더하는 말 */
+const TRAIT_MODIFIER = /[은는운한인의던운]$/;
+const TRAIT_INTENSIFIER = new Set(['매우', '아주', '몹시', '꽤', '극도로', '극도의', '지나치게', '지독한', 'very', 'extremely', 'deeply', 'highly', 'quite', 'overly', 'fiercely']);
+/** 정도를 말하는 뒷말 — "자존심 강함" · "질투심이 많음" · "겁이 많은"은 앞말과 같다 */
+const TRAIT_DEGREE = /^(?:강함|강한|강하다|많음|많은|많다|심함|심한|심하다|높음|높은|큼|큰|넘침|넘치는|센|셈|대단함|대단한|지나침|지나친)$/;
+
+function traitStem(word) {
+    const w = String(word).toLowerCase().replace(/[^\p{L}\p{N}]/gu, '');
+    if (!/[가-힣]/.test(w)) return w.replace(/(?:ness|ful|ive|ous)$/, (m) => (w.length - m.length >= 4 ? '' : m));
+    const cut = w.replace(TRAIT_SUFFIX, '');
+    return cut.length >= 2 ? cut : w;
+}
+
+/**
+ * 특성 하나를 견줄 꼴로. key: 낱말 줄기 전부, head: 꾸밈을 뗀 머리말 ("불같은 다혈질" → 다혈질, "독점욕이 강한" → 독점욕).
+ * 세 낱말 이상이거나 꾸밈 꼴이 아니면 head 는 없다 — "다정함 뒤의 냉정함" 같은 묶음은 한 낱말과 같다고 보지 않는다.
+ */
+export function traitShape(trait) {
+    const words = String(trait ?? '').toLowerCase().split(/\s+/).map(w => w.replace(/[^\p{L}\p{N}-]/gu, '')).filter(Boolean);
+    const key = words.map(traitStem).join(' ');
+    let head = '';
+    if (words.length === 1) head = traitStem(words[0]);
+    else if (words.length === 2) {
+        const [a, b] = words;
+        if (TRAIT_INTENSIFIER.has(a) || (/[가-힣]/.test(a) && TRAIT_MODIFIER.test(a) && a.length >= 2)) head = traitStem(b);              // 불같은 다혈질 · 매우 예민함
+        else if (/[가-힣]{2,}[이가]$/.test(a) && (TRAIT_MODIFIER.test(b) || /[함음]$/.test(b))) head = traitStem(a.slice(0, -1));       // 독점욕이 강한 · 질투심이 많음
+        else if (TRAIT_DEGREE.test(b)) head = traitStem(a);                                                                       // 자존심 강함 · 고집 센
+    }
+    return { key, head };
+}
+
+/** 두 특성이 같은 말인가 */
+export function sameTrait(a, b) {
+    const x = traitShape(a), y = traitShape(b);
+    if (!x.key || !y.key) return false;
+    if (x.key === y.key) return true;
+    return !!(x.head && y.head && x.head === y.head && x.head.length >= 2);
+}
+
+/**
+ * 특성 목록을 합친다. 같은 말이면 한 번만 — 더 짧은 쪽을 남기고 자리는 먼저 있던 쪽 그대로(장부의 줄이 흔들리지 않게).
+ * 상한을 넘으면 이번에 다시 적히지 않은 옛 것부터 뺀다 — 처음 받은 열 개가 영영 자리를 차지해 새 특성이 못 들어오던 것을 막는다.
+ * 반환: 새 배열 (입력은 건드리지 않는다)
+ */
+export function mergeTraits(existing, incoming = [], max = 10) {
+    const out = [];
+    const put = (t, fresh) => {
+        const text = String(t ?? '').trim();
+        if (!text) return;
+        const i = out.findIndex(x => sameTrait(x.text, text));
+        if (i < 0) { out.push({ text, fresh }); return; }
+        if ([...text].length < [...out[i].text].length) out[i].text = text;
+        if (fresh) out[i].fresh = true;
+    };
+    for (const t of existing || []) put(t, false);
+    for (const t of incoming || []) put(t, true);
+    while (out.length > max) {
+        const stale = out.findIndex(x => !x.fresh);
+        out.splice(stale >= 0 ? stale : 0, 1);
+    }
+    return out.map(x => x.text);
+}
+
+/* ------------------------------------------------------------
  * 드문 낱말 회상
  *
  * "그 나침반 아직 있어?"의 "나침반"처럼 서고 전체에서 몇 번 안 나오는 낱말은, 그 낱말이 든 기억을

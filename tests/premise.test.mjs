@@ -210,3 +210,24 @@ test('an old stretch of the chat is quoted only when the user\'s own words look 
     packet = (await a.buildPacketWithinBudget(a.currentRecallQuery(), null)).text;
     assert.match(packet, /## Original Lines[\s\S]*이건 아무한테도 말하지 마요/);
 });
+
+test('a card\'s traits that are forms of the same word are folded when filed, once on opening, and in the ledger — locked cards stay as the user left them', async () => {
+    const a = await app();
+    const store = a.getStore();
+    a.getSettings().recordBatch = 1;
+    store.characters.push(card('아리아', { traits: ['다혈질', '체념'] }), card('보라', { locked: true, traits: ['유약함', '유약한'] }));
+    a.context.generateRaw = async () => JSON.stringify({ digest: '아리아가 화를 냈다.', clock: { day: 91 }, memories: [], cast: [{ name: '아리아', traits: ['불같은 다혈질', '체념적', '고집 센', '고집'] }] });
+    a.context.chat.push({ is_user: true, mes: '아리아에게 말을 걸었다', name: '여행자' }, { is_user: false, mes: '아리아가 버럭 화를 냈다. 보라는 고개를 숙였다.', name: '아리아' });
+    assert.equal(await a.run('commitTurns')([a.context.chat.length - 1]), true);
+    const aria = store.characters.find(c => c.name === '아리아');
+    assert.deepEqual([...aria.traits], ['다혈질', '체념', '고집']);
+
+    // 예전에 쌓인 것은 채팅을 열 때 한 번 접는다
+    aria.traits = ['다혈질', '불같은 다혈질', '체념적', '체념'];
+    delete store.castRev;
+    a.run('reconcileWithChat')();
+    assert.deepEqual([...aria.traits], ['다혈질', '체념']);
+    const bora = store.characters.find(c => c.name === '보라');
+    assert.deepEqual([...bora.traits], ['유약함', '유약한'], 'a locked card is not rewritten');
+    assert.match(a.run('formatCharacterLine')({ ...bora, sceneNow: true }), /유약함(?!, 유약한)/, 'but it is carried folded');
+});

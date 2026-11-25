@@ -40,7 +40,7 @@ import { ARGUMENT_TYPE, SlashCommandArgument } from "../../../slash-commands/Sla
 import { MacrosParser } from "../../../../scripts/macros.js";
 import { NARRATOR_PERSPECTIVE, isSharedPerspective, hasChatPerspective, resolvePerspective, findAssociations, sameKnowledgeScope, archiveSnapshot, validateArchive, addCheckpoint, archiveChanges, packetSections } from './archive-engine.mjs';
 import { showArchiveLibrary } from './library-ui.mjs';
-import { withDeadline, parsePhraseList, stripPhrases, hasPhrase, findRepeatedPhrases, pickBundleValues, resolveBundleName, switchBundle, saveBundle, deleteBundle, renameBundle, exportBundle, parseBundleFile, diffStableEntries, shouldRefreeze, createActivityLog, findRivalExtensions, splitClosedLine, sleepStaleThreads, sleepStaleSecrets, pickPledges, pledgeHeldBack, SECRET_KINDS, mentionsThread, stripOpenLines, THREAD_KINDS, recallCooldown, pushRecallHistory, isEndedValue, ungroundedFigures, roughTokens, noteUsage, usageTotals, groundedIn, soundsHedged, noteThreadSightings, threadTouched, rareQueryWords, findConflicts, looksRefused, looksBlocked, strayHidden, pickTranscript, transcriptTerms, crossScriptPairs, crossScriptSame, pickPledgesToCheck, ensembleLabel } from './craft-engine.mjs';
+import { withDeadline, parsePhraseList, stripPhrases, hasPhrase, findRepeatedPhrases, pickBundleValues, resolveBundleName, switchBundle, saveBundle, deleteBundle, renameBundle, exportBundle, parseBundleFile, diffStableEntries, shouldRefreeze, createActivityLog, findRivalExtensions, splitClosedLine, sleepStaleThreads, sleepStaleSecrets, pickPledges, pledgeHeldBack, SECRET_KINDS, mentionsThread, stripOpenLines, THREAD_KINDS, recallCooldown, pushRecallHistory, isEndedValue, ungroundedFigures, roughTokens, noteUsage, usageTotals, groundedIn, soundsHedged, noteThreadSightings, threadTouched, rareQueryWords, findConflicts, looksRefused, looksBlocked, strayHidden, pickTranscript, transcriptTerms, crossScriptPairs, crossScriptSame, pickPledgesToCheck, ensembleLabel, mergeTraits, sameTrait } from './craft-engine.mjs';
 import { isOocText, looksOocReply, attributeQuote, addressTermsIn, tallyAddress, pickAddressLines, personNowLine, titleTargets, saysTitle, dialogueSpans, speakerOfSpan, crowdedNarration } from './stage-engine.mjs';
 import { parseStoryDate, storyDatesOf, isIsoDate, trackerText, trackerLineOf, pickBeats, beatLines, veilLeaks } from './calendar-engine.mjs';
 import { peopleList, matchPerson, personPage, nameSuggestions, planMerge, pairKey, WIPE_KINDS, wipeCounts, NOW_ORDER } from './people-engine.mjs';
@@ -3028,6 +3028,7 @@ function trimWas(rel, depth = 3) {
 }
 
 function upsertCharacter(store, c, turnIndex) {
+    if (Array.isArray(c.traits)) c = { ...c, traits: mergeTraits([], c.traits, 10) };
     const norm = (s) => String(s || '').toLowerCase();
     const findCard = (n) => store.characters.find(x =>
         norm(x.name) === norm(n) || (x.aliases || []).some(a => norm(a) === norm(n)));
@@ -3080,7 +3081,8 @@ function upsertCharacter(store, c, turnIndex) {
         // 실제로 내용이 바뀌는지 먼저 확인 — 재확인(변화 없음)이면 이전 값 이력을 건드리지 않는다
         const scalarChanged = ['role', 'age', 'occupation', 'appearance', 'voice']
             .some(f => c[f] && c[f] !== existing[f]);
-        const incomingTraits = (c.traits || []).filter(t => !(existing.traits || []).includes(t));
+        // 같은 말의 다른 꼴("체념"·"체념적")은 새 특성으로 치지 않는다
+        const incomingTraits = (c.traits || []).filter(t => !(existing.traits || []).some(x => sameTrait(x, t)));
         if (scalarChanged || incomingTraits.length) {
             // 이 턴이 삭제되면 되돌릴 수 있게, 바뀌기 직전 프로필을 쌓아 둔다 (몇 턴을 되감아도 그때의 프로필로)
             const snapshot = {
@@ -3100,7 +3102,7 @@ function upsertCharacter(store, c, turnIndex) {
             if (c[field]) existing[field] = c[field];
         }
         if (c.traits?.length) {
-            existing.traits = [...new Set([...(existing.traits || []), ...c.traits])].slice(0, 10);
+            existing.traits = mergeTraits(existing.traits, c.traits, 10);
         }
     }
     if (!existing.locked) {
@@ -3256,7 +3258,7 @@ function mergeCharacterCards(store, keep, absorb) {
     for (const field of ['role', 'age', 'occupation', 'appearance', 'voice']) {
         if (!keep[field] && absorb[field]) keep[field] = absorb[field];
     }
-    keep.traits = [...new Set([...(keep.traits || []), ...(absorb.traits || [])])].slice(0, 10);
+    keep.traits = mergeTraits(keep.traits, absorb.traits, 10);
     if (!keep.core && absorb.core) { keep.core = absorb.core; keep.coreTurn = absorb.coreTurn ?? null; }
     for (const l of (absorb.lines || [])) addCharacterLine(keep, l.text, l.turn || 0);
     keep.growth = [...(keep.growth || []), ...(absorb.growth || [])]
@@ -6051,7 +6053,7 @@ function formatCharacterLine(c) {
     const head = [c.role, c.age, c.occupation].filter(Boolean).join(', ');
     // 장면 밖 인물은 짧게: 누구인지와 핵심 한 줄만. 말투·변화·관계 전부는 그 인물이 장면에 설 때 싣는다.
     if (c.brief) {
-        const gist = c.core ? cleanStr(c.core, 90) : (c.traits || []).slice(0, 3).join(', ');
+        const gist = c.core ? cleanStr(c.core, 90) : mergeTraits([], c.traits).slice(0, 3).join(', ');
         const akaBrief = c.aliases?.length ? ` (aka ${c.aliases.slice(0, 2).join(', ')})` : '';
         return `- ${c.name}${akaBrief}${head ? ` (${head})` : ''}${gist ? ` — ${gist}` : ''}`;
     }
@@ -6067,7 +6069,7 @@ function formatCharacterLine(c) {
         ? `core (the temperament they began with — where "changed in this story" says otherwise, that is who they are now): ${c.core}`
         : `core (constant — the story does not rewrite this): ${c.core}`);
     if (c.voice) bits.push(`voice: ${c.voice}`);
-    if (c.traits?.length) bits.push(c.traits.join(', '));
+    if (c.traits?.length) bits.push(mergeTraits([], c.traits).join(', '));
     if (grown) bits.push(`changed in this story (how they stand now — this outranks the core and the original description): ${grown}`);
     if (c.relationships?.length) bits.push(c.relationships.map(r => `${r.target}: ${r.relation}`).join('; '));
     const aka = c.aliases?.length ? ` (aka ${c.aliases.join(', ')})` : '';
@@ -7177,6 +7179,17 @@ function reconcileWithChat() {
         store.castRev = 1;
         if (cleaned) { logActivity('update', `인물 카드 ${cleaned}장에서 다른 칸의 내용이 섞여 든 이름·나이·달라진 점을 걷어 냈어요`); changed = true; }
     }
+    if (!(store.castRev >= 2)) {
+        // 같은 말의 다른 꼴로 쌓인 특성("다혈질"·"불같은 다혈질")을 한 번 접는다 — 잠긴 카드는 그대로 둔다 (장부에 실을 때는 접어서 싣는다)
+        let folded = 0;
+        for (const c of store.characters) {
+            if (c.locked || !c.traits?.length) continue;
+            const next = mergeTraits([], c.traits, Math.max(10, c.traits.length));
+            if (next.length !== c.traits.length) { folded += c.traits.length - next.length; c.traits = next; }
+        }
+        store.castRev = 2;
+        if (folded) { logActivity('update', `인물 카드에서 같은 말의 다른 꼴로 겹친 특성 ${folded}개를 접었어요`); changed = true; }
+    }
     if (!(store.secretRev >= 1) && settleSecrets(store) !== 0) changed = true;
     const foldedOnLoad = foldEntityAliases(store);
     if (foldedOnLoad.states || foldedOnLoad.memories) {
@@ -7683,7 +7696,7 @@ async function applyEditorOps(ops) {
                     // 바탕은 사서가 스스로는 못 바꾸지만, 사용자가 정정을 요청한 경우에는 바꾼다
                     if (op.patch.core != null && existing) { existing.core = cleanStr(op.patch.core, 500) || null; existing.coreTurn = null; }
                     else if (op.patch.core != null) card.core = cleanStr(op.patch.core, 500) || null;
-                    if (Array.isArray(op.patch.traits)) card.traits = op.patch.traits.map(t => cleanStr(t, 40)).filter(Boolean).slice(0, 8);
+                    if (Array.isArray(op.patch.traits)) card.traits = mergeTraits([], op.patch.traits.map(t => cleanStr(t, 40)).filter(Boolean), 8);
                     upsertCharacter(store, card, now);
                     applied++;
                     break;
