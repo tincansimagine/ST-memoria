@@ -1644,3 +1644,18 @@ body[data-memoria-paper="dark"] :is(#memoria_settings.memoria, .memoria-library,
 .memoria-pop__entry p { white-space: pre-wrap; }
 .memoria__mem-who { font-size: .8em; opacity: .7; }
 .memoria-mes-star.is-on { color: #e0b44a; opacity: 1; }
+
+/* 긴 글이 카드 밖으로 나가지 않게 — 표식과 칩은 길면 줄을 바꾼다 (한 줄 고집은 짧은 종류 딱지에만 어울린다) */
+#memoria_settings .memoria__badge, #memoria_settings .memoria__chip, #memoria_settings .mmv-chip, #memoria_settings .mmv-tag {
+    white-space: normal; overflow-wrap: anywhere; word-break: keep-all; max-width: 100%; overflow: visible; text-overflow: clip; line-height: 1.45;
+}
+#memoria_settings .memoria__mem-head > .memoria__badge { white-space: nowrap; }   /* 기억 카드의 종류 딱지(사건·약속…)는 짧다 */
+#memoria_settings :is(.memoria__char-card, .memoria__bond-card, .memoria__mem-card, .memoria__row, .memoria__section) { min-width: 0; max-width: 100%; overflow-wrap: anywhere; }
+/* 관계선 카드: 이름 줄 → 지금 단계 → 버튼 순으로 쌓는다. 단계 문장이 길어도 카드 안에서 줄을 바꾼다 */
+#memoria_settings .memoria__bond-card .memoria__char-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
+#memoria_settings .memoria__bond-card .memoria__char-name { flex: 1 1 auto; min-width: 0; }
+#memoria_settings .memoria__bond-card .memoria__char-head > .memoria__badge { order: 3; flex: 1 1 100%; padding: 4px 9px; }
+#memoria_settings .memoria__bond-card .memoria__char-head > .memoria__mem-actions { order: 2; flex: none; margin: 0 -6px 0 auto; }
+#memoria_settings .memoria__bond-card .memoria__mem-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; }
+#memoria_settings .memoria__bond-card .memoria__mem-meta > * { min-width: 0; }
+#memoria_settings .memoria__char-line { min-width: 0; overflow-wrap: anywhere; }
