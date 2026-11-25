@@ -56,7 +56,7 @@ test('the sweep checks old pledges and canon against the story so far, takes onl
         });
     };
     const r = await a.run('auditPledges')(store);
-    assert.deepEqual({ ...r }, { checked: 6, flagged: 3, stale: 1 });
+    assert.deepEqual({ ...r }, { checked: 6, flagged: 3, stale: 1, premise: 0 });
     assert.match(body, /The story so far:\n[\s\S]*알아챘다/);
     assert.match(body, /은나침반을 잃어버린 일을 아리아에게 숨긴다\n {4}notes: 민호가 은나침반을 잃어버렸다고 아리아에게 털어놓았다/, 'the memory that touches the pledge rides along');
     for (const absent of ['항구에서 본 배', '등대 지하의 문', '범인은 민호', '새 규칙']) assert.doesNotMatch(body, new RegExp(absent), `${absent}: newer than the summary, upheld by the user, or the author's plan — not asked about`);
@@ -70,6 +70,7 @@ test('the sweep checks old pledges and canon against the story so far, takes onl
     assert.equal(store.worldRules[1].expired, undefined, 'a hedged verdict is not taken');
     assert.equal(store.worldRules.length, 3, 'nothing is deleted');
     assert.equal(store.pledgeAudit, 60);
+    assert.equal(store.sweepRev, 2);
 
     const packet = (await a.buildPacketWithinBudget('항구', null)).text;
     const pledges = packet.split('## Pledges')[1].split('\n## ')[0];
@@ -142,4 +143,60 @@ test('"still valid" and a pledge the story files again both bring a held-back pl
     a.run('upsertWorldRule')(store, { scope: 'world', key: 'harbor', value: '항구는 겨울에 닫힌다' }, 63);
     assert.equal(store.worldRules[0].expired, undefined);
     assert.equal(store.worldRules[0].expiredNow, undefined);
+});
+
+test('the sweep also holds the opening setup against the story: what the story overturned is carried as how things stand now', async () => {
+    const a = await app();
+    const store = a.getStore();
+    // 시작 설정: 아리아는 남장을 하고 정체를 숨긴다 · 보라는 아리아를 남자로 안다
+    a.run(`getContext = () => ({ characterId: 0, characters: [{ name: '아리아', description: '아리아는 남장을 하고 왕녀라는 정체를 숨긴 채 등대를 지킨다. 보라는 아리아를 남자로 알고 있다.', scenario: '보라가 등대에 새로 온다.' }] })`);
+    let body = '';
+    let system = '';
+    a.context.generateRaw = async ({ prompt, systemPrompt }) => {
+        body = prompt[0].content; system = systemPrompt;
+        return JSON.stringify({ done: [], stale: [], premise: [
+            { was: '아리아가 남장을 하고 정체를 숨긴다', now: '보라가 인장 반지를 보고 아리아가 왕녀임을 알아챘다 — 아리아는 더는 정체를 숨기지 않는다', said: '인장 반지를 보고 아리아가 왕녀임을 알아챘다' },
+            { was: '보라는 아리아를 남자로 안다', now: '보라도 이제 안다', said: '보라가 아리아의 비밀을 퍼뜨렸다' },                 // 이야기에 없는 글귀
+            { was: '등대를 지킨다', now: '등대를 떠난 듯하다', said: '둘은 항구로 떠났다' },                                                   // 말끝을 흐림
+        ] });
+    };
+    const r = await a.run('auditPledges')(store);
+    assert.equal(r.premise, 1);
+    assert.match(system, /"premise"/);
+    assert.match(body, /The opening setup \(written for the start of the story\):\n\[아리아\]\nDescription: 아리아는 남장을 하고/);
+    assert.equal(store.premiseNotes.length, 1);
+
+    const packet = (await a.buildPacketWithinBudget('보라', null)).text;
+    const sec = packet.split('## Overtaken by the Story')[1].split('\n## ')[0];
+    assert.match(sec, /where the character description or scenario reads otherwise, it describes the start of the story, not now/);
+    assert.match(sec, /- \(opening setup\) 아리아가 남장을 하고 정체를 숨긴다 — now: 보라가 인장 반지를 보고 아리아가 왕녀임을 알아챘다/);
+
+    // 틀린 것은 지우면 다시 붙지 않는다
+    store.premiseDropped = ['아리아가 남장을 하고 정체를 숨긴다'];
+    await a.run('auditPledges')(store);
+    assert.equal(store.premiseNotes.length, 0);
+});
+
+test('the sweep waits until the story has some length, and runs again right after a past-chat index', async () => {
+    const a = await app();
+    const store = a.getStore();
+    store.locks.push(lock('royal', 'keep_secret', '아리아가 왕녀라는 사실을 보라에게 숨긴다', 5));
+    let calls = 0;
+    a.context.generateRaw = async () => { calls++; return JSON.stringify({ done: [], stale: [], premise: [] }); };
+    const maybe = a.run('maybeAuditPledges');
+    store.turnCounter = 8;   // 색인 도중: 첫 요약이 막 생겼다
+    await maybe(store);
+    assert.equal(calls, 0, 'not on the first summary of an index run');
+    store.turnCounter = 60;
+    await maybe(store);
+    assert.equal(calls, 1);
+    store.turnCounter = 75;
+    await maybe(store);
+    assert.equal(calls, 1);
+    await maybe(store, { afterIndex: true });
+    assert.equal(calls, 2, 'an index that added more than ten turns gets a fresh look at the end');
+    // 예전 판(시작 설정을 보지 않던 훑기)만 돈 채팅은 한 번 더 돈다
+    store.sweepRev = 1;
+    await maybe(store);
+    assert.equal(calls, 3);
 });

@@ -241,3 +241,29 @@ test('a card folded the short way by v2.8.8 gets the richer form back from its o
     assert.deepEqual([...store.characters[0].traits], ['불같은 다혈질', '체념'], 'only a form that adds meaning is brought back');
     assert.equal(store.castRev, 3);
 });
+
+test('a person who joined the story later is not marked as absent from its old scenes, and a title word does not pull an old scene out', async () => {
+    const a = await app();
+    const store = a.getStore();
+    a.getSettings().sceneCards = 1;
+    a.getSettings().autoHide = true; a.getSettings().preserveRecent = 20;
+    for (const m of a.context.chat.slice(0, -20)) { m.is_system = true; m.extra = { memoria_hidden: true }; }
+    store.characters.push(card('아리아', { firstTurn: 1, updatedTurn: 88 }), card('보라', { firstTurn: 1, updatedTurn: 88 }), card('유원', { firstTurn: 86, updatedTurn: 88 }));
+    // 첫날: 보라가 아리아의 정체를 알아챈 장면. 그 자리에는 아리아와 보라만 있었다 (유원은 86턴에 처음 나온다)
+    for (const n of [2, 3]) store.turns[n - 1].beats = [{ text: `${n}턴: 보라가 아리아의 정체를 알아챘다`, with: ['아리아', '보라'], major: true }];
+    store.memories.push(memory('first', { summary: '아리아는 선배의 빈방을 넘겨받아 등대에 들어왔다', turnIndex: 2, entities: ['아리아'], witnesses: ['아리아', '보라'] }));
+    for (let i = 0; i < 12; i++) store.memories.push(memory(`f${i}`, { summary: `등대의 ${i}번째 일상`, turnIndex: 10 + i }));
+    a.context.chat.push({ is_user: true, mes: '유원 선배가 다쳐서 병원에 같이 갔다. 보라와 아리아도 왔다.', name: '여행자' });
+    const parts = await a.buildPacketSections(a.currentRecallQuery(), null);
+    assert.doesNotMatch(parts.trace.get('first')?.reason || '', /드문 낱말:[^·]*선배/, '"선배" is a way of addressing someone, not a rare clue');
+    assert.equal(parts.cards.length, 0, 'the opening scene is not unfolded on a weak match');
+    const lines = a.renderPacket(parts);
+    assert.doesNotMatch(lines, /유원 not there|not witnessed by 유원/, 'someone who was not yet in the story is not "absent" from it');
+
+    // 내가 직접 되짚으면 그 장면을 펼친다 — 그때도 유원은 짚지 않는다
+    a.context.chat.push({ is_user: true, mes: '처음 등대에 왔던 날, 보라가 아리아의 정체를 알아챘던 그때 기억나?', name: '여행자' });
+    store.memories.find(m => m.id === 'first').summary = '처음 등대에 왔던 날 보라가 아리아의 정체를 알아챘다';
+    const back = await a.buildPacketSections(a.currentRecallQuery(), null);
+    const text = a.renderPacket(back);
+    assert.doesNotMatch(text, /유원 not there/);
+});

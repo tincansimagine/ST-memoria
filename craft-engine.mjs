@@ -736,12 +736,22 @@ export function mergeTraits(existing, incoming = [], max = 10) {
  * queryText의 낱말 가운데 docs(기억 색인 글, 소문자) 몇 개에만 나오는 드문 것들. 반환: [{ word, idf }]
  * share: 전체의 이 비율 이하에 나와야 드물다 (최소 1개). 기억이 적으면(8개 미만) 드물다는 말이 의미가 없어 빈 배열.
  */
+/* 드문 낱말로 치지 않는 말 — 사람을 부르는 말, 때·차례를 가리키는 말, 흔한 서술어. 이런 말은 서고에 몇 번 안 나와도 무엇도 가리키지 않는다
+   ("선배"가 드물다는 이유로 첫날 장면이 끌려 나왔다) */
+const RARE_SKIP = new Set(['선배', '선배님', '후배', '형', '형님', '오빠', '언니', '누나', '동생', '선생님', '쌤', '아저씨', '아줌마', '아가씨', '자기',
+    '다음', '이번', '저번', '오늘', '내일', '어제', '모레', '그때', '지금', '아까', '방금', '나중', '처음', '마지막', '요즘', '이제', '아직', '벌써', '다시', '먼저', '계속', '갑자기', '조금', '많이',
+    '정말', '진짜', '그냥', '같이', '함께', '혼자', '우리', '너희', '사람', '생각', '이야기', '얘기', '때문', '정도', '시간', '동안', '하루', '오전', '오후', '아침', '저녁', '그날', '이날',
+    'today', 'tomorrow', 'yesterday', 'then', 'now', 'next', 'later', 'again', 'together', 'really', 'senior', 'junior', 'brother', 'sister']);
+/** 서술어 꼴 — "갔다 · 했다 · 있었어요 · 가자"는 낱말이 아니라 말끝이다 */
+const VERB_TAIL = /(?:[았었였했됐갔왔봤샀줬켰쳤났섰겼렸웠] ?다|[는한된]다|하다|있다|없다|겠다|이다|니다|어요|아요|해요|세요|네요|지요|군요|는데|지만|면서|려고|자고|었어|았어|했어|갔어|왔어)$/;
+
 export function rareQueryWords(queryText, docs, { share = 0.05, minDocs = 8 } = {}) {
     const n = docs.length;
     if (n < minDocs) return [];
     const limit = Math.max(1, Math.floor(n * share));
     const out = [];
     for (const word of contentWords(queryText)) {
+        if (RARE_SKIP.has(word) || VERB_TAIL.test(word)) continue;
         let df = 0;
         for (const d of docs) { if (d.includes(word) && ++df > limit) break; }
         if (df >= 1 && df <= limit) out.push({ word, idf: Math.log((n + 1) / df) });
