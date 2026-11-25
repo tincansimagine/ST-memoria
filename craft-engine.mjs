@@ -678,16 +678,28 @@ export function traitShape(trait) {
     return { key, head };
 }
 
-/** 두 특성이 같은 말인가 */
-export function sameTrait(a, b) {
+/**
+ * 두 특성의 사이. 'same': 끝꼴만 다른 같은 말 ("체념"·"체념적") · 'wider': a가 b에 꾸밈·정도를 더한 말 ("불같은 다혈질" ⊃ "다혈질")
+ * · 'narrower': 그 반대 · '': 다른 말. 꾸밈이 서로 다른 둘("불같은 다혈질"·"급한 다혈질")은 뜻이 달라 다른 말로 본다.
+ */
+export function traitRelation(a, b) {
     const x = traitShape(a), y = traitShape(b);
-    if (!x.key || !y.key) return false;
-    if (x.key === y.key) return true;
-    return !!(x.head && y.head && x.head === y.head && x.head.length >= 2);
+    if (!x.key || !y.key) return '';
+    if (x.key === y.key) return 'same';
+    const bare = (s) => s.head && s.head === s.key;
+    if (x.head && !bare(x) && bare(y) && x.head === y.key && y.key.length >= 2) return 'wider';
+    if (y.head && !bare(y) && bare(x) && y.head === x.key && x.key.length >= 2) return 'narrower';
+    return '';
+}
+
+/** 두 특성이 같은 말인가 (꾸밈만 더한 것 포함) */
+export function sameTrait(a, b) {
+    return traitRelation(a, b) !== '';
 }
 
 /**
- * 특성 목록을 합친다. 같은 말이면 한 번만 — 더 짧은 쪽을 남기고 자리는 먼저 있던 쪽 그대로(장부의 줄이 흔들리지 않게).
+ * 특성 목록을 합친다. 같은 말이면 한 번만 — 꾸밈·정도를 더한 쪽이 뜻이 더 있으니 그쪽을 남기고("다혈질" → "불같은 다혈질"),
+ * 끝꼴만 다르면 먼저 있던 글 그대로 둔다. 자리는 먼저 있던 쪽 그대로(장부의 줄이 흔들리지 않게).
  * 상한을 넘으면 이번에 다시 적히지 않은 옛 것부터 뺀다 — 처음 받은 열 개가 영영 자리를 차지해 새 특성이 못 들어오던 것을 막는다.
  * 반환: 새 배열 (입력은 건드리지 않는다)
  */
@@ -696,9 +708,11 @@ export function mergeTraits(existing, incoming = [], max = 10) {
     const put = (t, fresh) => {
         const text = String(t ?? '').trim();
         if (!text) return;
-        const i = out.findIndex(x => sameTrait(x.text, text));
+        let i = -1;
+        let rel = '';
+        for (let k = 0; k < out.length && i < 0; k++) { rel = traitRelation(text, out[k].text); if (rel) i = k; }
         if (i < 0) { out.push({ text, fresh }); return; }
-        if ([...text].length < [...out[i].text].length) out[i].text = text;
+        if (rel === 'wider') out[i].text = text;
         if (fresh) out[i].fresh = true;
     };
     for (const t of existing || []) put(t, false);

@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { withDeadline, parsePhraseList, stripPhrases, hasPhrase, findRepeatedPhrases, bundleKeys, pickBundleValues,
     resolveBundleName, switchBundle, saveBundle, deleteBundle, renameBundle, exportBundle, parseBundleFile,
-    diffStableEntries, shouldRefreeze, createActivityLog, findRivalExtensions, mergeTraits, sameTrait } from '../craft-engine.mjs';
+    diffStableEntries, shouldRefreeze, createActivityLog, findRivalExtensions, mergeTraits, sameTrait, traitRelation } from '../craft-engine.mjs';
 
 const sleep = (ms, v) => new Promise(r => setTimeout(() => r(v), ms));
 
@@ -176,15 +176,20 @@ test('rival memory extensions are detected only when enabled', () => {
     assert.deepEqual(findRivalExtensions(names, ['third-party/Cairn']), ['Qvink Memory (MessageSummarize)']);
 });
 
-test('traits: different forms of the same word are kept once, the shorter form wins, and the card\'s order does not shift', () => {
-    // 스크린샷의 카드 그대로
+test('traits: forms of the same word are kept once — the one with more meaning wins, and the card\'s order does not shift', () => {
+    // 스크린샷의 카드 그대로: 꾸밈을 더한 쪽이 자리를 이어받는다
     assert.deepEqual(mergeTraits([], ['능청스러움', '단호함', '이성애자', '다혈질', '결벽적', '불같은 다혈질', '자존심 강함', '위압적', '지배적', '자기합리화']),
-        ['능청스러움', '단호함', '이성애자', '다혈질', '결벽적', '자존심 강함', '위압적', '지배적', '자기합리화']);
+        ['능청스러움', '단호함', '이성애자', '불같은 다혈질', '결벽적', '자존심 강함', '위압적', '지배적', '자기합리화']);
+    // 끝꼴만 다르면 먼저 있던 글 그대로
     assert.deepEqual(mergeTraits([], ['유약함', '순종적', '집착적연심', '소심함', '체념적', '수동적', '자책', '체념', '단호함', '유약한']),
-        ['유약함', '순종적', '집착적연심', '소심함', '체념', '수동적', '자책', '단호함'], '"체념" takes the place of "체념적"');
-    assert.deepEqual(mergeTraits(['독점욕'], ['독점욕이 강한', '질투심이 많음', '질투심', '자존심', '자존심 강함']), ['독점욕', '질투심', '자존심']);
-    assert.deepEqual(mergeTraits(['hot-tempered'], ['very hot-tempered', 'calm']), ['hot-tempered', 'calm']);
-    for (const [a, b] of [['감성', '감성적'], ['결벽증', '결벽적'], ['적극성', '적극적'], ['능청스러움', '능청스러운'], ['단호함', '단호한']]) assert.equal(sameTrait(a, b), true, `${a} = ${b}`);
+        ['유약함', '순종적', '집착적연심', '소심함', '체념적', '수동적', '자책', '단호함']);
+    assert.deepEqual(mergeTraits(['독점욕', '질투심', '자존심'], ['독점욕이 강한', '질투심이 많음', '자존심 강함']), ['독점욕이 강한', '질투심이 많음', '자존심 강함']);
+    assert.deepEqual(mergeTraits(['불같은 다혈질'], ['다혈질']), ['불같은 다혈질'], 'the plain word does not wipe out the richer one');
+    assert.deepEqual(mergeTraits(['hot-tempered'], ['very hot-tempered', 'calm']), ['very hot-tempered', 'calm']);
+    assert.deepEqual(mergeTraits(['불같은 다혈질'], ['급한 다혈질']), ['불같은 다혈질', '급한 다혈질'], 'two different modifiers say different things');
+    for (const [a, b] of [['감성', '감성적'], ['결벽증', '결벽적'], ['적극성', '적극적'], ['능청스러움', '능청스러운'], ['단호함', '단호한']]) assert.equal(traitRelation(a, b), 'same', `${a} = ${b}`);
+    assert.equal(traitRelation('불같은 다혈질', '다혈질'), 'wider');
+    assert.equal(traitRelation('다혈질', '독점욕이 강한'), '');
     // 다른 말은 그대로 둔다
     for (const [a, b] of [['소심함', '대담함'], ['감성', '감정'], ['다정함 뒤의 냉정함', '다정함'], ['다정함 뒤의 냉정함', '냉정함'], ['질투', '질투심'], ['호감', '호의'], ['calm', 'kind']]) assert.equal(sameTrait(a, b), false, `${a} ≠ ${b}`);
 });

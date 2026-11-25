@@ -40,7 +40,7 @@ import { ARGUMENT_TYPE, SlashCommandArgument } from "../../../slash-commands/Sla
 import { MacrosParser } from "../../../../scripts/macros.js";
 import { NARRATOR_PERSPECTIVE, isSharedPerspective, hasChatPerspective, resolvePerspective, findAssociations, sameKnowledgeScope, archiveSnapshot, validateArchive, addCheckpoint, archiveChanges, packetSections } from './archive-engine.mjs';
 import { showArchiveLibrary } from './library-ui.mjs';
-import { withDeadline, parsePhraseList, stripPhrases, hasPhrase, findRepeatedPhrases, pickBundleValues, resolveBundleName, switchBundle, saveBundle, deleteBundle, renameBundle, exportBundle, parseBundleFile, diffStableEntries, shouldRefreeze, createActivityLog, findRivalExtensions, splitClosedLine, sleepStaleThreads, sleepStaleSecrets, pickPledges, pledgeHeldBack, SECRET_KINDS, mentionsThread, stripOpenLines, THREAD_KINDS, recallCooldown, pushRecallHistory, isEndedValue, ungroundedFigures, roughTokens, noteUsage, usageTotals, groundedIn, soundsHedged, noteThreadSightings, threadTouched, rareQueryWords, findConflicts, looksRefused, looksBlocked, strayHidden, pickTranscript, transcriptTerms, crossScriptPairs, crossScriptSame, pickPledgesToCheck, ensembleLabel, mergeTraits, sameTrait } from './craft-engine.mjs';
+import { withDeadline, parsePhraseList, stripPhrases, hasPhrase, findRepeatedPhrases, pickBundleValues, resolveBundleName, switchBundle, saveBundle, deleteBundle, renameBundle, exportBundle, parseBundleFile, diffStableEntries, shouldRefreeze, createActivityLog, findRivalExtensions, splitClosedLine, sleepStaleThreads, sleepStaleSecrets, pickPledges, pledgeHeldBack, SECRET_KINDS, mentionsThread, stripOpenLines, THREAD_KINDS, recallCooldown, pushRecallHistory, isEndedValue, ungroundedFigures, roughTokens, noteUsage, usageTotals, groundedIn, soundsHedged, noteThreadSightings, threadTouched, rareQueryWords, findConflicts, looksRefused, looksBlocked, strayHidden, pickTranscript, transcriptTerms, crossScriptPairs, crossScriptSame, pickPledgesToCheck, ensembleLabel, mergeTraits, sameTrait, traitRelation } from './craft-engine.mjs';
 import { isOocText, looksOocReply, attributeQuote, addressTermsIn, tallyAddress, pickAddressLines, personNowLine, titleTargets, saysTitle, dialogueSpans, speakerOfSpan, crowdedNarration } from './stage-engine.mjs';
 import { parseStoryDate, storyDatesOf, isIsoDate, trackerText, trackerLineOf, pickBeats, beatLines, veilLeaks } from './calendar-engine.mjs';
 import { peopleList, matchPerson, personPage, nameSuggestions, planMerge, pairKey, WIPE_KINDS, wipeCounts, NOW_ORDER } from './people-engine.mjs';
@@ -7179,15 +7179,25 @@ function reconcileWithChat() {
         store.castRev = 1;
         if (cleaned) { logActivity('update', `인물 카드 ${cleaned}장에서 다른 칸의 내용이 섞여 든 이름·나이·달라진 점을 걷어 냈어요`); changed = true; }
     }
-    if (!(store.castRev >= 2)) {
-        // 같은 말의 다른 꼴로 쌓인 특성("다혈질"·"불같은 다혈질")을 한 번 접는다 — 잠긴 카드는 그대로 둔다 (장부에 실을 때는 접어서 싣는다)
+    if (!(store.castRev >= 3)) {
+        // 같은 말의 다른 꼴로 쌓인 특성("다혈질"·"불같은 다혈질")을 한 번 접는다 — 꾸밈을 더한 쪽을 남긴다. 잠긴 카드는 그대로 둔다 (장부에 실을 때는 접어서 싣는다)
+        // (v2.8.8은 짧은 쪽을 남겼다 — 그때 접힌 카드는 카드 이력에 남은 꾸민 꼴을 되찾는다)
         let folded = 0;
         for (const c of store.characters) {
             if (c.locked || !c.traits?.length) continue;
             const next = mergeTraits([], c.traits, Math.max(10, c.traits.length));
             if (next.length !== c.traits.length) { folded += c.traits.length - next.length; c.traits = next; }
         }
-        store.castRev = 2;
+        if (store.castRev === 2) {
+            for (const c of store.characters) {
+                if (c.locked || !c.traits?.length) continue;
+                const before = [...c.traits];
+                const seen = (c.hist || []).flatMap(h => h?.fields?.traits || []);
+                for (const t of seen) for (let i = 0; i < c.traits.length; i++) if (traitRelation(t, c.traits[i]) === 'wider') c.traits[i] = t;
+                if (c.traits.some((t, i) => t !== before[i])) changed = true;
+            }
+        }
+        store.castRev = 3;
         if (folded) { logActivity('update', `인물 카드에서 같은 말의 다른 꼴로 겹친 특성 ${folded}개를 접었어요`); changed = true; }
     }
     if (!(store.secretRev >= 1) && settleSecrets(store) !== 0) changed = true;

@@ -220,14 +220,24 @@ test('a card\'s traits that are forms of the same word are folded when filed, on
     a.context.chat.push({ is_user: true, mes: '아리아에게 말을 걸었다', name: '여행자' }, { is_user: false, mes: '아리아가 버럭 화를 냈다. 보라는 고개를 숙였다.', name: '아리아' });
     assert.equal(await a.run('commitTurns')([a.context.chat.length - 1]), true);
     const aria = store.characters.find(c => c.name === '아리아');
-    assert.deepEqual([...aria.traits], ['다혈질', '체념', '고집']);
+    assert.deepEqual([...aria.traits], ['불같은 다혈질', '체념', '고집 센']);
 
     // 예전에 쌓인 것은 채팅을 열 때 한 번 접는다
     aria.traits = ['다혈질', '불같은 다혈질', '체념적', '체념'];
     delete store.castRev;
     a.run('reconcileWithChat')();
-    assert.deepEqual([...aria.traits], ['다혈질', '체념']);
+    assert.deepEqual([...aria.traits], ['불같은 다혈질', '체념적']);
     const bora = store.characters.find(c => c.name === '보라');
     assert.deepEqual([...bora.traits], ['유약함', '유약한'], 'a locked card is not rewritten');
     assert.match(a.run('formatCharacterLine')({ ...bora, sceneNow: true }), /유약함(?!, 유약한)/, 'but it is carried folded');
+});
+
+test('a card folded the short way by v2.8.8 gets the richer form back from its own history', async () => {
+    const a = await app();
+    const store = a.getStore();
+    store.characters.push(card('아리아', { traits: ['다혈질', '체념'], hist: [{ turn: 40, fields: { traits: ['다혈질', '불같은 다혈질', '체념적'] } }] }));
+    store.castRev = 2;
+    a.run('reconcileWithChat')();
+    assert.deepEqual([...store.characters[0].traits], ['불같은 다혈질', '체념'], 'only a form that adds meaning is brought back');
+    assert.equal(store.castRev, 3);
 });
