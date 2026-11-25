@@ -6602,6 +6602,41 @@ function rewindLegacyTo(store, K) {
     }
 }
 
+/**
+ * 상태창이 아닌 줄에서 읽혀 턴에 찍힌 시간·장소를 걷어 낸다 (채팅마다 한 번).
+ * 예전에는 화면에서 카드로 그려지는 소품 꼬리표나 문자·편지의 내용이 상태창 모양이면 그대로 읽었다.
+ * 그 메시지를 예전 판정과 지금 판정으로 다시 읽어, 예전 판정으로만 나오던 값이 찍힌 턴만 고친다.
+ */
+function repairStatusStamps(store) {
+    if (store.statusRev >= 1) return 0;
+    if (store.turns.length && !chat.length) return 0; // 채팅이 아직 안 열렸다 — 다음에 본다
+    const readDates = getSettings().storyDates !== false;
+    let fixed = 0;
+    for (const t of [...store.turns].sort((a, b) => a.turnIndex - b.turnIndex)) {
+        const mes = chat[t.mesId];
+        if (!t.when || !mes || mes.is_user || typeof mes.mes !== 'string') continue;
+        let was = null;
+        let now = null;
+        try {
+            was = findStatusBars(mes.mes, { loose: true }).slice(-1)[0] || null;
+            now = findStatusBars(mes.mes).slice(-1)[0] || null;
+        } catch { continue; }
+        if (!was || t.when !== was.when) continue;                              // 사서가 적은 장면이거나 직접 정한 모양으로 읽은 값
+        if (now && now.when === was.when && now.place === was.place) continue;  // 진짜 상태창
+        const bar = messageStatusBars(mes).slice(-1)[0] || null;
+        t.when = bar?.when || null;
+        if ((t.where || '') === (was.place || '')) t.where = bar?.place || null;
+        if (readDates) {
+            const prevDate = [...store.turns].filter(x => x.turnIndex < t.turnIndex && x.date).sort((a, b) => b.turnIndex - a.turnIndex)[0]?.date || '';
+            const d = parseStoryDate(t.when, prevDate);
+            if (d) t.date = d; else delete t.date;
+        }
+        fixed++;
+    }
+    store.statusRev = 1;
+    return fixed;
+}
+
 function reconcileWithChat() {
     const store = getStore();
     let changed = false;
@@ -6722,6 +6757,11 @@ function reconcileWithChat() {
     const repaired = repairSummaryRecords(store);
     if (repaired) {
         console.info(`[${MODULE_NAME}] 요약 복구: 이야기 이어쓰기·확장 태그가 섞인 기록 ${repaired}건 정리`);
+        changed = true;
+    }
+    const restamped = repairStatusStamps(store);
+    if (restamped) {
+        logActivity('update', `상태창이 아닌 줄(문자·소품 표식)에서 읽혀 있던 시간·장소를 ${restamped}턴에서 지웠어요`);
         changed = true;
     }
     const foldedOnLoad = foldEntityAliases(store);

@@ -25,6 +25,32 @@ test('labelled and HTML status bars are read; custom pattern and off mode are ho
     assert.deepEqual(findStatusBars('x', { mode: 'custom', pattern: '(' }), []);
 });
 
+test('prop tags and the text of a message are not status bars, even when they mention a time and a place', () => {
+    const none = (text) => assert.deepEqual(findStatusBars(text), [], text);
+    // 화면에서 문자 카드로 그려지는 표식 — 내용에 "목요일 저녁 일곱 시", "학교 앞"이 있다
+    none('편의점 앞에서 헤어졌다.\n\n[[prop:sms|차유원 선배|휘낭시에는 내일 아침에 우유랑 같이 먹고. 목요일 저녁 일곱 시, 학교 앞 괜찮지?]]');
+    none('[[prop:sms|차유원 선배|목요일 저녁 7시 학교 앞]]');
+    none('폰이 울렸다. [[prop:sms|차유원 선배|비 오는 목요일 저녁 7시 → 학교 앞]] 그는 웃었다');
+    none('[[prop:letter|차유원|3월 5일 화요일 저녁 7시에\n학교 앞 → 카페에서 보자]]');
+    none('[prop:sms|차유원 선배|목요일 저녁 7시]');
+    // 표식 문법이 없어도, 주고받은 글이면 상태창이 아니다
+    none('[문자|차유원 선배|목요일 저녁 7시에 봐요.]');
+    none('[📱 문자 | 차유원 선배 | 목요일 저녁 7시 학교 앞]');
+    none('(쪽지 · 차유원 선배 · 목요일 저녁 일곱 시, 학교 앞 괜찮지?)');
+    none('[차유원 선배 | 목요일 저녁 7시 괜찮아? | 학교 앞에서 봐]');
+
+    // 진짜 상태창은 그대로 읽힌다 — 표식과 한 답변에 있어도, 속마음 칸이 붙어도, 두 겹 괄호여도
+    const mixed = findStatusBars('[ 3월 5일 화요일 | 오후 9:10 | 편의점 앞 | 맑음 ]\n\n폰이 울렸다.\n\n[[prop:sms|차유원 선배|목요일 저녁 일곱 시, 학교 앞 괜찮지?]]');
+    assert.deepEqual(mixed.map(statusOneLine), ['3월 5일 화요일 오후 9:10 · 편의점 앞 · 맑음']);
+    const [thought] = findStatusBars('[ 3월 5일 | 21:10 | 편의점 앞 | 속마음: 저녁엔 뭐 먹지? ]');
+    assert.equal(thought.when, '3월 5일 21:10', 'a sentence cell does not leak into the time');
+    assert.equal(thought.place, '편의점 앞');
+    assert.equal(findStatusBars('[[ 3월 5일 | 오후 9:10 | 편의점 앞 ]]')[0].place, '편의점 앞');
+    assert.equal(findStatusBars('[time:21:10|date:3월 5일|place:편의점 앞]')[0].place, '편의점 앞', 'labelled cells are a status bar, not a tag');
+    assert.equal(findStatusBars('[ Mar 5 | 9:10 PM | Cafe → Home | Sunny ]')[0].place, 'Cafe → Home');
+    assert.equal(findStatusBars('[ 3월 5일 | 날씨: 맑음! ]')[0].weather, '맑음!');
+});
+
 test('pause directives mark side pieces; story-continuing prompts do not', () => {
     assert.equal(isPauseDirective('<System>Pause the role-play and write a horoscope.</System>'), true);
     assert.equal(isPauseDirective('롤플을 잠시 멈추고 인터뷰를 진행해줘'), true);
