@@ -306,7 +306,7 @@ const DEFAULT_SETTINGS = Object.freeze({
     recordDelay: 0,           // 기록 지연 — 응답 뒤에 내가 N번 더 답을 보낸 뒤에야 기록 (0 = 바로). 그리팅은 항상 첫 답 뒤
     profileId: '',            // '' = 현재 연결된 API로 조용히 생성
     // 작업별 연결 — '' = 위 연결과 같게. summary: 요약·연대기·서고 정리 / light: 연속성 검사·장면 연출·서고에 묻기 같은 가벼운 판단
-    taskProfiles: { summary: '', light: '', fallback: '' },
+    taskProfiles: { summary: '', light: '', check: '', fallback: '' },
     injectDepth: 1,
     injectPosition: 'chat',   // 'chat' = 채팅 내 깊이, 'before' = 메인 프롬프트 앞, 'after' = 메인 프롬프트 뒤
     tokenBudget: 8000,
@@ -885,7 +885,7 @@ async function checkReply(mesId) {
     updateStatusUI('연속성 검사 중…');
     let result = null;
     try {
-        const { value, timedOut } = await withDeadline(callAuxLLM(REPLY_CHECK_PROMPT, userPrompt, { task: 'light', maxTokens: auxTokens(1500) }), 120000, null);
+        const { value, timedOut } = await withDeadline(callAuxLLM(REPLY_CHECK_PROMPT, userPrompt, { task: 'check', maxTokens: auxTokens(1500) }), 120000, null);
         if (timedOut) logActivity('error', `#${mesId} 연속성 검사이 2분 안에 끝나지 않아 건너뛰었어요`);
         else result = parseJsonLoose(value);
     } catch (e) {
@@ -904,7 +904,7 @@ async function checkReply(mesId) {
         const all = [...kept, ...filtered];
         const listed = all.map((x, n) => `${n + 1}. reply: "${x.quote}" — conflicts with: "${x.evidence || '(no evidence quoted)'}"${x.source ? ` (${x.source})` : ''} — ${x.problem}${n >= kept.length ? ' [the quoted evidence was not found in the material]' : ''}`).join('\n');
         try {
-            const second = await withDeadline(callAuxLLM(CHECK_CONFIRM_PROMPT, `${userPrompt}\n\n<warnings>\n${listed}\n</warnings>`, { task: 'light', maxTokens: auxTokens(900) }), 120000, null);
+            const second = await withDeadline(callAuxLLM(CHECK_CONFIRM_PROMPT, `${userPrompt}\n\n<warnings>\n${listed}\n</warnings>`, { task: 'check', maxTokens: auxTokens(900) }), 120000, null);
             const verdicts = second.timedOut ? null : parseJsonLoose(second.value);
             if (verdicts && Array.isArray(verdicts.verdicts)) { ({ kept, filtered } = applyVerdicts(kept, filtered, verdicts.verdicts)); confirmed = true; }
         } catch (e) { console.debug(`[${MODULE_NAME}] 경고 재확인 실패 — 처음 결과를 둡니다`, e); }
@@ -1799,11 +1799,52 @@ async function callVertexApi(systemPrompt, userPrompt, tokens, model = '') {
 }
 
 /** 이 작업에 쓸 연결 프로필 — 작업별로 따로 골랐고 그 프로필이 아직 있으면 그것, 아니면 기본 연결 */
+const CHAT_API = '@current'; // 작업별 연결에서 "채팅에 연결된 API" (프로필 없이 지금 연결로)
 function profileForTask(task) {
     const s = getSettings();
-    const own = task && task !== 'record' ? String(s.taskProfiles?.[task] || '') : '';
-    if (own && listConnectionProfiles().some(p => p.id === own)) return own;
+    // 점검(연속성 검사 · 그 재확인)은 따로 고르지 않았으면 가벼운 작업용 연결을 따른다
+    const chain = task === 'check' ? ['check', 'light'] : task && task !== 'record' ? [task] : [];
+    for (const t of chain) {
+        const own = String(s.taskProfiles?.[t] || '');
+        if (own === CHAT_API) return '';
+        if (own && listConnectionProfiles().some(p => p.id === own)) return own;
+    }
     return s.profileId || '';
+}
+
+/* ------------------------------------------------------------
+ * 연결 프로필의 인증 오류 — 기록을 통째로 놓치지 않는다
+ *
+ * 최근 실리태번은 Custom(프록시) 연결의 API 키를 주소마다 따로 묶는다. 그 전에 만든 프로필에 그 주소의 키가
+ * 묶여 있지 않으면, 채팅과 다른 프로필로 보내는 요청은 보내기도 전에 막히거나(…not approved for this exact API root)
+ * 채팅 쪽 키로 엉뚱한 주소에 나가 401이 된다. 그러면 사서·요약이 매번 실패해 기억이 쌓이지 않는다.
+ * 이런 오류는 그 한 번을 지금 채팅 연결로 대신 보내고, 고치는 순서를 한 번 알려 준다.
+ * ------------------------------------------------------------ */
+const KEY_BINDING_RE = /stored key for this connection|select (a )?key again|not approved for this exact api root|select it again|remembered manual connection is unavailable|excludes its custom connection|eligible chat completion key|requires an explicit credential binding|keyless binding|credential binding|cannot carry a credential/i;
+const AUTH_ERROR_RE = /\b401\b|key is required|unauthori[sz]ed|no auth|not authenticated|authentication|invalid[^.]{0,24}(api[\s_-]?)?key|incorrect api key|api key not valid|missing[^.]{0,12}key|no api key|invalid (proxy )?password|wrong password|invalid token|x-api-key/i;
+// 실리태번이 프로필을 갈아 끼우는 동안 잠깐 나는 오류 — 조금 뒤면 사라진다
+const PROFILE_APPLYING_RE = /connection profile is still being applied/i;
+
+function errorText(e) {
+    if (!e) return '';
+    if (typeof e === 'string') return e;
+    const bits = [e.message, e.cause?.message, e.error?.message, e.statusText, e.status && `status ${e.status}`];
+    if (!e.message) { try { bits.push(JSON.stringify(e).slice(0, 400)); } catch { /* 순환 참조 등 */ } }
+    return bits.filter(Boolean).map(String).join(' | ');
+}
+
+let authNoticeShown = false;
+function noteAuthFallback(profileId, detail) {
+    const name = listConnectionProfiles().find(p => p.id === profileId)?.name || '사서 연결';
+    const binding = KEY_BINDING_RE.test(detail);
+    logActivity('error', `"${name}" 연결 프로필이 ${binding ? '이 주소에 묶인 API 키가 없다고' : '인증 오류(401)로'} 막혀서, 이번 작업은 채팅에 연결된 API로 보냈어요`);
+    if (authNoticeShown) return;
+    authNoticeShown = true;
+    toastr.warning(
+        `"${escapeHtml(name)}" 연결 프로필이 ${binding ? '새 실리태번에서 API 키를 다시 골라 줘야 해서' : '인증 오류(401)로'} 막혔습니다. 이번 작업은 채팅에 연결된 API로 대신 보냈습니다.<br><br>`
+        + `고치려면: ① 연결 프로필에서 "${escapeHtml(name)}"을 고르고 ② API 키${binding ? '' : '(와 프록시)'}를 그 연결에 맞는 것으로 다시 골라 연결한 뒤 ③ 프로필 업데이트(저장)를 누르고 ④ 원래 채팅 프로필로 돌아오세요.`,
+        'Memoria', { timeOut: 25000, extendedTimeOut: 10000, closeButton: true, escapeHtml: false },
+    );
 }
 
 /**
@@ -1874,7 +1915,7 @@ function usageLine() {
     if (!u || u.day !== new Date().toLocaleDateString('sv-SE')) return '';
     const t = usageTotals(u);
     if (!t.calls) return '';
-    const names = { record: '기록', summary: '요약·정리', light: '가벼운 작업' };
+    const names = { record: '기록', summary: '요약·정리', light: '가벼운 작업', check: '점검' };
     const by = Object.entries(u.tasks).map(([k, r]) => `${names[k] || k} ${r.calls}회`).join(' · ');
     return `오늘 서고가 쓴 양 — 호출 ${t.calls}회 (${by}) · 읽은 양 약 ${koCount(t.in)}토큰 · 쓴 양 약 ${koCount(t.out)}토큰 (글자 수로 어림)`;
 }
@@ -1884,7 +1925,7 @@ async function callAuxLLMRaw(systemPrompt, userPrompt, { maxTokens, task = 'reco
     const tokens = maxTokens || settings.responseTokens;
 
     if (settings.apiMode === 'custom' && !profile) {
-        const model = String((task === 'summary' ? settings.customApi.summaryModel : task === 'light' ? settings.customApi.lightModel : '') || '').trim();
+        const model = String((task === 'summary' ? settings.customApi.summaryModel : task === 'light' || task === 'check' ? settings.customApi.lightModel : '') || '').trim();
         return settings.customApi.authMode === 'vertex'
             ? await callVertexApi(systemPrompt, userPrompt, tokens, model)
             : await callCustomApi(systemPrompt, userPrompt, tokens, model);
@@ -1899,13 +1940,33 @@ async function callAuxLLMRaw(systemPrompt, userPrompt, { maxTokens, task = 'reco
                 { role: 'system', content: systemPrompt },
                 { role: 'user', content: userPrompt },
             ];
-            const result = await svc.sendRequest(profileId, messages, tokens, {
-                stream: false,
-                extractData: true,
-                includePreset: false,
-                includeInstruct: false,
-            }, buildProfileOverrides(profileId));
-            return String(result?.content ?? '');
+            let waited = false;
+            for (;;) {
+                try {
+                    const result = await svc.sendRequest(profileId, messages, tokens, {
+                        stream: false,
+                        extractData: true,
+                        includePreset: false,
+                        includeInstruct: false,
+                    }, buildProfileOverrides(profileId));
+                    return String(result?.content ?? '');
+                } catch (e) {
+                    const detail = errorText(e);
+                    // 프로필을 갈아 끼우는 중: 잠깐 기다렸다 같은 요청을 한 번 더 보낸다
+                    if (PROFILE_APPLYING_RE.test(detail) && !waited) {
+                        waited = true;
+                        await new Promise(r => setTimeout(r, 2500));
+                        continue;
+                    }
+                    // 키가 이 프로필의 주소에 묶여 있지 않거나 인증이 틀렸다 — 같은 프로필로는 다시 보내도 똑같다.
+                    // 지금 채팅 연결로 대신 보내 기록을 놓치지 않는다 (채팅 연결도 안 되면 그 오류가 그대로 올라간다)
+                    if (e?.name !== 'AbortError' && (KEY_BINDING_RE.test(detail) || AUTH_ERROR_RE.test(detail))) {
+                        noteAuthFallback(profileId, detail);
+                        break;
+                    }
+                    throw e;
+                }
+            }
         }
     }
 
@@ -8832,9 +8893,10 @@ function renderSettingsPanel() {
         $sel.append($('<option>').val(p.id).text(p.name || p.id));
     }
     $sel.val(s.profileId || '');
-    for (const task of ['summary', 'light', 'fallback']) {
+    for (const task of ['summary', 'light', 'check', 'fallback']) {
         const $t = $(`#memoria_profile_${task}`);
-        $t.empty().append(task === 'fallback' ? '<option value="">쓰지 않음</option>' : '<option value="">위 연결과 같게</option>');
+        $t.empty().append(task === 'fallback' ? '<option value="">쓰지 않음</option>' : task === 'check' ? '<option value="">가벼운 작업과 같게</option>' : '<option value="">위 연결과 같게</option>');
+        if (task !== 'fallback') $t.append(`<option value="${CHAT_API}">채팅에 연결된 API</option>`);
         for (const p of listConnectionProfiles()) $t.append($('<option>').val(p.id).text(p.name || p.id));
         $t.val(s.taskProfiles?.[task] || '');
     }
@@ -10147,7 +10209,7 @@ function bindUI() {
         reasoningRefused.clear();
         saveSettingsDebounced();
     });
-    $('#memoria_profile_summary, #memoria_profile_light, #memoria_profile_fallback').on('change', function () {
+    $('#memoria_profile_summary, #memoria_profile_light, #memoria_profile_check, #memoria_profile_fallback').on('change', function () {
         const s = getSettings();
         s.taskProfiles[this.id.replace('memoria_profile_', '')] = String($(this).val() || '');
         saveSettingsDebounced();
