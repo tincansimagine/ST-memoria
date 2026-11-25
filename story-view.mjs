@@ -95,6 +95,17 @@ const LEVEL_LABEL = { arc: '연대기', chunk: '챕터', carried: '이전 채팅
 export function flowHtml(nodes) {
     if (!nodes?.length) return '';
     const items = nodes.map((n) => {
+        if (n.gap) {
+            const range = n.toTurn > n.fromTurn ? `t${n.fromTurn}–t${n.toTurn}` : `t${n.fromTurn}`;
+            const tip = `이 구간의 턴 기록 ${n.turns}개로 요약을 다시 만듭니다${n.hidden ? '. 원문이 숨겨져 있어 지금은 모델이 이 구간을 보지 못합니다' : ''}`;
+            return `<li class="mmv-node mmv-node--gap">
+            <span class="mmv-node-dot" aria-hidden="true"></span>
+            <div class="mmv-gap${n.busy ? ' is-busy' : ''}" data-from="${n.fromTurn}" data-to="${n.toTurn}">
+                <span class="mmv-gap-text"><b>${range}</b> ${n.manual ? '지운 요약' : '요약 빠짐'}${n.hidden ? ' · 원문 숨김' : ''}</span>
+                <button type="button" class="memoria-gap-fill" title="${esc(tip)}"${n.busy ? ' disabled' : ''}>${n.busy ? '채우는 중' : '채우기'}</button>
+            </div>
+        </li>`;
+        }
         const rec = parseRecord(n.text);
         const level = n.carried ? 'carried' : n.level;
         const range = n.carried ? esc(n.carriedFrom || '') : `t${n.fromTurn}–t${n.toTurn}`;

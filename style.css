@@ -1134,6 +1134,13 @@
 .mmv-node--arc .mmv-node-dot { border-color: var(--mmv-muted); border-radius: 3px; }
 .mmv-node--carried .mmv-node-dot { border-style: dashed; border-color: var(--mmv-muted); }
 .mmv-flow .mmv-card { border-radius: 14px; background: var(--mmv-soft); padding: 0; margin: 0; border: 0; }
+.mmv-node--gap .mmv-node-dot { top: 11px; border-style: dashed; border-color: var(--mmv-muted); background: none; }
+.mmv-gap { display: flex; align-items: center; gap: 10px; min-width: 0; padding: 7px 8px 7px 12px; border: 1px dashed var(--mmv-line); border-radius: 12px; }
+.mmv-gap-text { flex: 1; min-width: 0; font-size: .88em; color: var(--mmv-muted); overflow-wrap: anywhere; word-break: keep-all; }
+.mmv-gap-text b { font-weight: 600; font-variant-numeric: tabular-nums; color: var(--mmv-ink); margin-right: 4px; }
+.mmv-gap button { flex-shrink: 0; font: inherit; font-size: .84em; color: var(--mmv-a); background: none; border: 1px solid var(--mmv-line); border-radius: 999px; padding: 5px 12px; cursor: pointer; white-space: nowrap; }
+.mmv-gap button:hover, .mmv-gap button:focus-visible { border-color: var(--mmv-a); }
+.mmv-gap.is-busy button { color: var(--mmv-muted); cursor: default; }
 .mmv-card > summary { display: grid; gap: 5px; padding: 11px 12px; cursor: pointer; list-style: none; min-width: 0; }
 .mmv-card > summary::-webkit-details-marker { display: none; }
 .mmv-card-top { display: flex; align-items: center; gap: 8px; min-width: 0; }
@@ -1553,6 +1560,10 @@ body[data-memoria-paper="dark"] :is(#memoria_settings.memoria, .memoria-library,
 #memoria_settings .mmv-flow .mmv-card { border: 1px solid var(--ink-line); border-radius: 0; background: var(--surface2); }
 #memoria_settings .mmv-node-dot { width: 9px; height: 9px; border-radius: 0; border: 1px solid var(--ink); background: var(--surface); transform: rotate(45deg); }
 #memoria_settings .mmv-node--arc .mmv-node-dot { background: var(--accent); border-color: var(--accent); }
+#memoria_settings .mmv-node--gap .mmv-node-dot { border: 1px dashed var(--faint); background: var(--surface); }
+#memoria_settings .mmv-gap { border-radius: 0; border-color: var(--ink-line); }
+#memoria_settings .mmv-gap button { border-radius: 0; border-color: var(--ink-line); color: var(--accent); font-weight: 600; }
+#memoria_settings .mmv-gap button:hover, #memoria_settings .mmv-gap button:focus-visible { border-color: var(--accent); }
 #memoria_settings :is(.mmv-who, .mmv-tag, .mmv-chip) { border-radius: 0; }
 #memoria_settings .mmv-tag { border: 1px solid var(--ink-line); background: none; color: var(--dim); font-weight: 600; }
 #memoria_settings .mmv-chip { border-color: var(--ink-line); background: var(--surface); }

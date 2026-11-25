@@ -40,7 +40,7 @@ import { ARGUMENT_TYPE, SlashCommandArgument } from "../../../slash-commands/Sla
 import { MacrosParser } from "../../../../scripts/macros.js";
 import { NARRATOR_PERSPECTIVE, isSharedPerspective, hasChatPerspective, resolvePerspective, findAssociations, sameKnowledgeScope, archiveSnapshot, validateArchive, addCheckpoint, archiveChanges, packetSections } from './archive-engine.mjs';
 import { showArchiveLibrary } from './library-ui.mjs';
-import { withDeadline, parsePhraseList, stripPhrases, hasPhrase, findRepeatedPhrases, pickBundleValues, resolveBundleName, switchBundle, saveBundle, deleteBundle, renameBundle, exportBundle, parseBundleFile, diffStableEntries, shouldRefreeze, createActivityLog, findRivalExtensions, splitClosedLine, sleepStaleThreads, pickPledges, stripOpenLines, THREAD_KINDS, recallCooldown, pushRecallHistory, isEndedValue, ungroundedFigures, roughTokens, noteUsage, usageTotals, groundedIn, soundsHedged, noteThreadSightings, threadTouched, rareQueryWords, findConflicts, looksRefused, looksBlocked, strayHidden, pickTranscript, transcriptTerms, crossScriptPairs, crossScriptSame, pickPledgesToCheck, ensembleLabel, firstOf, listOf, joinValue, clampScore, splitPair, jsonRepairVariants, normalizeRecordLabels, BOND_KINDS, bondKindOf } from './craft-engine.mjs';
+import { withDeadline, parsePhraseList, stripPhrases, hasPhrase, findRepeatedPhrases, pickBundleValues, resolveBundleName, switchBundle, saveBundle, deleteBundle, renameBundle, exportBundle, parseBundleFile, diffStableEntries, shouldRefreeze, createActivityLog, findRivalExtensions, splitClosedLine, sleepStaleThreads, pickPledges, stripOpenLines, THREAD_KINDS, recallCooldown, pushRecallHistory, isEndedValue, ungroundedFigures, roughTokens, noteUsage, usageTotals, groundedIn, soundsHedged, noteThreadSightings, threadTouched, rareQueryWords, findConflicts, looksRefused, looksBlocked, strayHidden, pickTranscript, transcriptTerms, crossScriptPairs, crossScriptSame, pickPledgesToCheck, ensembleLabel, firstOf, listOf, joinValue, clampScore, splitPair, jsonRepairVariants, normalizeRecordLabels, BOND_KINDS, bondKindOf, summaryGaps, spanWindows } from './craft-engine.mjs';
 import { isOocText, looksOocReply, attributeQuote, addressTermsIn, tallyAddress, pickAddressLines, personNowLine } from './stage-engine.mjs';
 import { parseStoryDate, storyDatesOf, isIsoDate, trackerText, trackerLineOf, pickBeats, beatLines, veilLeaks } from './calendar-engine.mjs';
 import { peopleList, matchPerson, personPage, nameSuggestions, planMerge, pairKey, WIPE_KINDS, wipeCounts, NOW_ORDER } from './people-engine.mjs';
@@ -4187,13 +4187,16 @@ function queueCommit(mesId, opts) {
  * ============================================================ */
 
 /** 일관성 유지를 위해 참조할 이전 요약들 (설정: 0 = 안 함, -1 = 전체, N = 최근 N개) */
-function previousSummariesForContext(store) {
+function previousSummariesForContext(store, beforeTurn = Infinity) {
     const count = getSettings().summaryContextCount ?? 3;
     if (count === 0) return '';
+    // beforeTurn: 가운데 구간을 다시 쓸 때는 그 구간보다 앞선 요약만 보여 준다 — 뒤의 일을 "앞선 요약"이라고 넘기면 앞뒤가 섞인다
+    const earlier = (x) => x.carried || x.toTurn < beforeTurn;
     const all = [
-        ...store.arcSummaries.map(s => ({ ...s, tag: s.carried ? 'earlier chat' : `t${s.fromTurn}–t${s.toTurn}` })),
-        ...store.chunkSummaries.map(s => ({ ...s, tag: `t${s.fromTurn}–t${s.toTurn}` })),
+        ...store.arcSummaries.filter(earlier).map(s => ({ ...s, tag: s.carried ? 'earlier chat' : `t${s.fromTurn}–t${s.toTurn}` })),
+        ...store.chunkSummaries.filter(earlier).map(s => ({ ...s, tag: `t${s.fromTurn}–t${s.toTurn}` })),
     ];
+    if (beforeTurn !== Infinity) all.sort((a, b) => (a.carried ? 0 : 1) - (b.carried ? 0 : 1) || a.fromTurn - b.fromTurn);
     const picked = count < 0 ? all : all.slice(-count);
     if (!picked.length) return '';
     return `Previous summaries (for continuity of names, time, place, relationships — do not restate their events):\n${picked.map(s => `[${s.tag}] ${s.text}`).join('\n')}\n`;
@@ -4206,6 +4209,91 @@ function summaryCoveredTurn(store) {
         store.chunkSummaries.reduce((acc, c) => Math.max(acc, c.toTurn), 0),
         store.arcSummaries.filter(a => !a.carried).reduce((acc, a) => Math.max(acc, a.toTurn), 0),
     );
+}
+
+/** 요약이 빈 구간 — 요약이 지나간 범위 안에서 턴 기록만 있고 덮는 요약이 없는 곳 */
+function findSummaryGaps(store = getStore()) {
+    return summaryGaps({
+        turnIndexes: store.turns.filter(t => t.summary && t.turnIndex > 0).map(t => t.turnIndex),
+        spans: [...store.chunkSummaries.filter(c => !c.carried), ...store.arcSummaries.filter(a => !a.carried)],
+        coveredTurn: summaryCoveredTurn(store),
+        voids: store.summaryVoids || [],
+    });
+}
+
+/** 손으로 지운 요약 구간을 적어 둔다 — 지운 것이 다음 요약 때 저절로 되살아나지 않게 (채우기를 누르면 그때 다시 만든다) */
+function markSummaryVoid(store, fromTurn, toTurn) {
+    if (!(fromTurn >= 1) || !(toTurn >= fromTurn)) return;
+    store.summaryVoids = [...(store.summaryVoids || []), { fromTurn, toTurn }].slice(-40);
+}
+
+/** 한 구간의 턴 기록을 요약 하나로 엮는다. 떡밥·낡은 기록 점검은 얹지 않는다 (지나간 구간에 대고 지금 것을 닫으면 안 된다). 반환: { text, unverified } | null */
+async function weaveSpan(store, fromTurn, toTurn) {
+    const parts = store.turns
+        .filter(t => t.turnIndex >= fromTurn && t.turnIndex <= toTurn && t.summary)
+        .sort((a, b) => a.turnIndex - b.turnIndex)
+        .map(t => `[${digestTag(t)}] ${t.summary}`);
+    if (!parts.length) return null;
+    const refBlock = await buildReferenceBlock({ lean: true });
+    const userPrompt = [refBlock, previousSummariesForContext(store, fromTurn), `Turn digests to weave:\n${parts.join('\n')}`].filter(Boolean).join('\n');
+    const reply = await callAuxLLM(`${getSettings().prompts.chunk}\n\n${languageDirective()}`, userPrompt + languageTail(), { task: 'summary', maxTokens: auxTokens(4000) });
+    const text = cleanMultiline(sanitizeRecordOutput(splitClosedLine(reply).text), 2000);
+    if (!text || refusedReply(text)) return null;
+    return { text, unverified: ungroundedFigures(text, userPrompt).slice(0, 12), fallback: cleanStr(parts.join(' / '), 2000) };
+}
+
+/** 새 요약을 제자리에 끼운다. 연대기가 이미 지나간 옛 구간이면 연대기 칸에(늘 주입된다), 아니면 청크 칸에 순서대로 */
+function placeSummary(store, row) {
+    const arcEnd = store.arcSummaries.filter(a => !a.carried).reduce((acc, a) => Math.max(acc, a.toTurn), 0);
+    if (row.toTurn < arcEnd) {
+        store.arcSummaries.push({ ...row, sourceChunks: [{ fromTurn: row.fromTurn, toTurn: row.toTurn, text: row.text }] });
+    } else {
+        store.chunkSummaries.push(row);
+        store.chunkSummaries.sort((a, b) => a.fromTurn - b.fromTurn);
+    }
+    if (store.summaryVoids?.length) {
+        store.summaryVoids = store.summaryVoids.filter(v => v.toTurn < row.fromTurn || v.fromTurn > row.toTurn);
+        if (!store.summaryVoids.length) delete store.summaryVoids;
+    }
+}
+
+/**
+ * 빈 요약 구간을 채운다. 큰 구간은 요약 주기만큼씩 나눈다.
+ * 평소(자동)에는 한 번에 한 묶음만, 손으로 지운 구간은 건드리지 않는다. 같은 구간이 두 번 연달아 실패하면 턴 기록을 이어 붙여 채운다 —
+ * 원문이 숨겨진 채 요약도 없는 구간을 오래 두지 않으려는 것이고, 그 요약은 이야기 탭에서 다시 만들 수 있다.
+ * 반환: 채운 묶음 수
+ */
+async function fillSummaryGaps(store, { limit = 1, includeManual = false, range = null } = {}) {
+    const size = Math.max(3, getSettings().chunkTurns);
+    let filled = 0;
+    for (const gap of findSummaryGaps(store)) {
+        if (filled >= limit) break;
+        if (gap.manual && !includeManual) continue;
+        if (range && (gap.toTurn < range.fromTurn || gap.fromTurn > range.toTurn)) continue;
+        const idx = store.turns.filter(t => t.summary && t.turnIndex >= gap.fromTurn && t.turnIndex <= gap.toTurn).map(t => t.turnIndex).sort((a, b) => a - b);
+        for (const win of spanWindows(idx, size)) {
+            if (filled >= limit) break;
+            const fromTurn = win[0];
+            const toTurn = win[win.length - 1];
+            const key = `${fromTurn}-${toTurn}`;
+            let made = null;
+            try { made = await weaveSpan(store, fromTurn, toTurn); } catch (e) { console.debug(`[${MODULE_NAME}] 빈 요약 구간 채우기 실패`, e); }
+            if (getStore() !== store) return filled;
+            if (!made) {
+                if (includeManual) return filled; // 손으로 누른 채우기는 실패를 그대로 알린다
+                if (store.gapMiss !== key) { store.gapMiss = key; return filled; }
+                const parts = store.turns.filter(t => t.summary && t.turnIndex >= fromTurn && t.turnIndex <= toTurn).sort((a, b) => a.turnIndex - b.turnIndex).map(t => t.summary);
+                made = { text: cleanStr(parts.join(' / '), 2000), unverified: [] };
+                logActivity('error', `t${fromTurn}–t${toTurn} 요약이 두 번 만들어지지 않아 턴 기록을 이어 붙여 채웠어요 (이야기 탭에서 다시 만들 수 있어요)`);
+            } else {
+                logActivity('summary', `요약이 비어 있던 t${fromTurn}–t${toTurn}을 다시 채웠어요`);
+            }
+            delete store.gapMiss;
+            placeSummary(store, { id: uuidv4(), fromTurn, toTurn, text: made.text, ...(made.unverified?.length ? { unverified: made.unverified } : {}) });
+            filled++;
+        }
+    }
+    return filled;
 }
 
 /**
@@ -4228,16 +4316,35 @@ async function maybeFoldEras(store) {
     const local = store.arcSummaries.filter(a => !a.carried).sort((a, b) => a.fromTurn - b.fromTurn);
     if (local.length <= keep) return false;
     const folding = local.slice(0, Math.max(3, local.length - keep + 2));
+    // 지난번에 줄어든 답만 와서 미뤄 둔 접기는 몇 턴 뒤에 다시 해 본다 (매 턴 같은 호출을 되풀이하지 않는다)
+    const held = Number(store.eraFoldHeld) || 0;
+    if (held && store.turnCounter >= held && store.turnCounter - held < 8) return false;
     const directive = '\n\nThese are the OLDEST records of a long story, being folded into its single standing "story so far". Up to 10 PLOT bullets. Spend them on what the whole story still stands on: how the characters met and what they became to each other, the turning points, lasting promises, secrets and who holds them, deaths, and anything still unresolved. Let routine scenes go.';
+    const prior = folding.find(a => a.saga);
+    const sys = `${getSettings().prompts.arc}${directive}\n\n${languageDirective()}`;
+    const material = folding.map(a => `[t${a.fromTurn}–t${a.toTurn}${a === prior ? ' · the story so far' : ''}]\n${a.text}`).join('\n\n');
+    const fold = async (note = '') => cleanMultiline(sanitizeRecordOutput(await callAuxLLM(sys, material + note + languageTail(), { task: 'summary', maxTokens: auxTokens(4000) })), 2800);
+    // 접을 때마다 '옛 이야기'가 조금씩 깎이면 몇 번 뒤에는 이야기의 처음이 남지 않는다.
+    // 새 글이 지금의 옛 이야기 절반에도 못 미치면(답이 잘렸거나 최근 것만 적은 것) 한 번 더 쓰게 하고, 그래도 그러면 지금 것을 그대로 둔다.
+    const thin = (t) => !!prior && prior.text.length > 400 && t.length < prior.text.length * 0.45;
     let text = '';
     try {
-        text = cleanMultiline(sanitizeRecordOutput(await callAuxLLM(`${getSettings().prompts.arc}${directive}\n\n${languageDirective()}`, folding.map(a => `[t${a.fromTurn}–t${a.toTurn}]\n${a.text}`).join('\n\n') + languageTail(), { task: 'summary', maxTokens: auxTokens(4000) })), 2800);
+        text = await fold();
+        if (text && !refusedReply(text) && thin(text)) {
+            const again = await fold('\n\n(Your previous draft kept only a fraction of the record marked "the story so far". Nothing that record holds may be dropped: carry every development in it, shortened where needed, then add what the later records bring.)');
+            if (again && !refusedReply(again) && again.length > text.length) text = again;
+            if (thin(text)) {
+                if (getStore() === store) { store.eraFoldHeld = store.turnCounter; logActivity('error', "'옛 이야기'를 접은 글이 지금 것보다 크게 줄어 받지 않았어요 — 지금 것을 그대로 두고 몇 턴 뒤 다시 해 봐요"); }
+                return false;
+            }
+        }
     } catch (e) {
         console.debug(`[${MODULE_NAME}] 옛 이야기 접기 실패 — 다음 기회에 다시`, e);
     }
     // 거절·사과문은 연대기로 받지 않는다 (아래에서 묶음을 이어 붙이거나 그대로 둔다)
     if (refusedReply(text)) { logActivity('error', '연대기 요약 대신 거절문이 와서 받지 않았어요'); text = ''; }
     if (!text || getStore() !== store) return false; // 실패하면 그대로 둔다 (이어붙인 날것으로 바꾸지 않는다)
+    delete store.eraFoldHeld;
     const ids = new Set(folding.map(a => a.id));
     store.arcSummaries = [
         ...store.arcSummaries.filter(a => !ids.has(a.id)),
@@ -4266,10 +4373,15 @@ async function maybeSummarizeChunk(store, { flushAll = false, onProgress = null,
     // 미요약 범위가 크게 밀렸어도(일괄 색인·기록 실패 구간) 한 덩이(t1–tNNN)로
     // 삼키지 않고 n턴 창 단위로 나눠 요약한다. summaryCursor는 다이제스트가 없어
     // 요약을 건너뛴 창도 "지나갔다"고 기억해 통짜 재시도를 막는다.
+    // 가운데 빈 구간부터 메운다 (요약을 걷어 낸 삭제·분기 뒤). 아래 루프는 맨 끝에서만 이어 가므로 여기서 안 하면 영영 비어 있다
+    let made = 0;
+    if (!flushAll && store === getStore()) {
+        made += await fillSummaryGaps(store, { limit: 1 });
+        if (getStore() !== store) return made;
+    }
     let lastCovered = summaryCoveredTurn(store);
     const pending = store.turnCounter - lastCovered;
     const total = pending <= 0 ? 0 : (flushAll ? Math.ceil(pending / n) : Math.floor(pending / n));
-    let made = 0;
     let done = 0;
 
     while (flushAll ? store.turnCounter > lastCovered : store.turnCounter - lastCovered >= n) {
@@ -4453,6 +4565,7 @@ async function rebuildAllSummaries(onProgress) {
             store.arcSummaries = draft.arcSummaries;
             store.summaryCursor = draft.summaryCursor;
             store.arcReviewCursor = draft.arcReviewCursor;
+            delete store.summaryVoids; delete store.gapMiss; delete store.eraFoldHeld;
             persistStore();
             await applyAutoHide();
             outcome = { made };
@@ -6791,6 +6904,16 @@ function renumberTurns(store) {
             for (const c of s.sourceChunks) { c.fromTurn = remap(c.fromTurn); c.toTurn = remap(c.toTurn); }
         }
     }
+    if (store.summaryVoids?.length) {
+        // 지운 구간 표시는 그 안에 남아 있는 턴으로 다시 잡는다 (다 사라졌으면 표시도 버린다)
+        store.summaryVoids = store.summaryVoids.map(v => {
+            const inside = olds.filter(o => o >= v.fromTurn && o <= v.toTurn);
+            return inside.length ? { fromTurn: map.get(inside[0]), toTurn: map.get(inside[inside.length - 1]) } : null;
+        }).filter(Boolean);
+        if (!store.summaryVoids.length) delete store.summaryVoids;
+    }
+    delete store.gapMiss;
+    if (store.eraFoldHeld) store.eraFoldHeld = remap(store.eraFoldHeld);
     if (store.lastConsolidateTurn) store.lastConsolidateTurn = remap(store.lastConsolidateTurn);
     if (store.summaryCursor) store.summaryCursor = remap(store.summaryCursor);
     if (store.lastArcConsolidateTurn) store.lastArcConsolidateTurn = remap(store.lastArcConsolidateTurn);
@@ -7531,7 +7654,10 @@ async function applyEditorOps(ops) {
                         if (target) store.arcSummaries = store.arcSummaries.filter(x => x.id !== op.id);
                     }
                     if (!target) break;
-                    store.summaryCursor = Math.min(store.summaryCursor || 0, target.fromTurn - 1);
+                    if (!target.carried) {
+                        store.summaryCursor = Math.max(store.summaryCursor || 0, target.toTurn);
+                        markSummaryVoid(store, target.fromTurn, target.toTurn);
+                    }
                     applied++;
                     break;
                 }
@@ -8594,6 +8720,8 @@ function renderMilestonesPanel() {
  * 모두 탭 안에서, 세로로 읽는다 (휴대폰에서 팝업·가로 스크롤 없이)
  * ============================================================ */
 
+/** 채우는 중인 빈 요약 구간 ('from-to') — 버튼을 두 번 눌러 호출이 겹치지 않게 */
+const gapFilling = new Set();
 const storyView = { tab: 'flow', by: 'people', query: '', minStars: 0, sort: 'order', desc: false, open: '', bond: '', focus: '' };
 
 function bondViewRows(store) {
@@ -8654,8 +8782,13 @@ function renderStoryView(resultsOnly = false) {
             ...store.chunkSummaries.map(s => ({ ...s, level: 'chunk' })),
         ].sort((a, b) => (a.carried ? -1 : 0) - (b.carried ? -1 : 0) || a.fromTurn - b.fromTurn);
         const marksIn = (s) => (s.carried ? [] : store.milestones.filter(m => m.turnIndex >= s.fromTurn && m.turnIndex <= s.toTurn));
-        html = all.length
-            ? flowHtml(all.map((s, i) => ({ ...s, marks: marksIn(s), open: i >= all.length - 2 })))
+        // 요약이 빈 구간도 제자리에 끼워 보여 준다 — 원문까지 숨겨져 있으면 모델은 그 구간을 전혀 못 본다
+        const hiddenIn = (g) => store.turns.some(t => t.turnIndex >= g.fromTurn && t.turnIndex <= g.toTurn && chat[t.mesId]?.is_system && chat[t.mesId]?.extra?.memoria_hidden);
+        const gaps = findSummaryGaps(store).map(g => ({ ...g, gap: true, hidden: hiddenIn(g), busy: gapFilling.has(`${g.fromTurn}-${g.toTurn}`) }));
+        const lastTwo = new Set(all.slice(-2).map(x => x.id));
+        const withGaps = gaps.length ? [...all, ...gaps].sort((a, b) => (a.carried ? -1 : 0) - (b.carried ? -1 : 0) || a.fromTurn - b.fromTurn) : all;
+        html = withGaps.length
+            ? flowHtml(withGaps.map(s => (s.gap ? s : { ...s, marks: marksIn(s), open: lastTwo.has(s.id) })))
             : '<div class="memoria__empty">아직 요약이 없습니다. 턴이 쌓이면 자동으로 만들어집니다.</div>';
     } else if (v.tab === 'line') {
         const shown = new Set(filterTimelineRows(rows, v).map(r => r.id));
@@ -9955,12 +10088,38 @@ function bindUI() {
     });
 
     // ── 요약
+    $('#memoria_settings').on('click', '.memoria-gap-fill', async function () {
+        const store = getStore();
+        const $gap = $(this).closest('.mmv-gap');
+        const range = { fromTurn: Number($gap.data('from')), toTurn: Number($gap.data('to')) };
+        const key = `${range.fromTurn}-${range.toTurn}`;
+        if (gapFilling.has(key)) return;
+        gapFilling.add(key);
+        renderStoryView();
+        let filled = 0;
+        try {
+            filled = await fillSummaryGaps(store, { limit: 50, includeManual: true, range });
+        } finally {
+            gapFilling.delete(key);
+        }
+        if (getStore() !== store) return;
+        if (filled) { persistStore(); updateInjection(); await applyAutoHide(); }
+        renderSummariesPanel();
+        if (filled) toastr.success(`t${range.fromTurn}–t${range.toTurn} 요약을 채웠습니다.`, 'Memoria');
+        else toastr.error('요약을 만들지 못했습니다. (모델 응답 오류) 잠시 뒤 다시 눌러 주세요.', 'Memoria');
+    });
     $('#memoria_settings').on('click', '.memoria-summary-delete', async function () {
         const id = $(this).closest('.memoria__summary-card').data('id');
         if (!await confirmDelete('이 요약')) return;
         const store = getStore();
+        const gone = store.chunkSummaries.find(s => s.id === id) || store.arcSummaries.find(s => s.id === id);
         store.chunkSummaries = store.chunkSummaries.filter(s => s.id !== id);
         store.arcSummaries = store.arcSummaries.filter(s => s.id !== id);
+        // 지운 구간은 "지나간 곳"으로 남긴다 — 저절로 다시 만들지 않고, 이야기 탭에 빈 구간으로 보여 채우기를 누를 수 있게
+        if (gone && !gone.carried) {
+            store.summaryCursor = Math.max(store.summaryCursor || 0, gone.toTurn);
+            markSummaryVoid(store, gone.fromTurn, gone.toTurn);
+        }
         persistStore(); renderSummariesPanel(); updateInjection();
     });
     $('#memoria_settings').on('click', '.memoria-summary-edit', async function () {
@@ -9981,27 +10140,19 @@ function bindUI() {
         const id = $(this).closest('.memoria__summary-card').data('id');
         const s = store.chunkSummaries.find(x => x.id === id);
         if (!s) return;
-        const parts = store.turns
-            .filter(t => t.turnIndex >= s.fromTurn && t.turnIndex <= s.toTurn && t.summary)
-            .sort((a, b) => a.turnIndex - b.turnIndex)
-            .map(t => `[t${t.turnIndex}] ${t.summary}`);
-        if (!parts.length) {
+        if (!store.turns.some(t => t.turnIndex >= s.fromTurn && t.turnIndex <= s.toTurn && t.summary)) {
             toastr.warning('이 구간의 턴 기록이 남아 있지 않아 다시 생성할 수 없습니다.', 'Memoria');
             return;
         }
         const $icon = $(this);
         $icon.addClass('fa-spin');
         try {
-            const settings = getSettings();
-            const refBlock = await buildReferenceBlock();
-            const userPrompt = [refBlock, previousSummariesForContext(store), `Turn digests to weave:\n${parts.join('\n')}`]
-                .filter(Boolean).join('\n');
-            const text = cleanMultiline(sanitizeRecordOutput(await callAuxLLM(`${settings.prompts.chunk}\n\n${languageDirective()}`, userPrompt, { task: 'summary', maxTokens: auxTokens(4000) })), 2000);
-            if (!text) throw new Error('빈 응답');
-            s.text = text;
+            const made = await weaveSpan(store, s.fromTurn, s.toTurn);
+            if (!made) throw new Error('빈 응답');
+            if (getStore() !== store) return;
+            s.text = made.text;
             s.avec = null;
-            const loose = ungroundedFigures(text, userPrompt);
-            if (loose.length) s.unverified = loose.slice(0, 12); else delete s.unverified;
+            if (made.unverified.length) s.unverified = made.unverified; else delete s.unverified;
             persistStore(); renderSummariesPanel(); updateInjection();
             toastr.success('요약을 다시 생성했습니다.', 'Memoria');
         } catch (e) {
@@ -11099,7 +11250,7 @@ async function openWipe() {
     if (pick.has('canon')) store.worldRules = [];
     if (pick.has('status')) store.entityStates = [];
     if (pick.has('items')) store.items = [];
-    if (pick.has('summaries')) { store.chunkSummaries = []; store.arcSummaries = []; delete store.summaryCursor; }
+    if (pick.has('summaries')) { store.chunkSummaries = []; store.arcSummaries = []; delete store.summaryCursor; delete store.summaryVoids; delete store.gapMiss; delete store.eraFoldHeld; }
     if (pick.has('dossier')) store.dossier = [];
     persistStore(); renderAllPanels(); updateInjection({ quiet: true });
     toastr.success(`${[...pick].map(k => WIPE_LABEL[k]).join(', ')}을(를) 비웠습니다.`, 'Memoria');

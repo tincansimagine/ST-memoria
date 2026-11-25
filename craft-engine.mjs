@@ -979,3 +979,42 @@ export function bondKindOf(text, given = '') {
     for (const [kind, rx] of BOND_KIND_RULES) if (rx.test(s)) return kind;
     return 'other';
 }
+
+
+/* ------------------------------------------------------------
+ * 요약이 빈 구간
+ * ------------------------------------------------------------ */
+
+/**
+ * 요약이 이미 지나간 범위(coveredTurn 이하) 안에서, 턴 기록은 있는데 그 턴을 덮는 요약이 없는 곳을 찾는다.
+ * 요약을 지웠거나, 가운데 메시지를 지워 그 구간 요약이 걷혔거나, 기록이 뒤늦게 채워진 경우에 생긴다.
+ * 사이에 요약된 턴이 끼어 있으면 다른 구간으로 나눈다. voids(일부러 지운 구간)에 드는 턴은 manual로 따로 묶는다.
+ * 반환: [{ fromTurn, toTurn, turns, manual }]
+ */
+export function summaryGaps({ turnIndexes = [], spans = [], coveredTurn = 0, voids = [] } = {}) {
+    const end = Number(coveredTurn) || 0;
+    if (end < 1) return [];
+    const ranges = (spans || []).filter(s => s && Number(s.toTurn) >= Number(s.fromTurn)).map(s => [Number(s.fromTurn), Number(s.toTurn)]);
+    const covered = (i) => ranges.some(([a, b]) => i >= a && i <= b);
+    const inVoid = (i) => (voids || []).some(v => v && i >= v.fromTurn && i <= v.toTurn);
+    const open = [...new Set((turnIndexes || []).map(Number))].filter(i => i >= 1 && i <= end && !covered(i)).sort((a, b) => a - b);
+    const gaps = [];
+    for (const i of open) {
+        const last = gaps[gaps.length - 1];
+        const manual = inVoid(i);
+        const split = !last || last.manual !== manual || ranges.some(([a, b]) => a > last.toTurn && b < i);
+        if (split) gaps.push({ fromTurn: i, toTurn: i, turns: 1, manual });
+        else { last.toTurn = i; last.turns++; }
+    }
+    return gaps;
+}
+
+/** 턴 번호 목록을 size개씩 나눈다. 끝에 남는 자투리(절반 미만)는 앞 묶음에 붙인다. 반환: [[...], ...] */
+export function spanWindows(indexes, size) {
+    const n = Math.max(1, Math.round(Number(size) || 1));
+    const list = [...(indexes || [])];
+    const out = [];
+    for (let i = 0; i < list.length; i += n) out.push(list.slice(i, i + n));
+    if (out.length > 1 && out[out.length - 1].length < n / 2) out[out.length - 2].push(...out.pop());
+    return out;
+}
