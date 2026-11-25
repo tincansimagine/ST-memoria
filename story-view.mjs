@@ -193,63 +193,187 @@ export function tableHtml(rows, { sort = 'order', desc = false } = {}) {
  * 관계도
  * ------------------------------------------------------------ */
 
+/** 글자 폭 어림 (한글·한자·가나는 정폭, 나머지는 좁게) — 상자와 글 칸을 글보다 먼저 잡아야 해서 */
+const textW = (s, px) => [...String(s ?? '')].reduce((w, ch) => w + (/[ᄀ-ᇿ⺀-鿿가-힯＀-￯]/.test(ch) ? px : px * 0.58), 0);
+
 /**
- * bonds: [{ id, from, to, stage, steps }] — steps는 지나온 단계 수
- * 인물을 원 위에 놓고, 관계선을 휘어진 화살표로 잇는다 (A→B와 B→A는 서로 다른 쪽으로 휜다).
+ * 원 위에 놓을 인물 순서 — 선이 덜 엇갈리고, 이어진 사람끼리 가깝게.
+ * 자리를 둘씩 바꿔 보며 엇갈림이 줄 때만 받아들인다. 같은 관계선이면 늘 같은 그림이 나온다 (무작위 없음).
+ */
+export function orderForMap(names, bonds) {
+    const order = [...names];
+    const n = order.length;
+    if (n < 4) return order;
+    const seen = new Set();
+    const pairs = [];
+    for (const b of bonds || []) {
+        const key = [b.from, b.to].sort().join('\u0001');
+        if (seen.has(key) || b.from === b.to) continue;
+        seen.add(key);
+        pairs.push([b.from, b.to]);
+    }
+    const cost = () => {
+        const at = new Map(order.map((x, i) => [x, i]));
+        const es = pairs.map(([p, q]) => [Math.min(at.get(p), at.get(q)), Math.max(at.get(p), at.get(q))]);
+        let cross = 0;
+        let span = 0;
+        for (let i = 0; i < es.length; i++) {
+            const [p, q] = es[i];
+            span += Math.min(q - p, n - (q - p));
+            for (let j = i + 1; j < es.length; j++) {
+                const [r, s] = es[j];
+                if (p === r || p === s || q === r || q === s) continue;
+                if ((r > p && r < q) !== (s > p && s < q)) cross++;
+            }
+        }
+        return cross * 1000 + span;
+    };
+    let best = cost();
+    for (let pass = 0; pass < 4; pass++) {
+        let better = false;
+        for (let i = 0; i < n; i++) {
+            for (let j = i + 1; j < n; j++) {
+                [order[i], order[j]] = [order[j], order[i]];
+                const c = cost();
+                if (c < best) { best = c; better = true; } else [order[i], order[j]] = [order[j], order[i]];
+            }
+        }
+        if (!better) break;
+    }
+    return order;
+}
+
+/**
+ * bonds: [{ id, from, to, stage, kind }] — kind는 선의 갈래(색)
+ * 인물은 이름 상자, 관계선은 휘어진 화살표. 선마다 지금 단계를 적는다 (글끼리·상자와 겹치면 선을 따라 비켜 놓는다).
+ * A→B와 B→A는 서로 다른 쪽으로 휜다. 반환하는 svg의 --mmv-w 가 제 크기(px)다 — 확대·축소는 바깥에서 폭으로 한다.
  */
 let mapSeq = 0;
 
 export function bondMapSvg(bonds, { picked = '', focus = '' } = {}) {
-    const names = [];
-    for (const b of bonds || []) for (const n of [b.from, b.to]) if (!names.includes(n)) names.push(n);
-    if (names.length < 2) return '';
-    const S = 340;
-    const c = S / 2;
-    const R = names.length === 2 ? 96 : Math.min(124, 70 + names.length * 9);
-    const pos = new Map(names.map((n, i) => {
-        const a = names.length === 2 ? (i ? 0 : Math.PI) : (-Math.PI / 2 + (i * 2 * Math.PI) / names.length);
-        return [n, { x: c + R * Math.cos(a), y: c + R * Math.sin(a) }];
-    }));
-    const NODE = 20;
-    // 화살촉 id는 그림마다 따로 — 숨겨진 탭의 그림에 있는 것을 가리키면 화살촉이 그려지지 않는다
-    const arrowId = `mmv-arrow-${++mapSeq}`;
-    // 그림을 인물들이 놓인 만큼만 잡는다 (세 명일 때 아래가 휑하지 않게)
-    const ys = [...pos.values()].map(p => p.y);
-    const xs = [...pos.values()].map(p => p.x);
-    const pad = NODE + 18;
-    const box = [Math.min(...xs) - pad, Math.min(...ys) - pad, Math.max(...xs) - Math.min(...xs) + pad * 2, Math.max(...ys) - Math.min(...ys) + pad * 2];
-    const edges = bonds.map((b) => {
+    const list = (bonds || []).filter(b => b && b.from && b.to && b.from !== b.to);
+    const raw = [];
+    for (const b of list) for (const n of [b.from, b.to]) if (!raw.includes(n)) raw.push(n);
+    if (raw.length < 2) return '';
+    const names = orderForMap(raw, list);
+    const n = names.length;
+    const NAME_PX = 12;
+    const CAP_PX = 10.5;
+    const BOX_H = 26;
+    const size = new Map(names.map(x => [x, Math.max(44, Math.min(132, textW(clip(x, 10), NAME_PX) + 20))]));
+    const caps = list.map(b => clip(b.stage, 12));
+    const longest = Math.max(0, ...caps.map(c => textW(c, CAP_PX)));
+
+    // 자리: 둘이면 나란히, 셋부터는 타원 위에. 선에 글을 적을 만큼은 벌린다
+    const pos = new Map();
+    if (n === 2) {
+        const gap = Math.max(110, longest + 44);
+        const half = (size.get(names[0]) + size.get(names[1])) / 4 + gap / 2;
+        pos.set(names[0], { x: -half, y: 0 });
+        pos.set(names[1], { x: half, y: 0 });
+    } else {
+        const widest = Math.max(...size.values());
+        const rx = Math.max(118, Math.min(300, 62 + n * 13 + widest * 0.35));
+        const ry = Math.max(92, Math.min(320, 46 + n * 17));
+        names.forEach((x, i) => {
+            const t = -Math.PI / 2 + (i * 2 * Math.PI) / n;
+            pos.set(x, { x: rx * Math.cos(t), y: ry * Math.sin(t) });
+        });
+    }
+    const boxOf = (x) => { const p = pos.get(x); const w = size.get(x); return { x: p.x - w / 2, y: p.y - BOX_H / 2, w, h: BOX_H }; };
+    const taken = names.map(boxOf);
+    const hit = (r, s) => r.x < s.x + s.w && r.x + r.w > s.x && r.y < s.y + s.h && r.y + r.h > s.y;
+    const overlap = (r) => taken.reduce((sum, s) => (hit(r, s) ? sum + (Math.min(r.x + r.w, s.x + s.w) - Math.max(r.x, s.x)) * (Math.min(r.y + r.h, s.y + s.h) - Math.max(r.y, s.y)) : sum), 0);
+    // 상자 가장자리에서 선이 시작하고 끝나게 — 가운데에서 (tx,ty) 쪽으로 나가다 테두리를 만나는 점
+    const rim = (x, tx, ty, pad) => {
+        const p = pos.get(x);
+        const dx = tx - p.x, dy = ty - p.y;
+        const k = Math.min((size.get(x) / 2 + pad) / Math.abs(dx || 1e-6), (BOX_H / 2 + pad) / Math.abs(dy || 1e-6));
+        return [p.x + dx * k, p.y + dy * k];
+    };
+    const both = new Set(list.map(b => `${b.from}\u0001${b.to}`));
+    const r1 = (v) => Math.round(v * 10) / 10;
+    const edges = list.map((b, i) => {
         const p = pos.get(b.from);
         const q = pos.get(b.to);
         const dx = q.x - p.x, dy = q.y - p.y;
         const len = Math.hypot(dx, dy) || 1;
         const ux = dx / len, uy = dy / len;
-        // 오른쪽으로 살짝 휘게 — 반대 방향 줄과 겹치지 않는다
-        const bend = Math.max(24, Math.min(50, len * 0.3));
+        // 오가는 선이 둘이면 서로 반대로 넉넉히, 하나뿐이면 살짝만 휜다
+        const twin = both.has(`${b.to}\u0001${b.from}`);
+        const bend = twin ? Math.max(20, Math.min(46, len * 0.2)) : Math.max(8, Math.min(18, len * 0.07));
         const mx = (p.x + q.x) / 2 - uy * bend;
         const my = (p.y + q.y) / 2 + ux * bend;
-        const sx = p.x + ux * NODE, sy = p.y + uy * NODE;
-        const ex = q.x - ux * (NODE + 5), ey = q.y - uy * (NODE + 5);
+        const [sx, sy] = rim(b.from, mx, my, 2);
+        const [tx, ty] = rim(b.to, mx, my, 4);
+        // 화살촉은 끝점에서 선이 들어오는 방향으로
+        const hl = Math.hypot(tx - mx, ty - my) || 1;
+        const hx = (tx - mx) / hl, hy = (ty - my) / hl;
+        const ex = tx - hx * 7, ey = ty - hy * 7;
+        const head = `M${r1(tx)},${r1(ty)} L${r1(tx - hx * 9 - hy * 4.2)},${r1(ty - hy * 9 + hx * 4.2)} L${r1(tx - hx * 9 + hy * 4.2)},${r1(ty - hy * 9 - hx * 4.2)} z`;
+        const d = `M${r1(sx)},${r1(sy)} Q${r1(mx)},${r1(my)} ${r1(ex)},${r1(ey)}`;
+        // 글 자리: 선의 가운데부터, 겹치면 선을 따라 앞뒤로 비켜 본다
+        const cw = textW(caps[i], CAP_PX) + 8;
+        let spot = null;
+        for (const t of [0.5, 0.4, 0.6, 0.3, 0.7]) {
+            const cx = (1 - t) * (1 - t) * sx + 2 * (1 - t) * t * mx + t * t * tx;
+            const cy = (1 - t) * (1 - t) * sy + 2 * (1 - t) * t * my + t * t * ty;
+            const rect = { x: cx - cw / 2, y: cy - 8, w: cw, h: 16 };
+            const o = overlap(rect);
+            if (!spot || o < spot.o) spot = { cx, cy, rect, o };
+            if (!o) break;
+        }
+        taken.push(spot.rect);
         const off = focus && b.from !== focus && b.to !== focus;
-        return `<g class="mmv-edge${picked === b.id ? ' is-picked' : ''}${off ? ' is-dim' : ''}" data-id="${esc(b.id)}" tabindex="0" role="button">
-            <path class="mmv-edge-hit" d="M${sx},${sy} Q${mx},${my} ${ex},${ey}"/>
-            <path class="mmv-edge-line" d="M${sx},${sy} Q${mx},${my} ${ex},${ey}" marker-end="url(#${arrowId})"/>
-            ${picked === b.id || bonds.length <= 3 ? `<text x="${(sx + 2 * mx + ex) / 4}" y="${(sy + 2 * my + ey) / 4}" text-anchor="middle" dy="-4">${esc(clip(b.stage, 9))}</text>` : ''}
+        return {
+            rect: spot.rect,
+            html: `<g class="mmv-edge mmv-kind--${esc(b.kind || 'other')}${picked === b.id ? ' is-picked' : ''}${off ? ' is-dim' : ''}" data-id="${esc(b.id)}" tabindex="0" role="button">
+            <path class="mmv-edge-hit" d="${d}"/>
+            <path class="mmv-edge-line" d="${d}"/>
+            <path class="mmv-edge-head" d="${head}"/>
+            ${caps[i] ? `<text x="${r1(spot.cx)}" y="${r1(spot.cy)}" text-anchor="middle" dy="0.35em">${esc(caps[i])}</text>` : ''}
             <title>${esc(`${b.from} → ${b.to}: ${b.stage}`)}</title>
+        </g>`,
+        };
+    });
+    const nodes = names.map((x) => {
+        const r = boxOf(x);
+        const linked = !focus || focus === x || list.some(b => (b.from === focus && b.to === x) || (b.to === focus && b.from === x));
+        return `<g class="mmv-person${focus === x ? ' is-picked' : ''}${linked ? '' : ' is-dim'}" data-name="${esc(x)}" tabindex="0" role="button">
+            <rect x="${r1(r.x)}" y="${r1(r.y)}" width="${r1(r.w)}" height="${r.h}" rx="7"/>
+            <text x="${r1(pos.get(x).x)}" y="${r1(pos.get(x).y)}" text-anchor="middle" dy="0.35em">${esc(clip(x, 10))}</text>
+            <title>${esc(x)}</title>
         </g>`;
     }).join('');
-    const nodes = names.map((n) => {
-        const p = pos.get(n);
-        return `<g class="mmv-person${focus === n ? ' is-picked' : ''}${focus && focus !== n && !bonds.some(b => (b.from === focus && b.to === n) || (b.to === focus && b.from === n)) ? ' is-dim' : ''}" data-name="${esc(n)}" tabindex="0" role="button">
-            <circle cx="${p.x}" cy="${p.y}" r="${NODE}"/>
-            <text x="${p.x}" y="${p.y}" text-anchor="middle" dy="0.35em">${esc(clip(n, 4))}</text>
-            <title>${esc(n)}</title>
-        </g>`;
-    }).join('');
-    return `<svg class="mmv-map" viewBox="${box.map(n => Math.round(n)).join(' ')}" style="max-width:${Math.round(box[2])}px" role="img" aria-label="관계도">
-        <defs><marker id="${arrowId}" viewBox="0 0 10 10" refX="8" refY="5" markerUnits="userSpaceOnUse" markerWidth="11" markerHeight="11" orient="auto-start-reverse"><path d="M0,1 L9,5 L0,9 z"/></marker></defs>
-        ${edges}${nodes}
+    // 그림은 상자와 글이 놓인 만큼만 잡는다
+    const all = [...names.map(boxOf), ...edges.map(e => e.rect)];
+    const pad = 12;
+    const x0 = Math.min(...all.map(r => r.x)) - pad;
+    const y0 = Math.min(...all.map(r => r.y)) - pad;
+    const w = Math.max(...all.map(r => r.x + r.w)) + pad - x0;
+    const h = Math.max(...all.map(r => r.y + r.h)) + pad - y0;
+    return `<svg class="mmv-map" data-map="${++mapSeq}" viewBox="${Math.floor(x0)} ${Math.floor(y0)} ${Math.ceil(w)} ${Math.ceil(h)}" style="--mmv-w:${Math.ceil(w)}px" role="img" aria-label="관계도">
+        ${edges.map(e => e.html).join('')}${nodes}
     </svg>`;
+}
+
+/** 관계도 아래 범례 — 그림에 실제로 나온 갈래만. labels: { love: '사랑', ... } */
+export function bondLegendHtml(bonds, labels = {}) {
+    const kinds = [];
+    for (const b of bonds || []) { const k = b.kind || 'other'; if (!kinds.includes(k)) kinds.push(k); }
+    if (kinds.length < 2 && kinds[0] === 'other') return '';
+    const order = Object.keys(labels);
+    kinds.sort((p, q) => order.indexOf(p) - order.indexOf(q));
+    return `<div class="mmv-legend">${kinds.map(k => `<span class="mmv-kind--${esc(k)}"><i aria-hidden="true"></i>${esc(labels[k] || k)}</span>`).join('')}</div>`;
+}
+
+/** 관계도 위 인물 고르기 — 작은 그림에서 상자를 누르기 어려운 휴대폰용. 누르면 그 사람이 얽힌 선만 남는다 */
+export function bondPeopleHtml(bonds, focus = '') {
+    const count = new Map();
+    for (const b of bonds || []) for (const x of [b.from, b.to]) count.set(x, (count.get(x) || 0) + 1);
+    if (count.size < 3) return '';
+    const names = [...count.keys()].sort((p, q) => count.get(q) - count.get(p));
+    return `<div class="mmv-people">${names.map(x => `<button type="button" class="mmv-person-chip${focus === x ? ' is-active' : ''}" data-name="${esc(x)}">${esc(clip(x, 10))}<small>${count.get(x)}</small></button>`).join('')}</div>`;
 }
 
 /**
@@ -270,7 +394,7 @@ export function bondCardsHtml(bonds, { picked = '', focus = '' } = {}) {
             + shown.map((st, i) => `<li class="${i === shown.length - 1 ? 'is-now' : ''}" style="--mmv-step:${i}"><b>${esc(st.stage)}</b>${st.basis ? `<small>${esc(st.basis)}</small>` : ''}</li>`).join('');
         const extra = [now.calls ? `<span class="mmv-chip">부르는 말 · ${esc(now.calls)}</span>` : '', now.unsaid ? `<span class="mmv-chip mmv-chip--open">말하지 못한 것 · ${esc(now.unsaid)}</span>` : ''].join('');
         return `<section class="mmv-bond${picked === bond.id ? ' is-picked' : ''}" data-id="${esc(bond.id)}">
-            <h5>${esc(bond.from)} <span class="mmv-arrow">→</span> ${esc(bond.to)}</h5>
+            <h5>${esc(bond.from)} <span class="mmv-arrow">→</span> ${esc(bond.to)}${bond.kind && bond.kind !== 'other' && bond.kindLabel ? `<span class="mmv-kind-tag mmv-kind--${esc(bond.kind)}"><i aria-hidden="true"></i>${esc(bond.kindLabel)}</span>` : ''}</h5>
             <ol class="mmv-stairs">${stairs}</ol>
             ${extra ? `<div class="mmv-chips">${extra}</div>` : ''}
         </section>`;
@@ -289,4 +413,69 @@ export function statusListHtml(history) {
         <span class="mmv-status-when">${esc(h.when || '—')}</span>
         <span>${esc([h.place, h.weather].filter(Boolean).join(' · '))}</span>
     </li>`).join('')}</ol>`;
+}
+
+
+/* ------------------------------------------------------------
+ * 변화 — 이미 적힌 기록에서 "무엇이 무엇으로 바뀌었나"만 추린다
+ * ------------------------------------------------------------ */
+
+export const CHANGE_KINDS = Object.freeze({ bond: '관계', mood: '감정', state: '상태', growth: '성장' });
+
+/**
+ * 관계선의 계단, 상태가 지나온 값, 인물의 달라진 점에서 바뀐 순간을 모은다. 모델을 부르지 않고, 장부에도 싣지 않는다 — 읽는 사람을 위한 보기다.
+ * bonds: [{ from, to, log: [{ turn, stage, basis }] }], states: [{ entity, slot, value, turn, hist: [{ value, turn }] }],
+ * characters: [{ name, growth: [{ text, turn }] }]. moodSlots·skipSlots: 감정으로 볼 칸 / 자잘해서 뺄 칸.
+ * 반환: 최근 것부터 [{ id, kind, turn, who: [이름], title, before, after, note }]
+ */
+export function buildChanges({ bonds = [], states = [], characters = [], moodSlots = [], skipSlots = [], slotLabel = (s) => s } = {}) {
+    const out = [];
+    const same = (p, q) => String(p ?? '').trim() === String(q ?? '').trim();
+    for (const b of bonds || []) {
+        const steps = [];
+        for (const e of b.log || []) if (e?.stage && !same(steps[steps.length - 1]?.stage, e.stage)) steps.push(e);
+        for (let i = 1; i < steps.length; i++) {
+            out.push({ kind: 'bond', turn: Number(steps[i].turn) || 0, who: [b.from, b.to], title: `${b.from} → ${b.to}`, before: steps[i - 1].stage, after: steps[i].stage, note: steps[i].basis || '' });
+        }
+    }
+    for (const s of states || []) {
+        if (!s?.entity || skipSlots.includes(s.slot)) continue;
+        const series = [...(s.hist || []).map(h => ({ value: h.value, turn: h.turn })), { value: s.value, turn: s.turn }].filter(x => String(x.value ?? '').trim());
+        for (let i = 1; i < series.length; i++) {
+            if (same(series[i - 1].value, series[i].value)) continue;
+            out.push({ kind: moodSlots.includes(s.slot) ? 'mood' : 'state', turn: Number(series[i].turn) || 0, who: [s.entity], title: `${s.entity} · ${slotLabel(s.slot)}`, before: series[i - 1].value, after: series[i].value, note: '' });
+        }
+    }
+    for (const c of characters || []) {
+        for (const g of (Array.isArray(c?.growth) ? c.growth : [])) {
+            if (g?.text) out.push({ kind: 'growth', turn: Number(g.turn) || 0, who: [c.name], title: c.name, before: '', after: g.text, note: '' });
+        }
+    }
+    out.sort((p, q) => q.turn - p.turn);
+    return out.map((r, i) => ({ ...r, id: `ch${i}` }));
+}
+
+/**
+ * rows: buildChanges()의 결과에 mesId를 붙인 것. kind: 고른 갈래('' = 전체), who: 고른 인물('' = 모두)
+ * 갈래 칩의 숫자는 지금 고른 인물 기준이다.
+ */
+export function changesHtml(rows, { kind = '', who = '' } = {}) {
+    const all = rows || [];
+    if (!all.length) return '<div class="memoria__empty">아직 바뀐 것이 없습니다. 관계나 상태가 한 번 이상 달라지면 여기에 모입니다.</div>';
+    const people = [];
+    for (const r of all) for (const x of r.who) if (x && !people.includes(x)) people.push(x);
+    const mine = all.filter(r => !who || r.who.includes(who));
+    const shown = mine.filter(r => !kind || r.kind === kind);
+    const chip = (key, label, n) => `<button type="button" class="mmv-change-kind${kind === key ? ' is-active' : ''}" data-kind="${key}"${n ? '' : ' disabled'}>${label}<small>${n}</small></button>`;
+    const tools = `<div class="mmv-tools mmv-tools--changes">
+        <div class="mmv-change-kinds">${chip('', '전체', mine.length)}${Object.entries(CHANGE_KINDS).map(([k, label]) => chip(k, label, mine.filter(r => r.kind === k).length)).join('')}</div>
+        <select class="mmv-change-who" title="인물"><option value="">모든 인물</option>${people.map(x => `<option value="${esc(x)}"${who === x ? ' selected' : ''}>${esc(x)}</option>`).join('')}</select>
+    </div>`;
+    const items = shown.map(r => `<li class="mmv-change mmv-change--${r.kind}">
+            <span class="mmv-change-top"><span class="mmv-tag">${CHANGE_KINDS[r.kind]}</span><b>${esc(r.title)}</b>${r.turn > 0
+                ? (r.mesId >= 0 ? `<button type="button" class="mmv-jump" data-mes="${r.mesId}" title="그 메시지로">t${r.turn}</button>` : `<small>t${r.turn}</small>`) : ''}</span>
+            <span class="mmv-change-body">${r.before ? `<s>${esc(r.before)}</s><span class="mmv-arrow" aria-hidden="true">→</span>` : ''}<span>${esc(r.after)}</span></span>
+            ${r.note ? `<small class="mmv-change-note">${esc(r.note)}</small>` : ''}
+        </li>`).join('');
+    return `${tools}<ol class="mmv-changes">${items || '<li class="mmv-change is-none">이 조건에 맞는 변화가 없습니다.</li>'}</ol>`;
 }

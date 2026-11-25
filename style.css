@@ -1108,7 +1108,7 @@
 
 /* 보기 고르기 */
 .mmv-bar { display: flex; gap: 8px; align-items: stretch; }
-.mmv-views { flex: 1; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); padding: 3px; gap: 3px; border-radius: 12px; background: var(--mmv-soft); min-width: 0; }
+.mmv-views { flex: 1; display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); padding: 3px; gap: 3px; border-radius: 12px; background: var(--mmv-soft); min-width: 0; }
 .mmv-views button { font: inherit; color: var(--mmv-muted); background: none; border: 0; border-radius: 9px; padding: 9px 0; cursor: pointer; white-space: nowrap; }
 .mmv-views button.is-active { background: var(--mm-panel, #222); color: var(--mmv-ink); font-weight: 600; box-shadow: 0 1px 3px #0004; }
 .mmv-bar .menu_button { margin: 0; min-width: 40px; display: flex; align-items: center; justify-content: center; gap: 6px; border-radius: 12px; }
@@ -1213,19 +1213,66 @@
 .mmv-table .mmv-none { text-align: center; color: var(--mmv-muted); }
 
 /* 관계 */
-.mmv-map-wrap { display: flex; justify-content: center; }
-.mmv-map { width: 100%; max-width: 340px; height: auto; display: block; }
-.mmv-map marker path { fill: var(--mmv-a); }
+.mmv-map-bar { display: flex; align-items: flex-start; gap: 8px; min-width: 0; }
+.mmv-people { flex: 1; min-width: 0; display: flex; gap: 6px; overflow-x: auto; padding-bottom: 2px; scrollbar-width: thin; }
+.mmv-person-chip { flex-shrink: 0; display: inline-flex; align-items: baseline; gap: 5px; font: inherit; font-size: .86em; color: inherit; background: none; border: 1px solid var(--mmv-line); border-radius: 999px; padding: 5px 11px; cursor: pointer; white-space: nowrap; }
+.mmv-person-chip small { color: var(--mmv-muted); font-variant-numeric: tabular-nums; }
+.mmv-person-chip.is-active { border-color: var(--mmv-a); color: var(--mmv-a); }
+.mmv-zoom { margin-left: auto; flex-shrink: 0; display: inline-flex; border: 1px solid var(--mmv-line); border-radius: 999px; overflow: hidden; }
+.mmv-zoom button { font: inherit; font-size: .86em; color: inherit; background: none; border: 0; padding: 5px 11px; min-width: 34px; cursor: pointer; white-space: nowrap; }
+.mmv-zoom button + button { border-left: 1px solid var(--mmv-line); }
+.mmv-zoom button:disabled { opacity: .35; cursor: default; }
+.mmv-map-wrap { overflow: auto; max-height: 76vh; -webkit-overflow-scrolling: touch; }
+.mmv-map { display: block; margin: 0 auto; height: auto; width: calc(min(100%, var(--mmv-w, 340px)) * var(--mmv-zoom, 1)); max-width: none; }
+.mmv-map, .mmv-legend, .mmv-kind-tag { --mmv-k: var(--mmv-muted); }
+.mmv-kind--love { --mmv-k: #df5a9a; }
+.mmv-kind--crush { --mmv-k: #df5a9a; }
+.mmv-kind--family { --mmv-k: #b8a23c; }
+.mmv-kind--friend { --mmv-k: #4fa66b; }
+.mmv-kind--ally { --mmv-k: #2f9f9a; }
+.mmv-kind--rival { --mmv-k: #e0802f; }
+.mmv-kind--hostile { --mmv-k: #c53a3a; }
+.mmv-kind--work { --mmv-k: #6c8cc6; }
+.mmv-kind--mixed { --mmv-k: #9670cc; }
+.mmv-kind--other { --mmv-k: var(--mmv-muted); }
 .mmv-edge { cursor: pointer; outline: none; }
-.mmv-edge-line { fill: none; stroke: var(--mmv-a); stroke-width: 1.8; }
-.mmv-edge-hit { fill: none; stroke: transparent; stroke-width: 22; }
-.mmv-edge text { font-size: 11px; fill: var(--mmv-ink); paint-order: stroke; stroke: var(--mm-panel, #222); stroke-width: 4px; stroke-linejoin: round; }
-.mmv-edge:hover .mmv-edge-line, .mmv-edge:focus .mmv-edge-line, .mmv-edge.is-picked .mmv-edge-line { stroke-width: 3.4; }
+.mmv-edge-line { fill: none; stroke: var(--mmv-k); stroke-width: 1.7; }
+.mmv-kind--crush .mmv-edge-line { stroke-dasharray: 5 4; }
+.mmv-edge-head { fill: var(--mmv-k); stroke: none; }
+.mmv-edge-hit { fill: none; stroke: transparent; stroke-width: 20; }
+.mmv-edge text { font-size: 10.5px; fill: var(--mmv-ink); paint-order: stroke; stroke: var(--mm-panel, #222); stroke-width: 4px; stroke-linejoin: round; pointer-events: none; }
+.mmv-edge:hover .mmv-edge-line, .mmv-edge:focus-visible .mmv-edge-line, .mmv-edge.is-picked .mmv-edge-line { stroke-width: 3.2; }
+.mmv-edge.is-picked text { font-weight: 700; }
 .mmv-person { cursor: pointer; outline: none; }
-.mmv-person circle { fill: var(--mm-panel, #222); stroke: var(--mmv-muted); stroke-width: 1.8; }
-.mmv-person text { font-size: 11px; font-weight: 600; fill: var(--mmv-ink); }
-.mmv-person:hover circle, .mmv-person.is-picked circle { stroke: var(--mmv-a); stroke-width: 3; }
-.mmv-edge.is-dim, .mmv-person.is-dim { opacity: .18; }
+.mmv-person rect { fill: var(--mm-panel, #222); stroke: var(--mmv-muted); stroke-width: 1.4; }
+.mmv-person text { font-size: 12px; font-weight: 600; fill: var(--mmv-ink); pointer-events: none; }
+.mmv-person:hover rect, .mmv-person:focus-visible rect, .mmv-person.is-picked rect { stroke: var(--mmv-a); stroke-width: 2.4; }
+.mmv-edge.is-dim, .mmv-person.is-dim { opacity: .16; }
+.mmv-legend { display: flex; flex-wrap: wrap; gap: 4px 14px; justify-content: center; font-size: .8em; color: var(--mmv-muted); }
+.mmv-legend span, .mmv-kind-tag { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.mmv-legend i, .mmv-kind-tag i { width: 16px; height: 0; border-top: 2px solid var(--mmv-k); }
+.mmv-legend .mmv-kind--crush i, .mmv-kind-tag.mmv-kind--crush i { border-top-style: dashed; }
+.mmv-kind-tag { margin-left: 8px; font-size: .78em; font-weight: 500; color: var(--mmv-muted); vertical-align: middle; }
+.mmv-kind-tag i { width: 12px; }
+
+/* 변화 */
+.mmv-tools--changes { flex-wrap: wrap; }
+.mmv-change-kinds { flex: 1 1 240px; min-width: 0; display: flex; gap: 6px; overflow-x: auto; padding-bottom: 2px; scrollbar-width: thin; }
+.mmv-change-kind { flex-shrink: 0; display: inline-flex; align-items: baseline; gap: 5px; font: inherit; font-size: .86em; color: inherit; background: none; border: 1px solid var(--mmv-line); border-radius: 999px; padding: 5px 11px; cursor: pointer; white-space: nowrap; }
+.mmv-change-kind small { color: var(--mmv-muted); font-variant-numeric: tabular-nums; }
+.mmv-change-kind.is-active { border-color: var(--mmv-a); color: var(--mmv-a); }
+.mmv-change-kind:disabled { opacity: .4; cursor: default; }
+.mmv-change-who { flex: 0 1 150px; min-width: 0; max-width: 100%; }
+.mmv-changes { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.mmv-change { display: grid; gap: 5px; padding: 10px 12px; border-radius: 12px; background: var(--mmv-soft); min-width: 0; }
+.mmv-change.is-none { color: var(--mmv-muted); text-align: center; }
+.mmv-change-top { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.mmv-change-top b { flex: 1; min-width: 0; font-weight: 600; overflow-wrap: anywhere; word-break: keep-all; }
+.mmv-change-top > small { color: var(--mmv-muted); font-variant-numeric: tabular-nums; }
+.mmv-change-body { line-height: 1.55; font-size: .93em; overflow-wrap: anywhere; word-break: keep-all; }
+.mmv-change-body s { color: var(--mmv-muted); text-decoration-color: color-mix(in srgb, var(--mmv-muted) 60%, transparent); }
+.mmv-change-body .mmv-arrow { margin: 0 6px; color: var(--mmv-muted); }
+.mmv-change-note { color: var(--mmv-muted); line-height: 1.5; overflow-wrap: anywhere; word-break: keep-all; }
 .mmv-bonds { display: grid; gap: 10px; }
 .mmv-bond { padding: 12px; border-radius: 14px; background: var(--mmv-soft); display: grid; gap: 9px; min-width: 0; border: 1px solid transparent; }
 .mmv-bond.is-picked { border-color: var(--mmv-a); }
@@ -1561,6 +1608,13 @@ body[data-memoria-paper="dark"] :is(#memoria_settings.memoria, .memoria-library,
 #memoria_settings .mmv-node-dot { width: 9px; height: 9px; border-radius: 0; border: 1px solid var(--ink); background: var(--surface); transform: rotate(45deg); }
 #memoria_settings .mmv-node--arc .mmv-node-dot { background: var(--accent); border-color: var(--accent); }
 #memoria_settings .mmv-node--gap .mmv-node-dot { border: 1px dashed var(--faint); background: var(--surface); }
+#memoria_settings :is(.mmv-person-chip, .mmv-change-kind, .mmv-zoom) { border-radius: 0; border-color: var(--ink-line); }
+#memoria_settings :is(.mmv-person-chip, .mmv-change-kind).is-active { border-color: var(--accent); color: var(--accent); }
+#memoria_settings .mmv-zoom button + button { border-left-color: var(--ink-line); }
+#memoria_settings .mmv-person rect { fill: var(--surface); stroke: var(--ink-line); rx: 0; }
+#memoria_settings .mmv-person:hover rect, #memoria_settings .mmv-person.is-picked rect { stroke: var(--accent); }
+#memoria_settings .mmv-edge text { stroke: var(--surface); }
+#memoria_settings .mmv-change { border: 1px solid var(--ink-line); border-radius: 0; background: var(--surface2); }
 #memoria_settings .mmv-gap { border-radius: 0; border-color: var(--ink-line); }
 #memoria_settings .mmv-gap button { border-radius: 0; border-color: var(--ink-line); color: var(--accent); font-weight: 600; }
 #memoria_settings .mmv-gap button:hover, #memoria_settings .mmv-gap button:focus-visible { border-color: var(--accent); }

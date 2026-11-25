@@ -47,7 +47,7 @@ import { peopleList, matchPerson, personPage, nameSuggestions, planMerge, pairKe
 import { readerSystem, readerUser, readerKey, needsReading, packBatches, replyBudget, readReply, trimItems, READER_LANGS } from './reader-engine.mjs';
 import { KNOW_DIRECTIVE, LEARN_DIRECTIVE, BEATS_DIRECTIVE, FEELING_DIRECTIVE, THREAD_KIND_NOTE, VOICE_LINES, PLAN_HEAD, VEIL_PROMPT } from './directives.mjs';
 import { findStatusBars, statusOneLine, isPauseDirective, isPauseMessage, buildTimelineRows, filterTimelineRows, timelineMarkdown, timelineCsv, layoutTimelineGraph, verifyIssues, applyVerdicts } from './scene-engine.mjs';
-import { heroHtml, pulseSvg, flowHtml, railHtml, tableHtml, bondMapSvg, bondCardsHtml, statusListHtml } from './story-view.mjs';
+import { heroHtml, pulseSvg, flowHtml, railHtml, tableHtml, bondMapSvg, bondCardsHtml, statusListHtml, bondLegendHtml, bondPeopleHtml, buildChanges, changesHtml } from './story-view.mjs';
 
 const MODULE_NAME = 'memoria';
 const INJECT_KEY = 'memoria_ledger';
@@ -8797,10 +8797,35 @@ function renderMilestonesPanel() {
 
 /** 채우는 중인 빈 요약 구간 ('from-to') — 버튼을 두 번 눌러 호출이 겹치지 않게 */
 const gapFilling = new Set();
-const storyView = { tab: 'flow', by: 'people', query: '', minStars: 0, sort: 'order', desc: false, open: '', bond: '', focus: '' };
+const storyView = { tab: 'flow', by: 'people', query: '', minStars: 0, sort: 'order', desc: false, open: '', bond: '', focus: '', zoom: 1, changeKind: '', changeWho: '' };
 
 function bondViewRows(store) {
-    return (store.bonds || []).filter(b => !b.disabled && bondNow(b)).map(b => ({ id: b.id, from: b.from, to: b.to, stage: bondNow(b).stage, log: b.log }));
+    return (store.bonds || []).filter(b => !b.disabled && bondNow(b)).map((b) => {
+        const now = bondNow(b);
+        // 갈래: 직접 고른 것이 먼저, 없으면 사서가 적은 것, 그것도 없으면 단계 글에서 가린다
+        const kind = bondKindOf(`${now.stage} ${now.basis || ''}`, b.kind || now.kind);
+        return { id: b.id, from: b.from, to: b.to, stage: now.stage, log: b.log, kind, kindLabel: BOND_KINDS[kind] };
+    });
+}
+
+/** 상태 칸 이름을 읽는 말로 (모르는 칸은 적힌 그대로) */
+const SLOT_KO = { mood: '기분', expression: '표정', condition: '몸 상태', injury: '부상', location: '있는 곳', outfit: '옷차림', holding: '든 것', activity: '하는 일',
+    job: '직업', occupation: '직업', role: '역할', status: '처지', rank: '지위', title: '직함', residence: '사는 곳', home: '사는 곳', goal: '목표', age: '나이',
+    appearance: '겉모습', hair: '머리', money: '돈', debt: '빚', relationship: '관계', secret: '비밀', ability: '능력', power: '힘', level: '레벨', name: '이름' };
+const slotKo = (slot) => SLOT_KO[slot] || String(slot || '').replace(/_/g, ' ');
+
+/** 변화 보기의 줄들 — 기록에서 바로 뽑는다 (모델 호출 없음) */
+function changeRows(store) {
+    const mesOf = new Map(store.turns.map(t => [t.turnIndex, t.mesId]));
+    return buildChanges({
+        bonds: (store.bonds || []).filter(b => !b.disabled),
+        states: store.entityStates.filter(x => String(x.entity || '').toLowerCase() !== 'scene' && x.claim !== 'belief')
+            .map(x => ({ entity: x.entity, slot: canonSlot(x.slot), value: x.value, turn: x.valueTurn ?? x.turnIndex, hist: x.hist })),
+        characters: store.characters,
+        moodSlots: ['mood', 'expression'],
+        skipSlots: ['outfit', 'holding', 'activity'],
+        slotLabel: slotKo,
+    }).map(r => ({ ...r, mesId: mesOf.has(r.turn) ? mesOf.get(r.turn) : -1 }));
 }
 
 const koDuration = (days) => (days < 1 ? `${Math.max(1, Math.round(days * 24))}시간` : days < 14 ? `${Math.round(days)}일` : days < 56 ? `${Math.round(days / 7)}주`
@@ -8874,10 +8899,14 @@ function renderStoryView(resultsOnly = false) {
             : '<div class="memoria__empty">아직 그릴 사건이 없습니다. 턴이 기록되면 채워집니다.</div>';
     } else if (v.tab === 'bonds') {
         const bonds = bondViewRows(store);
+        if (v.focus && !bonds.some(b => b.from === v.focus || b.to === v.focus)) v.focus = '';
         const svg = bondMapSvg(bonds, { picked: v.bond, focus: v.focus });
+        const zoomBar = `<div class="mmv-zoom" role="group" aria-label="그림 크기"><button type="button" data-zoom="out" title="작게"${v.zoom <= 0.6 ? ' disabled' : ''}>−</button><button type="button" data-zoom="fit" title="칸 폭에 맞추기">맞춤</button><button type="button" data-zoom="in" title="크게"${v.zoom >= 2.4 ? ' disabled' : ''}>+</button></div>`;
         html = bonds.length
-            ? `${svg ? `<div class="mmv-map-wrap">${svg}</div>` : ''}${bondCardsHtml(bonds, { picked: v.bond, focus: v.focus })}`
+            ? `${svg ? `<div class="mmv-map-bar">${bondPeopleHtml(bonds, v.focus)}${zoomBar}</div><div class="mmv-map-wrap" style="--mmv-zoom:${v.zoom}">${svg}</div>${bondLegendHtml(bonds, BOND_KINDS)}` : ''}${bondCardsHtml(bonds, { picked: v.bond, focus: v.focus })}`
             : '<div class="memoria__empty">관계선이 아직 없습니다. 관계가 움직이는 장면이 나오면 그려집니다.</div>';
+    } else if (v.tab === 'changes') {
+        html = changesHtml(changeRows(store), { kind: v.changeKind, who: v.changeWho });
     } else {
         const history = statusHistory();
         results = `${tableHtml(filterTimelineRows(rows, v), v)}${history.length ? `<details class="memoria__details"><summary>상태창 기록 ${history.length}</summary>${statusListHtml(history)}</details>` : ''}`;
@@ -8932,11 +8961,24 @@ function bindStoryView() {
         renderStoryView();
         document.querySelector('#memoria_story_view .mmv-bond.is-picked')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     });
-    $root.on('click', '#memoria_story_view .mmv-person', function () {
+    $root.on('click', '#memoria_story_view .mmv-person, #memoria_story_view .mmv-person-chip', function () {
         const name = String($(this).data('name'));
         storyView.focus = storyView.focus === name ? '' : name;
         renderStoryView();
     });
+    $root.on('click', '#memoria_story_view .mmv-zoom button', function () {
+        const how = String($(this).data('zoom'));
+        const steps = [0.6, 0.8, 1, 1.3, 1.7, 2.4];
+        const at = steps.reduce((best, z, i) => (Math.abs(z - storyView.zoom) < Math.abs(steps[best] - storyView.zoom) ? i : best), 2);
+        storyView.zoom = how === 'fit' ? 1 : steps[Math.max(0, Math.min(steps.length - 1, at + (how === 'in' ? 1 : -1)))];
+        // 그림을 다시 그리지 않고 폭만 바꾼다 — 고른 선과 보던 자리가 그대로 남는다
+        const $bar = $(this).closest('.mmv-zoom');
+        $('#memoria_story_view .mmv-map-wrap').css('--mmv-zoom', storyView.zoom);
+        $bar.find('[data-zoom="out"]').prop('disabled', storyView.zoom <= steps[0]);
+        $bar.find('[data-zoom="in"]').prop('disabled', storyView.zoom >= steps[steps.length - 1]);
+    });
+    $root.on('click', '#memoria_story_view .mmv-change-kind', function () { storyView.changeKind = String($(this).data('kind') || ''); renderStoryView(); });
+    $root.on('change', '#memoria_story_view .mmv-change-who', function () { storyView.changeWho = String($(this).val() || ''); renderStoryView(); });
     $root.on('click', '#memoria_story_view .mmv-export', async function () {
         const shown = filterTimelineRows(buildTimelineRows(getStore()), storyView);
         if ($(this).data('kind') === 'csv') return download(timelineCsv(shown), 'memoria-timeline.csv', 'text/csv');
@@ -10613,18 +10655,21 @@ function bindUI() {
     });
     const bondForm = (b) => {
         const now = b ? bondNow(b) : null;
-        return [`누가: ${b?.from || ''}`, `누구에게: ${b?.to || ''}`, `지금 단계: ${now?.stage || ''}`, `근거: ${now?.basis || ''}`, `부르는 말: ${now?.calls || ''}`, `말하지 못한 것: ${now?.unsaid || ''}`].join('\n');
+        return [`누가: ${b?.from || ''}`, `누구에게: ${b?.to || ''}`, `지금 단계: ${now?.stage || ''}`, `근거: ${now?.basis || ''}`, `부르는 말: ${now?.calls || ''}`, `말하지 못한 것: ${now?.unsaid || ''}`,
+            `갈래: ${b?.kind ? BOND_KINDS[b.kind] : ''}`, `(갈래는 관계도의 선 색입니다. ${Object.entries(BOND_KINDS).filter(([k]) => k !== 'other').map(([, label]) => label.split('·')[0]).join(' · ')} 가운데 하나 — 비워 두면 단계 글에서 알아서 가립니다)`].join('\n');
     };
     const readBondForm = (raw) => {
         const pick = (label, max) => {
             const m = String(raw).match(new RegExp(`^${label}\\s*[:：]\\s*(.*)$`, 'm'));
             return m ? cleanStr(m[1], max) : '';
         };
-        return { from: pick('누가', 60), to: pick('누구에게', 60), stage: pick('지금 단계', 120), basis: pick('근거', 200), calls: pick('부르는 말', 100), unsaid: pick('말하지 못한 것', 160) };
+        const kindText = pick('갈래', 20);
+        const kind = !kindText ? '' : (Object.keys(BOND_KINDS).find(k => BOND_KINDS[k] === kindText || BOND_KINDS[k].split('·').includes(kindText)) || bondKindOf(kindText, kindText));
+        return { from: pick('누가', 60), to: pick('누구에게', 60), stage: pick('지금 단계', 120), basis: pick('근거', 200), calls: pick('부르는 말', 100), unsaid: pick('말하지 못한 것', 160), kindPick: kind === 'other' ? '' : kind };
     };
     const saveBondForm = async (title, existing) => {
         const ctx = getContext();
-        const raw = await ctx.callGenericPopup(title, ctx.POPUP_TYPE.INPUT, bondForm(existing), { rows: 7 });
+        const raw = await ctx.callGenericPopup(title, ctx.POPUP_TYPE.INPUT, bondForm(existing), { rows: 9 });
         if (!raw || typeof raw !== 'string') return;
         const form = readBondForm(raw);
         if (existing) { form.from = existing.from; form.to = existing.to; } // 방향은 줄의 정체다 — 바꾸려면 새 줄을 만든다
@@ -10633,7 +10678,9 @@ function bindUI() {
         const row = upsertBond(store, form, store.turnCounter, { manual: true });
         if (!row) return toastr.warning('같은 인물끼리는 관계선을 만들 수 없습니다.', 'Memoria');
         row.disabled = false;
-        persistStore(); renderBondsPanel(); updateInjection({ quiet: true });
+        // 직접 고른 갈래는 줄에 붙여 둔다 — 단계가 바뀌어도 그대로 (칸을 비우면 다시 글에서 가린다)
+        if (form.kindPick) row.kind = form.kindPick; else delete row.kind;
+        persistStore(); renderBondsPanel(); renderSummariesPanel(); updateInjection({ quiet: true });
     };
     $('#memoria_settings').on('click', '.memoria-bond-edit', function () {
         const b = bondOf(this);
