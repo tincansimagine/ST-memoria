@@ -401,6 +401,32 @@ export function splitClosedLine(raw) {
     return { text, closed, stale };
 }
 
+/**
+ * 요약 응답에서 "NOW:" 덩이(지금 이야기가 서 있는 자리)를 떼어 낸다. 기록 앞이든 뒤든 찾는다.
+ * 덩이는 "NOW:" 줄과 그 뒤의 "- " 줄들이다 — 빈 줄은 건너뛰고, 다른 라벨이나 글줄이 나오면 끝난다.
+ * 반환: { text: 덩이를 뗀 나머지, now: 줄들 (8줄까지) }
+ */
+export function splitNowBlock(raw) {
+    const lines = String(raw ?? '').split('\n');
+    const head = /^\s*(?:[*_#]+\s*)?NOW(?:[*_]+)?\s*[:：]\s*(?:[*_]+\s*)?/i;
+    const i = lines.findIndex(l => head.test(l));
+    if (i < 0) return { text: String(raw ?? ''), now: [] };
+    const now = [];
+    const first = lines[i].replace(head, '').trim();
+    if (first) now.push(first.replace(/^[-•*]\s*/, ''));
+    let j = i + 1;
+    for (; j < lines.length; j++) {
+        const t = lines[j].trim();
+        if (!t) continue;
+        if (/^(?:WHEN|PLOT|SHIFTS|OPEN|CLOSED|STALE)\s*[:：]/i.test(t)) break;
+        if (/^[-•*]\s+/.test(t)) { now.push(t.replace(/^[-•*]\s+/, '')); continue; }
+        if (!now.length) { now.push(t); continue; }
+        break;
+    }
+    const clean = now.map(x => x.replace(/\s+/g, ' ').trim()).filter(x => x.length >= 2).slice(0, 8);
+    return { text: [...lines.slice(0, i), ...lines.slice(j)].join('\n').replace(/\n{3,}/g, '\n\n').trim(), now: clean };
+}
+
 /* ------------------------------------------------------------
  * 회상 쉬어가기 — 같은 기억이 매 턴 되풀이해 실리지 않게
  *

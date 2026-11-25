@@ -84,6 +84,7 @@ test('the sweep checks old pledges and canon against the story so far, takes onl
 test('the sweep runs once per chat after the first summary, then every so many turns, and can be switched off', async () => {
     const a = await app();
     const store = a.getStore();
+    store.nowLog = [{ toTurn: 40, text: '- 이미 적어 둔 지금 이야기' }];   // 이 시험은 훑기 호출만 센다
     store.locks.push(lock('royal', 'keep_secret', '아리아가 왕녀라는 사실을 보라에게 숨긴다', 5));
     let calls = 0;
     a.context.generateRaw = async () => { calls++; return JSON.stringify({ done: [], stale: [] }); };
@@ -180,6 +181,7 @@ test('the sweep also holds the opening setup against the story: what the story o
 test('the sweep waits until the story has some length, and runs again right after a past-chat index', async () => {
     const a = await app();
     const store = a.getStore();
+    store.nowLog = [{ toTurn: 40, text: '- 이미 적어 둔 지금 이야기' }];   // 이 시험은 훑기 호출만 센다
     store.locks.push(lock('royal', 'keep_secret', '아리아가 왕녀라는 사실을 보라에게 숨긴다', 5));
     let calls = 0;
     a.context.generateRaw = async () => { calls++; return JSON.stringify({ done: [], stale: [], premise: [] }); };
