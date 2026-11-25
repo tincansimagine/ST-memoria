@@ -126,11 +126,40 @@ test('forms of address on file are carried for anyone in or named in the scene, 
     chat.push({ is_user: true, mes: '집에 가는 길에 유원을 마주쳤다.', name: '여행자' });
     const packet = (await a.buildPacketWithinBudget(a.currentRecallQuery(), null)).text;
     const sec = packet.split('## How They Address Each Other')[1]?.split('\n## ')[0] || '';
-    assert.match(sec, /also when one of them enters partway through a scene[\s\S]*more distant form/);
-    assert.match(sec, /- 여행자 → 유원: "유원 형", "형"/);
-    assert.match(sec, /- 유원 → 여행자: "시온아"/);
-    assert.doesNotMatch(sec, /유원 씨/, 'the slip is not handed back as the form to keep');
-    assert.doesNotMatch(sec, /보라야/, 'a pair nobody in the scene is part of is left out');
+    assert.match(sec, /also when one of them enters partway through a scene[\s\S]*Never put 씨 or 님 after a name here/);
+    assert.match(sec, /- 여행자 → 유원: "유원 형", "형"\n- 유원 → 여행자: "시온아"\n- 아리아 → 보라: "보라야"/, 'pairs touching the scene first; the rest still listed — anyone may walk in');
+    assert.doesNotMatch(sec.split('(The last reply')[0], /유원 씨/, 'the slip is not handed back as the form to keep');
+    assert.match(sec, /\(The last reply got these wrong — from here on use the forms above:\)\n- 여행자 called 유원 "유원 씨" — the form on record is "유원 형" \/ "형"/);
+});
+
+test('a person is recognised by the given name the story actually uses (유원 for 차유원), and a slip in earlier attempts at the same reply is called out', async () => {
+    const a = await app();
+    const store = a.getStore();
+    a.getSettings().defaultPerspective = '__narrator__';
+    store.characters.push(card('차유원', { updatedTurn: 58 }), card('윤시온', { updatedTurn: 60 }), card('차도겸', { updatedTurn: 60 }));
+    store.bonds.push(bond('윤시온', '차유원', '믿고 따르는 선배', '유원 형, 형'), bond('차유원', '윤시온', '아끼는 후배', '시온아'));
+    assert.deepEqual([...a.run('personForms')(store, store.characters[0])], ['차유원', '유원']);
+    assert.equal(a.run('mentionsPerson')(store, '며칠 뒤 유원과 마주쳤다', store.characters[0]), true);
+    assert.equal(a.run('mentionsPerson')(store, '차유원의 명함', store.characters[0]), true);
+    assert.equal(a.run('mentionsPerson')(store, '그 사람은 차유원 씨가 아니었다', store.characters[2]), false);
+    // 성을 뺀 이름이 다른 카드와 겹치면 쓰지 않는다
+    store.characters.push(card('박유원'));
+    assert.deepEqual([...a.run('personForms')(store, store.characters[0])], ['차유원']);
+    store.characters.pop();
+
+    const chat = a.context.chat;
+    chat.push({ is_user: true, mes: '며칠 뒤, 화방에 다녀오던 시온은 길에서 유원과 마주친다.', name: '윤시온' });
+    let parts = await a.buildPacketSections(a.currentRecallQuery(), null);
+    assert.ok(parts.characters.find(c => c.name === '차유원')?.sceneNow, '"유원" puts 차유원 in the scene');
+
+    // 같은 답변을 다시 받는 중: 앞서 받은 답변에서 유원이 시온을 "윤시온 씨"라고 불렀다
+    chat.push({ is_user: false, name: '차도겸', mes: '', swipe_id: 1, swipes: ['차유원이 걸음을 멈추고 손을 들었다. "어, 윤시온 씨……."', ''] });
+    a.run('chatGenerating = true; lastGenerationType = "swipe";');
+    parts = await a.buildPacketSections(a.currentRecallQuery(), null);
+    a.run('chatGenerating = false;');
+    assert.deepEqual([...parts.slips.map(x => `${x.from}→${x.to}:${x.term}`)], ['차유원→윤시온:윤시온 씨']);
+    const text = a.renderPacket(parts);
+    assert.match(text, /\(Earlier attempts at this reply got these wrong — do not repeat them:\)\n- 차유원 called 윤시온 "윤시온 씨" — the form on record is "시온아"/);
 });
 
 test('a bond filed again at the same stage keeps the forms of address on file; a real move may change them', () => {

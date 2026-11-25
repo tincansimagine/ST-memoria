@@ -514,6 +514,8 @@ function openingSetupText() {
             if (ch.description) bits.push(`Description: ${cleanMultiline(ch.description, 3500)}`);
             if (ch.scenario) bits.push(`Scenario: ${cleanMultiline(ch.scenario, 1500)}`);
             if (ch.personality) bits.push(`Personality: ${cleanMultiline(ch.personality, 600)}`);
+            // 첫 메시지가 시작 장면을 세운다 — 변장·오해 같은 시작 설정이 설명이 아니라 여기에만 있는 카드가 많다
+            if (ch.first_mes) bits.push(`Opening message: ${cleanMultiline(visibleProse(ch.first_mes), 2000)}`);
             if (bits.length) parts.push(`[${ch.name || 'Main character'}]\n${bits.join('\n')}`);
         }
     } catch { /* ignore */ }
@@ -2861,6 +2863,34 @@ function upsertWorldRule(store, rule, turnIndex) {
  * 한쪽은 최신 상태 · 다른 쪽은 며칠 전에서 멈춘 채 둘 다 주입돼 응답이 오락가락한다.
  * ------------------------------------------------------------ */
 
+/* ------------------------------------------------------------
+ * 성을 뺀 이름 — 카드는 "차유원"인데 글은 "유원"이라고 부른다
+ *
+ * 세 글자 한국 이름은 이야기 속에서 거의 늘 성을 빼고 불린다. 카드 이름만 찾으면 "유원이 웃었다"에서 그 사람을 못 알아봐
+ * 장면에 있는 사람·호칭·돌아온 사람을 모두 놓친다. 다른 카드와 겹치지 않을 때만 성을 뺀 이름도 그 사람의 이름으로 친다.
+ * ------------------------------------------------------------ */
+const givenNameOf = (name) => { const t = String(name || '').trim(); return /^[가-힣]{3}$/.test(t) ? t.slice(1) : ''; };
+/** 한 사람을 가리키는 이름들 — 카드 이름, 다른 이름, 그리고 성을 뺀 이름(겹치지 않을 때) */
+function personForms(store, c) {
+    const forms = [c.name, ...(c.aliases || [])].filter(Boolean);
+    const given = givenNameOf(c.name);
+    if (given && !forms.some(f => entityKey(f) === entityKey(given))
+        && !(store.characters || []).some(o => o !== c && !o.disabled && [o.name, ...(o.aliases || []), givenNameOf(o.name)].some(f => f && entityKey(f) === entityKey(given)))) forms.push(given);
+    return forms;
+}
+/** 글(소문자)에 그 이름이 나오는가. 성을 뺀 두 글자 이름은 앞이 낱말의 시작일 때만 ("차유원"의 "유원"이 아니라 "유원이"·"유원 형") */
+function mentionsName(hayLower, form, given = false) {
+    const f = String(form || '').toLowerCase();
+    if (f.length < 2) return false;
+    if (!given) return hayLower.includes(f);
+    return new RegExp(`(?:^|[^가-힣])${f.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`).test(hayLower);
+}
+/** 글(소문자)에 이 사람이 나오는가 */
+function mentionsPerson(store, hayLower, c) {
+    const given = givenNameOf(c.name);
+    return personForms(store, c).some(f => String(f).length >= 2 && mentionsName(hayLower, f, f === given));
+}
+
 /** 비교용 정규화 — 대소문자·공백·구두점 무시 (kkang / Kkang / 깡 은 각각 자기 형태로 유지) */
 function entityKey(s) {
     return String(s || '').toLowerCase().replace(/[\s._\-'"`]+/g, '').trim();
@@ -3759,7 +3789,7 @@ async function commitTurns(mesIds, { silent = true, force = false, retry = 1 } =
     ])];
     const hereKeys = new Set(presentNames.map(entityKey));
     const wasHere = (name) => { const c = canonEntityName(store, name); return hereKeys.has(entityKey(c)) || witnessed(name); };
-    const people = store.characters.filter(c => !c.disabled).map(c => ({ name: c.name, forms: c.aliases || [] }));
+    const people = store.characters.filter(c => !c.disabled).map(c => ({ name: c.name, forms: personForms(store, c).slice(1) }));
     for (const n of speakersNow) if (n && !people.some(p => entityKey(p.name) === entityKey(n))) people.push({ name: n, forms: [] });
     const knownPerson = (n) => { if (!n) return ''; const c = canonEntityName(store, n); return people.some(p => entityKey(p.name) === entityKey(c)) ? c : ''; };
     const soloChat = !selected_group;
@@ -4990,8 +5020,7 @@ async function retrieveMemories(queryText, recentUserTexts, sceneText = '') {
     const presentEntities = new Set();
     for (const c of store.characters || []) {
         if (c.disabled) continue;
-        const names = [c.name, ...(c.aliases || [])];
-        if (names.some(n => n && String(n).length >= 2 && presenceText.includes(String(n).toLowerCase()))) {
+        if (mentionsPerson(store, presenceText, c)) {
             presentEntities.add(String(c.name).toLowerCase());
         }
     }
@@ -5487,12 +5516,11 @@ const isStoryMessage = (m) => !!m && typeof m.mes === 'string' && !isSideMessage
  */
 function lastSeenTurn(store, c) {
     const keys = new Set([c.name, ...(c.aliases || [])].map(entityKey));
-    const names = [c.name, ...(c.aliases || [])].map(n => String(n).toLowerCase()).filter(n => n.length >= 2);
     let at = Math.min(store.turnCounter, Math.max(0, Number(c.updatedTurn ?? c.firstTurn ?? 0) || 0));
     for (const t of store.turns) {
         if (t.turnIndex <= at) continue;
         const digest = String(t.summary || '').toLowerCase();
-        if ((t.present || []).some(n => keys.has(entityKey(n))) || (digest && names.some(n => digest.includes(n)))) at = t.turnIndex;
+        if ((t.present || []).some(n => keys.has(entityKey(n))) || (digest && mentionsPerson(store, digest, c))) at = t.turnIndex;
     }
     for (const m of store.memories) {
         if ((m.turnIndex || 0) > at && m.turnIndex <= store.turnCounter && !m.manual && (m.entities || []).some(e => keys.has(entityKey(e)))) at = m.turnIndex;
@@ -5516,7 +5544,7 @@ function calledByTitle(store, end = chat.length) {
     const narrated = effectivePerspective(store) === NARRATOR_PERSPECTIVE;
     const me = name1 ? canonEntityName(store, name1) : '';
     const lead = name2 ? canonEntityName(store, name2) : '';
-    const people = store.characters.filter(c => !c.disabled).map(c => ({ name: c.name, forms: c.aliases || [] }));
+    const people = store.characters.filter(c => !c.disabled).map(c => ({ name: c.name, forms: personForms(store, c).slice(1) }));
     for (const n of [me, lead]) if (n && !people.some(p => entityKey(p.name) === entityKey(n))) people.push({ name: n, forms: [] });
     const cardOf = (n) => store.characters.find(c => !c.disabled && entityKey(c.name) === entityKey(canonEntityName(store, n)));
     const bondsFrom = (who) => bonds.filter(b => entityKey(b.from) === entityKey(who))
@@ -5689,7 +5717,7 @@ const addressCache = new WeakMap();
 const NARRATION_VOICE = '\u0000narration';
 /** 대사에서 모은 부름말 — 저장하지 않는다 (매번 대화에서 다시 센다: 스와이프·삭제·편집이 저절로 반영된다) */
 function addressRows(store) {
-    const people = store.characters.filter(c => !c.disabled).map(c => ({ name: c.name, forms: c.aliases || [] }));
+    const people = store.characters.filter(c => !c.disabled).map(c => ({ name: c.name, forms: personForms(store, c).slice(1) }));
     const me = name1 ? canonEntityName(store, name1) : '';
     const lead = name2 ? canonEntityName(store, name2) : '';
     for (const n of [me, lead]) if (n && !people.some(p => entityKey(p.name) === entityKey(n))) people.push({ name: n, forms: [] });
@@ -5879,9 +5907,7 @@ async function buildPacketSections(query, supervisorPlan) {
     // 이름 없이 호칭으로만 불린 사람 ("형, 오랜만이에요") — 말한 사람의 관계선에 적힌 부르는 말로 보아 한 사람만 가리킬 때 그 사람이 장면에 있는 것으로 친다
     const sceneEnd = chatGenerating && ['regenerate', 'swipe'].includes(lastGenerationType) ? chat.length - 1 : chat.length;
     const called = settings.addressTerms !== false ? calledByTitle(store, sceneEnd) : new Map();
-    const inScene = (c) => sceneHay.includes(String(c.name).toLowerCase())
-        || (c.aliases || []).some(a => a.length >= 2 && sceneHay.includes(String(a).toLowerCase()))
-        || called.has(entityKey(c.name));
+    const inScene = (c) => mentionsPerson(store, sceneHay, c) || called.has(entityKey(c.name));
     // 상태 보드: 지금 장면과 닿는 것부터, 그다음 최근에 바뀐 것. 예전에는 저장 순서의 끝 10개를 실어
     // 장면과 무관한 인물의 묵은 상태가 자리를 차지하고 정작 눈앞 인물의 상태가 밀려났다.
     const stateInScene = (s) => {
@@ -6026,8 +6052,9 @@ async function buildPacketSections(query, supervisorPlan) {
     if (settings.guardSecrets !== false) for (const m of publicRecallDeduped) { const away = awayFrom(m.witnesses, m.turnIndex || 0); if (away.length) absentNotes.set(m.id, away); }
     // 장면 인물의 지금 모습 — 상태 보드의 칸들을 사람마다 한 줄로 묶어 앞에 싣는다
     const nowIds = new Set(settings.presentNow !== false ? states.filter(s => String(s.entity || '').toLowerCase() !== 'scene' && s.claim !== 'belief' && stateInScene(s)).map(s => s.id) : []);
-    // 서로 부르는 말 — 대사에서 모은다. 장면에 함께 있는 둘 사이의 것만
+    // 서로 부르는 말 — 관계선에 적힌 것이 먼저, 없는 짝만 대사에서 모은다
     let address = [];
+    let slips = [];
     if (settings.addressTerms !== false) {
         const present = new Set([...characters.filter(c => c.sceneNow).map(c => String(c.name).toLowerCase()), ...(meName ? [meName.toLowerCase()] : [])]);
         const callsOf = (from, to) => { const b = (store.bonds || []).find(x => !x.disabled && entityKey(x.from) === entityKey(from) && entityKey(x.to) === entityKey(to)); return b ? bondNow(b)?.calls || '' : ''; };
@@ -6036,12 +6063,42 @@ async function buildPacketSections(query, supervisorPlan) {
         const hay = `${sceneHay}\n${String(query || '').toLowerCase()}`;
         const aroundCard = (name) => {
             const c = store.characters.find(x => entityKey(x.name) === entityKey(canonEntityName(store, name)));
-            const forms = [name, ...(c ? [c.name, ...(c.aliases || [])] : [])].map(n => String(n).toLowerCase()).filter(n => n.length >= 2);
-            return present.has(String(c?.name || name).toLowerCase()) || forms.some(n => hay.includes(n)) || (c && called.has(entityKey(c.name)));
+            return present.has(String(c?.name || name).toLowerCase()) || (c ? mentionsPerson(store, hay, c) : hay.includes(String(name).toLowerCase())) || (c && called.has(entityKey(c.name)));
         };
-        const filed = (store.bonds || []).filter(b => !b.disabled && bondNow(b)?.calls && aroundCard(b.from) && aroundCard(b.to))
-            .map(b => ({ from: b.from, to: b.to, terms: String(bondNow(b).calls).split(/\s*[,，、/]\s*/).map(t => t.trim()).filter(Boolean).slice(0, 4), filed: true }))
-            .sort((a, z) => a.from.localeCompare(z.from) || a.to.localeCompare(z.to)).slice(0, 8);
+        // 장면에 안 보이던 사람도 답변 안에서 불쑥 들어올 수 있다 — 적힌 호칭은 몇 줄 안 되니 다 싣되, 지금 장면에 닿는 짝을 앞에 둔다
+        const termsOf = (b) => String(bondNow(b).calls).split(/\s*[,，、/]\s*/).map(t => t.trim()).filter(Boolean).slice(0, 4);
+        const filed = (store.bonds || []).filter(b => !b.disabled && bondNow(b)?.calls)
+            .map(b => ({ from: b.from, to: b.to, terms: termsOf(b), filed: true, near: aroundCard(b.from) && aroundCard(b.to) ? 0 : 1 }))
+            .sort((a, z) => a.near - z.near || a.from.localeCompare(z.from) || a.to.localeCompare(z.to)).slice(0, 8);
+        // 호칭이 샌 자리 — 직전 답변(다시 쓰는 중이면 앞서 받은 다른 답변들)에서 적힌 호칭 대신 이름+씨·님 같은 먼 호칭을 쓴 곳.
+        // 막연히 "지켜라"보다, 바로 앞에서 틀린 그 말을 짚어 주는 편이 모델을 훨씬 잘 붙든다
+        const slipText = [];
+        const lastAiAt = (() => { for (let i = chat.length - 1; i >= 0 && i >= chat.length - 6; i--) { const m = chat[i]; if (m && !m.is_user && !m.is_system && !isSideMessage(m)) return i; } return -1; })();
+        if (lastAiAt >= 0) {
+            const m = chat[lastAiAt];
+            const redoing = chatGenerating && ['regenerate', 'swipe'].includes(lastGenerationType) && lastAiAt === chat.length - 1;
+            if (redoing) for (const [k, t] of (Array.isArray(m.swipes) ? m.swipes : []).entries()) { if (k !== m.swipe_id && t) slipText.push(t); }
+            else slipText.push(m.mes);
+        }
+        const isHonorific = (t) => /(?:씨|님)$/.test(String(t).replace(/\s+/g, ''));
+        const slipSeen = new Set();
+        slips = [];
+        const narrated = effectivePerspective(store) === NARRATOR_PERSPECTIVE;
+        const people = store.characters.filter(c => !c.disabled).map(c => ({ name: c.name, forms: personForms(store, c).slice(1) }));
+        for (const raw of slipText.slice(-3)) {
+            const text = visibleProse(raw || '');
+            const author = narrated ? NARRATION_VOICE : canonEntityName(store, chat[lastAiAt]?.name || name2 || '');
+            const partner = !selected_group && !narrated && meName ? meName : '';
+            for (const h of addressTermsIn(text, { speaker: author, people, partner })) {
+                if (h.from === NARRATION_VOICE) continue;
+                const on = callsOf(h.from, h.to).split(/\s*[,，、/]\s*/).map(t => t.trim()).filter(Boolean);
+                if (!on.length || !isHonorific(h.term) || on.some(isHonorific) || on.some(t => entityKey(t) === entityKey(h.term))) continue;
+                const k = `${entityKey(h.from)}|${entityKey(h.to)}|${entityKey(h.term)}`;
+                if (slipSeen.has(k)) continue;
+                slipSeen.add(k);
+                slips.push({ from: h.from, to: h.to, term: h.term, on: on.slice(0, 3), redo: slipText.length > 1 || (chatGenerating && ['regenerate', 'swipe'].includes(lastGenerationType)) });
+            }
+        }
         // 2) 적힌 것이 없는 짝만 대사에서 모은 것으로 채운다 — 적힌 짝까지 대사에서 모으면, 모델이 한 번 잘못 쓴 호칭("유원 씨")이 다음 장부에 "지켜라"로 실려 굳는다
         const tallied = present.size >= 2 ? pickAddressLines(addressRows(store), present, { known: callsOf })
             .filter(x => !callsOf(x.from, x.to)) : [];
@@ -6108,14 +6165,13 @@ async function buildPacketSections(query, supervisorPlan) {
     // 쓰거나 호칭을 지어내거나 그때 끝난 일을 지금 일처럼 꺼낸다 (모델 호출 없음 · 매 턴 바뀌는 구간에만 싣는다)
     const returning = [];
     if (store.turnCounter) {
-        const names = (c) => [c.name, ...(c.aliases || [])].map(n => String(n).toLowerCase()).filter(n => n.length >= 2);
-        const named = (c) => names(c).some(n => recentSceneText.includes(n)) || called.has(entityKey(c.name));
+        const named = (c) => mentionsPerson(store, recentSceneText, c) || called.has(entityKey(c.name));
         // 방금 다시 나온 사람만 짚는다: 최근 몇 메시지보다 앞선 대화(숨긴 것 포함)에 이미 나오던 사람은 기록이 늦었을 뿐 돌아온 사람이 아니다.
         // 늘 장면에 있는 주인공이 카드가 한동안 그대로라는 이유로 "오랜만에 나온 사람"이 되지 않게 한다
         const tail = [];
         for (let i = sceneEnd - 1; i >= 0 && tail.length < RETURN_FRESH + RETURN_QUIET; i--) if (isStoryMessage(chat[i])) tail.push(chat[i]);
         const before = tail.slice(RETURN_FRESH).map(proseOf).join('\n').toLowerCase();
-        const lately = (c) => names(c).some(n => before.includes(n)) || (called.has(entityKey(c.name)) && saysTitle(before, called.get(entityKey(c.name))));
+        const lately = (c) => mentionsPerson(store, before, c) || (called.has(entityKey(c.name)) && saysTitle(before, called.get(entityKey(c.name))));
         const leads = new Set([name2 ? entityKey(canonEntityName(store, name2)) : ''].filter(Boolean));
         const around = new Set([...sceneNames, entityKey(meName), ...leads].filter(Boolean));
         const shownIds = new Set(publicRecallDeduped.map(m => m.id));
@@ -6155,7 +6211,7 @@ async function buildPacketSections(query, supervisorPlan) {
     }
     const trackerLine = store.trackers?.length ? trackerLine0(store, [...inSceneCast.map(c => c.name), meName].filter(Boolean)) : '';
 
-    return { recordLag, returning, bonds, plans, outSecrets, storyNow, milestoneRoots: new Set(milestoneRoots.map(e => e.id)), nowIds, address, deadlines, cards, minds, transcript, trackerLine, voice: String(settings.recallVoice || 'natural'), voices, banned, styleGuard: settings.styleGuard !== false, recallQuotes: settings.recallQuotes !== false, banTell: settings.banTell === true,
+    return { recordLag, returning, bonds, plans, outSecrets, storyNow, slips, milestoneRoots: new Set(milestoneRoots.map(e => e.id)), nowIds, address, deadlines, cards, minds, transcript, trackerLine, voice: String(settings.recallVoice || 'natural'), voices, banned, styleGuard: settings.styleGuard !== false, recallQuotes: settings.recallQuotes !== false, banTell: settings.banTell === true,
         publicRecall: publicRecallDeduped, protectedRecall, hiddenProtected, locks, rules, scene, states, characters, milestones, items, summaries, supervisorPlan, narratorMode, turnNow: store.turnCounter, storyAges, storyTotalDays, nowNote, sources: await pickDossierExcerpts(query, recallContext), recallCandidates, trace };
 }
 
@@ -6480,8 +6536,14 @@ function renderPacket(parts, { withExcerpts = true, excerptLimit = Infinity, rec
     if (parts.trackerLine && stateLimit > 0) lines.push(parts.trackerLine);
     if (parts.address?.length && stateLimit > 0) {
         // 서로 부르는 말 — 대사에서 모은 것. 호칭이 흔들리면 관계가 흔들려 보인다
-        lines.push('## How They Address Each Other (use exactly these whenever these people speak to each other — also when one of them enters partway through a scene. Do not slip into a more distant form the record does not show — a surname, a bare name with 씨 or 님, a formal register — unless the scene itself changes it)');
+        lines.push('## How They Address Each Other (use exactly these whenever these people speak to each other — also when one of them enters partway through a scene, however long they have been apart. These forms set the register too: a given name with 아/야/이 or a kinship word such as 형 means they talk casually. Never put 씨 or 님 after a name here, never switch to a surname or full name, never turn formal, unless the scene itself makes that change)');
         for (const a of parts.address) lines.push(`- ${a.from} → ${a.to}: ${a.terms.map(x => `"${x}"`).join(', ')}${a.filed ? '' : ' (from their dialogue)'}`);
+        if (parts.slips?.length) {
+            lines.push(parts.slips.some(x => x.redo)
+                ? '(Earlier attempts at this reply got these wrong — do not repeat them:)'
+                : '(The last reply got these wrong — from here on use the forms above:)');
+            for (const x of parts.slips.slice(0, 4)) lines.push(`- ${x.from} called ${x.to} "${x.term}" — the form on record is ${x.on.map(t => `"${t}"`).join(' / ')}`);
+        }
     }
     if (parts.voices?.length && stateLimit > 0) {
         // 요약은 서술자 말투로 쓰이고 옛 원문은 숨겨진다 — 장면에 있는 인물이 실제로 했던 말을 몇 줄 보여
@@ -7129,7 +7191,7 @@ function settleSecrets(store) {
 function repairNarratedSpeakers(store) {
     if (store.speakerRev >= 1 || effectivePerspective(store) !== NARRATOR_PERSPECTIVE) return 0;
     if (store.turns.length && !chat.length) return 0;
-    const people = store.characters.filter(c => !c.disabled).map(c => ({ name: c.name, forms: c.aliases || [] }));
+    const people = store.characters.filter(c => !c.disabled).map(c => ({ name: c.name, forms: personForms(store, c).slice(1) }));
     const mesOf = new Map(store.turns.map(t => [t.turnIndex, t.mesId]));
     let fixed = 0;
     for (const m of store.memories) {
