@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { runtime, memory } from './runtime.mjs';
-import { groundedIn, soundsHedged, contentWords, mentionsThread, noteThreadSightings, sleepStaleThreads, sleepStaleSecrets, pledgeHeldBack, pickPledges, rareQueryWords } from '../craft-engine.mjs';
+import { groundedIn, soundsHedged, contentWords, mentionsThread, noteThreadSightings, sleepStaleThreads, rareQueryWords } from '../craft-engine.mjs';
 
 async function app() {
     const a = await runtime();
@@ -104,41 +104,13 @@ test('a sleeping thread wakes when the story brings it up again, and talk keeps 
     assert.equal(store.locks[0].seenTurn ?? null, null);
 });
 
-test('sightings are counted once per turn; secrets are followed too, closed pledges and standing limits are not', () => {
+test('sightings are counted once per turn and never touch closed or standing pledges', () => {
     const locks = [lock('a', '북문 너머의 불빛 정체를 확인하기'), lock('b', '북문 너머의 불빛 정체를 확인하기', { status: 'resolved' }),
-        { ...lock('c', '북문 너머의 불빛 정체를 아무도 모르게 하기'), kind: 'keep_secret' },
-        { ...lock('d', '북문 너머의 불빛 정체를 확인하는 일은 허락 없이 하지 않기'), kind: 'consent' },
-        { ...lock('e', '북문 너머의 불빛 정체를 아무도 모르게 하기'), kind: 'knowledge_gap', status: 'dormant', sleptTurn: 5 }];
-    assert.deepEqual(noteThreadSightings(locks, '북문 너머 불빛의 정체를 확인했다', 9), { seen: 3, woke: 1 });
+        { ...lock('c', '북문 너머의 불빛 정체를 아무도 모르게 하기'), kind: 'keep_secret' }];
+    assert.deepEqual(noteThreadSightings(locks, '북문 너머 불빛의 정체를 확인했다', 9), { seen: 1, woke: 0 });
     assert.deepEqual(noteThreadSightings(locks, '북문 너머 불빛의 정체를 확인했다', 9), { seen: 0, woke: 0 });
     assert.equal(locks[1].seenTurn, undefined);
-    assert.equal(locks[2].seenTurn, 9, 'a secret the story keeps touching is seen — it will not be put to sleep as forgotten');
-    assert.equal(locks[3].seenTurn, undefined);
-    assert.equal(locks[4].status, 'active', 'a sleeping secret wakes when it comes up again');
-});
-
-test('a secret nobody has touched for a very long time is put to sleep, unless the records in between still speak of it', () => {
-    const secret = (id, summary, extra = {}) => ({ ...lock(id, summary), kind: 'keep_secret', turnIndex: 10, ...extra });
-    const locks = [secret('quiet', '등대 지하의 금고 비밀번호를 아무에게도 알리지 않기'),
-        secret('alive', '아리아가 편지의 발신인이라는 사실을 보라에게 숨기기'),
-        secret('mine', '등대 지하의 금고 비밀번호를 아무에게도 알리지 않기', { manual: true }),
-        secret('top', '등대 지하의 금고 비밀번호를 아무에게도 알리지 않기', { priority: 1 }),
-        secret('young', '등대 지하의 금고 비밀번호를 아무에게도 알리지 않기', { turnIndex: 190 }),
-        { ...lock('limit', '등대 지하의 금고 비밀번호를 아무에게도 알리지 않기'), kind: 'world_limit', turnIndex: 10 }];
-    const records = [{ turn: 150, text: '아리아는 편지의 발신인이 자신이라는 사실을 보라에게 끝내 숨겼다.' }, { turn: 5, text: '금고 비밀번호 이야기가 나왔다.' }];
-    assert.equal(sleepStaleSecrets(locks, 200, 150, records), 1);
-    assert.deepEqual(locks.map(l => l.status), ['dormant', 'active', 'active', 'active', 'active', 'active']);
-    assert.equal(locks[1].seenTurn, 150, 'the mention in between is noted');
-    assert.equal(sleepStaleSecrets(locks, 320, 150, records), 1, 'and once that mention is old too, it sleeps');
-    assert.equal(sleepStaleSecrets(locks, 320, 0, records), 0);
-});
-
-test('a pledge the librarian thinks is over is left out before the user confirms — hand-written and top-priority ones stay', () => {
-    const base = { status: 'active', kind: 'keep_secret', turnIndex: 5, priority: 2 };
-    const locks = [{ ...base, id: 'held', summary: '끝난 비밀', suggestResolved: true }, { ...base, id: 'mine', summary: '직접 적은 비밀', suggestResolved: true, manual: true },
-        { ...base, id: 'top', summary: '최우선 비밀', suggestResolved: true, priority: 1 }, { ...base, id: 'live', summary: '살아 있는 비밀' }];
-    assert.deepEqual(locks.map(pledgeHeldBack), [true, false, false, false]);
-    assert.deepEqual(pickPledges(locks, { turnNow: 10 }).map(l => l.id).sort(), ['live', 'mine', 'top']);
+    assert.equal(locks[2].seenTurn, undefined);
 });
 
 test('a memory is retired only when the librarian quotes the scene', async () => {

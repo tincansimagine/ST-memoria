@@ -1,7 +1,7 @@
 <div id="memoria_settings" class="memoria">
     <div class="inline-drawer">
         <div class="inline-drawer-toggle inline-drawer-header">
-            <b><i class="fa-solid fa-book-bookmark"></i> Memoria — 장기기억 서고 <span class="memoria__version">v2.10.3</span></b>
+            <b><i class="fa-solid fa-book-bookmark"></i> Memoria — 장기기억 서고 <span class="memoria__version">v2.8.3</span></b>
             <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
         </div>
         <div class="inline-drawer-content">
@@ -219,7 +219,7 @@
                             <p>비밀·미해결 떡밥·건너뛰면 안 되는 전개 등, 이야기가 지켜야 할 약속. 토큰이 부족해도 가장 마지막까지 유지됩니다.</p>
                         </div>
                         <div class="memoria__compact-actions">
-                            <div class="menu_button" id="memoria_pledge_audit" title="오래된 서약과 캐논, 캐릭터 설명의 시작 설정을 지금까지의 기록과 견주어 이야기가 이미 넘어선 것을 가립니다 (호출 1회). 서약에는 ‘해소된 듯’이 붙고, 캐논은 ‘지나감’으로 물리고, 뒤집힌 시작 설정은 캐논 칸에 ‘시작 설정’으로 적힙니다. 지우지는 않습니다.">
+                            <div class="menu_button" id="memoria_pledge_audit" title="오래된 서약을 지금까지의 요약과 견주어 이미 끝난 것을 장부에서 뺍니다 (호출 1회). 지우지는 않습니다.">
                                 <i class="fa-solid fa-list-check"></i>
                                 <span>훑기</span>
                             </div>
@@ -818,10 +818,6 @@
                         <div class="memoria__field">
                             <label for="memoria_stable_refresh" title="고정 장부를 이 턴 수마다 새로 뜹니다. 0 = 달라진 줄이 넘치거나 항목이 지워졌을 때만">고정 장부 새로 뜨는 주기(턴)</label>
                             <input type="number" id="memoria_stable_refresh" min="0" max="200" step="1">
-                        </div>
-                        <div class="memoria__field">
-                            <label for="memoria_pledge_sweep" title="채팅마다 한 번, 그 뒤로 이 턴 수마다 오래된 서약·캐논을 지금까지의 기록과 견주어 이미 끝난 것을 가립니다 (호출 1회). 서약에는 ‘해소된 듯’이 붙고 캐논은 ‘지나감’으로 물립니다 — 지우지 않습니다. 0 = 끔">서약·캐논 훑기 주기(턴)</label>
-                            <input type="number" id="memoria_pledge_sweep" min="0" max="1000" step="10">
                         </div>
                     </div>
                     <label class="memoria__toggle-row" for="memoria_yield_to_chat">

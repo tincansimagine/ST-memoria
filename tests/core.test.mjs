@@ -411,10 +411,6 @@ test('batched recording: several exchanges cost one librarian call, yet every tu
     lines.forEach((l, i) => chat.push({ is_user: true, mes: `${i + 1}번째 행동`, name: '여행자' }, { is_user: false, mes: `${l} 바람이 불었고 파도 소리가 들렸다.`, name: '아리아' }));
     const settings = a.getSettings();
     assert.equal(settings.recordBatch, 4);
-    // 기본값: 방금 받은 답변은 다시 받기로 바뀔 수 있으니, 내가 다음 말을 보낸 뒤에야 기록 대상이 된다
-    assert.equal(settings.recordDelay, 1);
-    assert.deepEqual([...a.run('pendingSettledMesIds')()], [1, 3, 5], 'the reply just received is not filed until the user moves on');
-    settings.recordDelay = 0;
 
     // 묶음이 차기 전에는 사서를 부르지 않는다
     assert.deepEqual([...a.run('pendingSettledMesIds')()], [1, 3, 5, 7]);

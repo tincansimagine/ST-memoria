@@ -282,29 +282,19 @@ export function parseBundleFile(text, defaults) {
 /**
  * 얼려 둔 안정 구간과 지금의 안정 구간을 항목 단위로 비교한다.
  * entries: [{ id, sec, line }]
- * stillStands(entry): 이번에는 뽑히지 않았지만 서고에 그대로 있는 항목인가 (true, 또는 지금의 줄) — 인물이 열 명을 넘는 채팅에서 누가 장면에 들어오면
- * 다른 인물 카드가 상한에 밀려 이번 목록에서 빠진다. 그 카드는 지워진 게 아니라 자리가 없었을 뿐이므로, 얼려 둔 장부의 그 줄은 그대로 맞다.
- * 반환: { changed: 바뀌었거나 새로 생긴 항목들, removed: 정말 사라진 항목 수, held: 빠졌지만 그대로 둔 항목 수 }
+ * 반환: { changed: 바뀌었거나 새로 생긴 항목들, removed: 사라진 항목 수 }
  */
-export function diffStableEntries(frozen, current, stillStands = null) {
-    const before = new Map((frozen || []).map(e => [e.id, e]));
+export function diffStableEntries(frozen, current) {
+    const before = new Map((frozen || []).map(e => [e.id, e.line]));
     const now = new Set();
     const changed = [];
     for (const e of current || []) {
         now.add(e.id);
-        if (before.get(e.id)?.line !== e.line) changed.push(e);
+        if (before.get(e.id) !== e.line) changed.push(e);
     }
     let removed = 0;
-    let held = 0;
-    for (const [id, e] of before) {
-        if (now.has(id)) continue;
-        // true: 얼려 둔 줄 그대로 맞다 · 글: 그 줄이 지금은 이렇게 달라졌다 (달라진 줄로 알린다) · 그 밖: 정말 사라졌다
-        const v = stillStands ? stillStands(e) : false;
-        if (typeof v === 'string') { if (v !== e.line) changed.push({ ...e, line: v }); held++; }
-        else if (v) held++;
-        else removed++;
-    }
-    return { changed, removed, held };
+    for (const id of before.keys()) if (!now.has(id)) removed++;
+    return { changed, removed };
 }
 
 /**
@@ -371,16 +361,6 @@ export function findRivalExtensions(names, disabled = []) {
  * ------------------------------------------------------------ */
 
 export const THREAD_KINDS = Object.freeze(['keep_unresolved', 'loose_end', 'foreshadow', 'feeling']);
-/** 숨겨야 하는 것(비밀·정보 격차) — 떡밥처럼 저절로 닫히지 않는다. 끝난 뒤에도 "지켜야 할 것"으로 남으면 모델이 옛 비밀을 지금 일처럼 꺼낸다 */
-export const SECRET_KINDS = Object.freeze(['keep_secret', 'knowledge_gap']);
-
-/**
- * 사서가 "풀린 듯"이라고 본 서약은 사용자가 확정하기 전에도 싣지 않는다 — 끝난 비밀을 확정을 기다리며 매 턴 "지킬 것"으로 싣는 쪽이 더 해롭다.
- * 지우지 않는다 (세계 탭에서 ✔로 확정하거나 「아직 유효」로 되돌린다). 직접 적은 서약과 최우선(P1)은 그대로 싣는다.
- */
-export function pledgeHeldBack(l) {
-    return !!l && l.status === 'active' && l.suggestResolved === true && !l.manual && (l.priority ?? 2) > 1;
-}
 
 /**
  * 요약 응답 끝의 "CLOSED: o2, o5" 줄을 떼어 낸다.
@@ -399,32 +379,6 @@ export function splitClosedLine(raw) {
         return '';
     }).replace(/\n{3,}/g, '\n\n').trim();
     return { text, closed, stale };
-}
-
-/**
- * 요약 응답에서 "NOW:" 덩이(지금 이야기가 서 있는 자리)를 떼어 낸다. 기록 앞이든 뒤든 찾는다.
- * 덩이는 "NOW:" 줄과 그 뒤의 "- " 줄들이다 — 빈 줄은 건너뛰고, 다른 라벨이나 글줄이 나오면 끝난다.
- * 반환: { text: 덩이를 뗀 나머지, now: 줄들 (8줄까지) }
- */
-export function splitNowBlock(raw) {
-    const lines = String(raw ?? '').split('\n');
-    const head = /^\s*(?:[*_#]+\s*)?NOW(?:[*_]+)?\s*[:：]\s*(?:[*_]+\s*)?/i;
-    const i = lines.findIndex(l => head.test(l));
-    if (i < 0) return { text: String(raw ?? ''), now: [] };
-    const now = [];
-    const first = lines[i].replace(head, '').trim();
-    if (first) now.push(first.replace(/^[-•*]\s*/, ''));
-    let j = i + 1;
-    for (; j < lines.length; j++) {
-        const t = lines[j].trim();
-        if (!t) continue;
-        if (/^(?:WHEN|PLOT|SHIFTS|OPEN|CLOSED|STALE)\s*[:：]/i.test(t)) break;
-        if (/^[-•*]\s+/.test(t)) { now.push(t.replace(/^[-•*]\s+/, '')); continue; }
-        if (!now.length) { now.push(t); continue; }
-        break;
-    }
-    const clean = now.map(x => x.replace(/\s+/g, ' ').trim()).filter(x => x.length >= 2).slice(0, 8);
-    return { text: [...lines.slice(0, i), ...lines.slice(j)].join('\n').replace(/\n{3,}/g, '\n\n').trim(), now: clean };
 }
 
 /* ------------------------------------------------------------
@@ -485,41 +439,13 @@ export function sleepStaleThreads(locks, turnNow, after = 60) {
 }
 
 /**
- * 아주 오래 아무도 건드리지 않은 비밀·정보 격차를 잠재운다 (지우지 않는다 — 다시 언급되면 깨어나고, 세계 탭에서 깨울 수 있다).
- * 비밀은 떡밥과 달리 저절로 닫히지 않아, 그 비밀이 걸린 대목이 오래전에 끝났어도 "지켜야 할 것"으로 매 턴 실렸다.
- * 조용히 지켜지는 비밀도 있으므로 떡밥보다 훨씬 오래 기다리고, 잠재우기 전에 그사이의 기록(seenIn: [{ turn, text }] — 턴 요약·기억)을 훑는다:
- * 이야기에서 계속 오간 비밀이면 "본 턴"만 적고 그대로 둔다. 직접 적은 것과 최우선(P1)은 건드리지 않는다. kindOf: 서약 종류를 정식 이름으로. 반환: 잠재운 수
- */
-export function sleepStaleSecrets(locks, turnNow, after, seenIn = [], kindOf = (k) => k) {
-    if (!(after > 0)) return 0;
-    let slept = 0;
-    for (const l of locks || []) {
-        if (l.status !== 'active' || l.manual || !SECRET_KINDS.includes(kindOf(l.kind)) || (l.priority ?? 2) <= 1) continue;
-        const since = threadTouched(l);
-        if (turnNow - since < after) continue;
-        const text = `${l.summary} ${l.latest?.text || ''}`;
-        let seen = 0;
-        for (const r of seenIn) if (r.turn > since && r.turn <= turnNow && r.turn > seen && mentionsThread(text, r.text)) seen = r.turn;
-        if (seen) {
-            l.seenPrev = l.seenTurn ?? null;
-            l.seenTurn = seen;
-            if (turnNow - seen < after) continue;
-        }
-        l.status = 'dormant';
-        l.sleptTurn = turnNow;
-        slept++;
-    }
-    return slept;
-}
-
-/**
  * 이번 턴에 실을 서약 고르기.
  * 비밀·동의 경계·세계 제약처럼 늘 지켜야 하는 것은 그대로 싣고, 떡밥은 지금 장면과 닿아 있거나
  * 최근 것이거나 최우선일 때만 싣는다 — 무관한 옛 떡밥이 매 턴 자리를 차지하면 모델이 억지로 꺼낸다.
  * overlap(a, b): 두 글의 겹침(0~1)
  */
 export function pickPledges(locks, { turnNow = 0, sceneText = '', overlap = () => 0, cap = 8, threadCap = 4, fresh = 24 } = {}) {
-    const active = (locks || []).filter(l => l.status === 'active' && !pledgeHeldBack(l)).sort((a, b) => (a.priority ?? 2) - (b.priority ?? 2));
+    const active = (locks || []).filter(l => l.status === 'active').sort((a, b) => (a.priority ?? 2) - (b.priority ?? 2));
     const standing = active.filter(l => !THREAD_KINDS.includes(l.kind));
     const threads = active.filter(l => THREAD_KINDS.includes(l.kind)).map((l) => {
         const age = turnNow - threadTouched(l);
@@ -650,8 +576,7 @@ export function noteThreadSightings(locks, text, turn) {
     let woke = 0;
     if (!String(text ?? '').trim()) return { seen, woke };
     for (const l of locks || []) {
-        // 잠든 비밀·정보 격차도 다시 언급되면 깨운다
-        if (!(THREAD_KINDS.includes(l.kind) || SECRET_KINDS.includes(l.kind)) || !['active', 'dormant'].includes(l.status)) continue;
+        if (!THREAD_KINDS.includes(l.kind) || !['active', 'dormant'].includes(l.status)) continue;
         if (!mentionsThread(`${l.summary} ${l.latest?.text || ''}`, text)) continue;
         if (l.seenTurn !== turn) { l.seenPrev = l.seenTurn ?? null; l.seenTurn = turn; seen++; }
         if (l.status === 'dormant') { l.status = 'active'; l.wokeTurn = turn; woke++; }
@@ -662,92 +587,6 @@ export function noteThreadSightings(locks, text, turn) {
 /** 떡밥이 마지막으로 움직인 턴 — 다시 적힌 때, 언급된 때, "지금"이 바뀐 때 가운데 가장 늦은 것 */
 export function threadTouched(l) {
     return Math.max(l?.turnIndex || 0, l?.seenTurn || 0, l?.latest?.turn || 0);
-}
-
-/* ------------------------------------------------------------
- * 인물 특성 — 같은 말의 다른 꼴을 한 줄로
- *
- * 사서는 카드에 이미 있는 특성을 보지 못한 채 그때그때 적는다. 그래서 "체념"과 "체념적", "다혈질"과 "불같은 다혈질",
- * "독점욕"과 "독점욕이 강한"이 한 카드에 나란히 쌓이고, 매 턴 장부에 실려 토큰만 먹는다.
- * ------------------------------------------------------------ */
-
-/** 낱말 끝의 꼴 — "~함 · ~한 · ~적 · ~스러운 · ~성 · ~증 · ~감"을 떼면 같은 말이다 (뗀 뒤 두 글자 이상 남을 때만) */
-const TRAIT_SUFFIX = /(?:스러움|스러운|스럽다|스러워|스럽게|적인|적임|하다|하게|함|한|적|성|증|감)$/;
-/** 꾸미는 말 — 관형형으로 끝나거나("불같은 · 강한 · 많은") 정도를 더하는 말 */
-const TRAIT_MODIFIER = /[은는운한인의던운]$/;
-const TRAIT_INTENSIFIER = new Set(['매우', '아주', '몹시', '꽤', '극도로', '극도의', '지나치게', '지독한', 'very', 'extremely', 'deeply', 'highly', 'quite', 'overly', 'fiercely']);
-/** 정도를 말하는 뒷말 — "자존심 강함" · "질투심이 많음" · "겁이 많은"은 앞말과 같다 */
-const TRAIT_DEGREE = /^(?:강함|강한|강하다|많음|많은|많다|심함|심한|심하다|높음|높은|큼|큰|넘침|넘치는|센|셈|대단함|대단한|지나침|지나친)$/;
-
-function traitStem(word) {
-    const w = String(word).toLowerCase().replace(/[^\p{L}\p{N}]/gu, '');
-    if (!/[가-힣]/.test(w)) return w.replace(/(?:ness|ful|ive|ous)$/, (m) => (w.length - m.length >= 4 ? '' : m));
-    const cut = w.replace(TRAIT_SUFFIX, '');
-    return cut.length >= 2 ? cut : w;
-}
-
-/**
- * 특성 하나를 견줄 꼴로. key: 낱말 줄기 전부, head: 꾸밈을 뗀 머리말 ("불같은 다혈질" → 다혈질, "독점욕이 강한" → 독점욕).
- * 세 낱말 이상이거나 꾸밈 꼴이 아니면 head 는 없다 — "다정함 뒤의 냉정함" 같은 묶음은 한 낱말과 같다고 보지 않는다.
- */
-export function traitShape(trait) {
-    const words = String(trait ?? '').toLowerCase().split(/\s+/).map(w => w.replace(/[^\p{L}\p{N}-]/gu, '')).filter(Boolean);
-    const key = words.map(traitStem).join(' ');
-    let head = '';
-    if (words.length === 1) head = traitStem(words[0]);
-    else if (words.length === 2) {
-        const [a, b] = words;
-        if (TRAIT_INTENSIFIER.has(a) || (/[가-힣]/.test(a) && TRAIT_MODIFIER.test(a) && a.length >= 2)) head = traitStem(b);              // 불같은 다혈질 · 매우 예민함
-        else if (/[가-힣]{2,}[이가]$/.test(a) && (TRAIT_MODIFIER.test(b) || /[함음]$/.test(b))) head = traitStem(a.slice(0, -1));       // 독점욕이 강한 · 질투심이 많음
-        else if (TRAIT_DEGREE.test(b)) head = traitStem(a);                                                                       // 자존심 강함 · 고집 센
-    }
-    return { key, head };
-}
-
-/**
- * 두 특성의 사이. 'same': 끝꼴만 다른 같은 말 ("체념"·"체념적") · 'wider': a가 b에 꾸밈·정도를 더한 말 ("불같은 다혈질" ⊃ "다혈질")
- * · 'narrower': 그 반대 · '': 다른 말. 꾸밈이 서로 다른 둘("불같은 다혈질"·"급한 다혈질")은 뜻이 달라 다른 말로 본다.
- */
-export function traitRelation(a, b) {
-    const x = traitShape(a), y = traitShape(b);
-    if (!x.key || !y.key) return '';
-    if (x.key === y.key) return 'same';
-    const bare = (s) => s.head && s.head === s.key;
-    if (x.head && !bare(x) && bare(y) && x.head === y.key && y.key.length >= 2) return 'wider';
-    if (y.head && !bare(y) && bare(x) && y.head === x.key && x.key.length >= 2) return 'narrower';
-    return '';
-}
-
-/** 두 특성이 같은 말인가 (꾸밈만 더한 것 포함) */
-export function sameTrait(a, b) {
-    return traitRelation(a, b) !== '';
-}
-
-/**
- * 특성 목록을 합친다. 같은 말이면 한 번만 — 꾸밈·정도를 더한 쪽이 뜻이 더 있으니 그쪽을 남기고("다혈질" → "불같은 다혈질"),
- * 끝꼴만 다르면 먼저 있던 글 그대로 둔다. 자리는 먼저 있던 쪽 그대로(장부의 줄이 흔들리지 않게).
- * 상한을 넘으면 이번에 다시 적히지 않은 옛 것부터 뺀다 — 처음 받은 열 개가 영영 자리를 차지해 새 특성이 못 들어오던 것을 막는다.
- * 반환: 새 배열 (입력은 건드리지 않는다)
- */
-export function mergeTraits(existing, incoming = [], max = 10) {
-    const out = [];
-    const put = (t, fresh) => {
-        const text = String(t ?? '').trim();
-        if (!text) return;
-        let i = -1;
-        let rel = '';
-        for (let k = 0; k < out.length && i < 0; k++) { rel = traitRelation(text, out[k].text); if (rel) i = k; }
-        if (i < 0) { out.push({ text, fresh }); return; }
-        if (rel === 'wider') out[i].text = text;
-        if (fresh) out[i].fresh = true;
-    };
-    for (const t of existing || []) put(t, false);
-    for (const t of incoming || []) put(t, true);
-    while (out.length > max) {
-        const stale = out.findIndex(x => !x.fresh);
-        out.splice(stale >= 0 ? stale : 0, 1);
-    }
-    return out.map(x => x.text);
 }
 
 /* ------------------------------------------------------------
@@ -762,22 +601,12 @@ export function mergeTraits(existing, incoming = [], max = 10) {
  * queryText의 낱말 가운데 docs(기억 색인 글, 소문자) 몇 개에만 나오는 드문 것들. 반환: [{ word, idf }]
  * share: 전체의 이 비율 이하에 나와야 드물다 (최소 1개). 기억이 적으면(8개 미만) 드물다는 말이 의미가 없어 빈 배열.
  */
-/* 드문 낱말로 치지 않는 말 — 사람을 부르는 말, 때·차례를 가리키는 말, 흔한 서술어. 이런 말은 서고에 몇 번 안 나와도 무엇도 가리키지 않는다
-   ("선배"가 드물다는 이유로 첫날 장면이 끌려 나왔다) */
-const RARE_SKIP = new Set(['선배', '선배님', '후배', '형', '형님', '오빠', '언니', '누나', '동생', '선생님', '쌤', '아저씨', '아줌마', '아가씨', '자기',
-    '다음', '이번', '저번', '오늘', '내일', '어제', '모레', '그때', '지금', '아까', '방금', '나중', '처음', '마지막', '요즘', '이제', '아직', '벌써', '다시', '먼저', '계속', '갑자기', '조금', '많이',
-    '정말', '진짜', '그냥', '같이', '함께', '혼자', '우리', '너희', '사람', '생각', '이야기', '얘기', '때문', '정도', '시간', '동안', '하루', '오전', '오후', '아침', '저녁', '그날', '이날',
-    'today', 'tomorrow', 'yesterday', 'then', 'now', 'next', 'later', 'again', 'together', 'really', 'senior', 'junior', 'brother', 'sister']);
-/** 서술어 꼴 — "갔다 · 했다 · 있었어요 · 가자"는 낱말이 아니라 말끝이다 */
-const VERB_TAIL = /(?:[았었였했됐갔왔봤샀줬켰쳤났섰겼렸웠] ?다|[는한된]다|하다|있다|없다|겠다|이다|니다|어요|아요|해요|세요|네요|지요|군요|는데|지만|면서|려고|자고|었어|았어|했어|갔어|왔어)$/;
-
 export function rareQueryWords(queryText, docs, { share = 0.05, minDocs = 8 } = {}) {
     const n = docs.length;
     if (n < minDocs) return [];
     const limit = Math.max(1, Math.floor(n * share));
     const out = [];
     for (const word of contentWords(queryText)) {
-        if (RARE_SKIP.has(word) || VERB_TAIL.test(word)) continue;
         let df = 0;
         for (const d of docs) { if (d.includes(word) && ++df > limit) break; }
         if (df >= 1 && df <= limit) out.push({ word, idf: Math.log((n + 1) / df) });
