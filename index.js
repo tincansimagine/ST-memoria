@@ -5866,10 +5866,14 @@ function formatCharacterLine(c) {
     if (c.appearance) bits.push(c.appearance);
     // 바탕은 변하지 않는 기준, 달라진 점은 그 위에 천천히 얹히는 것 — 둘을 따로 적어야
     // 모델이 장면 하나의 기분을 성격으로 굳히지 않는다
-    if (c.core) bits.push(`core (constant — the story does not rewrite this): ${c.core}`);
+    // 바탕은 이야기를 시작할 때의 기질이다. 이야기가 그 사람을 바꿔 놓았으면(달라진 점) 그쪽이 지금이다 —
+    // 바탕을 "바뀌지 않는다"고만 적으면, 이야기가 뒤집은 처음의 태도(혐오·확신)를 모델이 지금 것으로 읽고 그 시절로 되돌아간다
+    if (c.core) bits.push(c.growth?.length
+        ? `core (how they were when the story began — where "changed in this story" differs, that is how they are now): ${c.core}`
+        : `core (constant — the story does not rewrite this): ${c.core}`);
     if (c.voice) bits.push(`voice: ${c.voice}`);
     if (c.traits?.length) bits.push(c.traits.join(', '));
-    if (c.growth?.length) bits.push(`grown in this story (gradual, on top of the core): ${c.growth.slice(-2).map(g => g.text).join('; ')}`);
+    if (c.growth?.length) bits.push(`changed in this story (how they are now — this outranks the core): ${c.growth.slice(-3).map(g => g.text).join('; ')}`);
     if (c.relationships?.length) bits.push(c.relationships.map(r => `${r.target}: ${r.relation}`).join('; '));
     const aka = c.aliases?.length ? ` (aka ${c.aliases.join(', ')})` : '';
     const unnamed = c.provisional ? ' [not yet named in-story — refer to them only by this handle]' : '';
@@ -5937,7 +5941,7 @@ function renderPacket(parts, { withExcerpts = true, excerptLimit = Infinity, rec
     }
     const chars = (parts.characters || []).slice(0, charLimit === Infinity ? parts.characters?.length || 0 : charLimit);
     if (chars.length) {
-        stable.push('## Cast (who they are — constant core, voice, and what the story has changed)');
+        stable.push('## Cast (who they are — how they began, their voice, and what the story has changed; where the story has changed someone, that is how they are now)');
         // 온전한 인물 노트는 장면에 있는 인물(고정 장부에서는 가장 최근에 움직인 넷)에게만
         // 누가 장면에 있는지는 글을 쓰는 모델이 지금 대화를 보고 가린다 — Memoria가 이름으로 짐작해 카드를 줄이지 않는다
         // (짐작이 빗나가면 정작 장면에 들어온 사람이 한 줄로만 실렸다). 자리가 모자라면 예산 단계가 인물 수를 줄인다
@@ -5991,7 +5995,7 @@ function renderPacket(parts, { withExcerpts = true, excerptLimit = Infinity, rec
     if (parts.locks.length) {
         // "지금 일어나는 일"이 아니라 "깔려 있는 압력"임을 명시 — 모델이 서약 소재를
         // 매 턴 억지로 무대에 올리거나 성급히 해소해 버리는 과잉 반응 방지
-        stable.push('## Pledges (the story must keep these true — standing pressure in the background, not events happening right now; never rush to stage or resolve them. A [foreshadow] entry is a setup waiting for its payoff: let it surface when the story is ready, not before)');
+        stable.push('## Pledges (what the story must keep — a secret stays known only to the people its entry names, an open thread stays open. An entry may describe something from long ago; it is kept, not happening now: standing pressure in the background, not events happening right now; never rush to stage or resolve them. A [foreshadow] entry is a setup waiting for its payoff: let it surface when the story is ready, not before)');
         for (const l of parts.locks) {
             const feel = normLockKind(l.kind) === 'feeling' && (l.cause || l.needs) ? ` (${[l.cause ? `from: ${l.cause}` : '', l.needs ? `would ease if: ${l.needs}` : ''].filter(Boolean).join('; ')})` : '';
             entry('Pledges', l.id || l.summary, `- [${normLockKind(l.kind)}] ${l.summary}${feel}${l.latest?.text ? ` — now: ${l.latest.text}` : ''}`);

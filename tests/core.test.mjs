@@ -495,3 +495,17 @@ test('a sent input never sits right after a stale ledger, and replies still on s
     await a.updateInjection();
     assert.equal(a.prompts.at(-1)[3], 2, 'with an input the ledger goes above the latest reply: [ledger] [reply] [input]');
 });
+
+test('a character the story has changed: the opening temperament is labelled as how they began, and the change as how they are now', async () => {
+    const a = await runtime();
+    const store = a.getStore();
+    a.getSettings().autoHide = false;
+    store.turnCounter = 5;
+    store.characters.push(
+        { id: 'c1', name: '도겸', aliases: [], traits: [], relationships: [], lines: [], firstTurn: 1, updatedTurn: 5, core: '확고한 이성애자다', growth: [{ text: '이성애자라는 자기규정을 버림', turn: 4 }] },
+        { id: 'c2', name: '보라', aliases: [], traits: [], relationships: [], lines: [], firstTurn: 1, updatedTurn: 5, core: '말수가 적다', growth: [] });
+    const text = (await a.buildPacketWithinBudget('도겸 보라', null)).text;
+    assert.match(text, /- 도겸 — core \(how they were when the story began — where "changed in this story" differs, that is how they are now\): 확고한 이성애자다 \| changed in this story \(how they are now — this outranks the core\): 이성애자라는 자기규정을 버림/);
+    assert.match(text, /- 보라 — core \(constant — the story does not rewrite this\): 말수가 적다/);
+    assert.match(text, /## Cast \(who they are — how they began, their voice, and what the story has changed; where the story has changed someone, that is how they are now\)/);
+});
