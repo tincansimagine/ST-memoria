@@ -40,7 +40,7 @@ import { ARGUMENT_TYPE, SlashCommandArgument } from "../../../slash-commands/Sla
 import { MacrosParser } from "../../../../scripts/macros.js";
 import { NARRATOR_PERSPECTIVE, isSharedPerspective, hasChatPerspective, resolvePerspective, findAssociations, sameKnowledgeScope, archiveSnapshot, validateArchive, addCheckpoint, archiveChanges, packetSections } from './archive-engine.mjs';
 import { showArchiveLibrary } from './library-ui.mjs';
-import { withDeadline, parsePhraseList, stripPhrases, hasPhrase, findRepeatedPhrases, pickBundleValues, resolveBundleName, switchBundle, saveBundle, deleteBundle, renameBundle, exportBundle, parseBundleFile, diffStableEntries, shouldRefreeze, createActivityLog, findRivalExtensions, splitClosedLine, sleepStaleThreads, pickPledges, stripOpenLines, THREAD_KINDS, recallCooldown, pushRecallHistory, isEndedValue, ungroundedFigures, roughTokens, noteUsage, usageTotals, groundedIn, soundsHedged, noteThreadSightings, threadTouched, rareQueryWords, findConflicts, looksRefused, looksBlocked, strayHidden, pickTranscript, transcriptTerms, crossScriptPairs, crossScriptSame, pickPledgesToCheck, ensembleLabel, firstOf, listOf, joinValue, clampScore, splitPair, jsonRepairVariants, normalizeRecordLabels, BOND_KINDS, bondKindOf, summaryGaps, spanWindows } from './craft-engine.mjs';
+import { withDeadline, parsePhraseList, stripPhrases, hasPhrase, findRepeatedPhrases, pickBundleValues, resolveBundleName, switchBundle, saveBundle, deleteBundle, renameBundle, exportBundle, parseBundleFile, diffStableEntries, shouldRefreeze, createActivityLog, findRivalExtensions, splitClosedLine, sleepStaleThreads, pickPledges, stripOpenLines, THREAD_KINDS, recallCooldown, pushRecallHistory, isEndedValue, ungroundedFigures, roughTokens, noteUsage, usageTotals, groundedIn, soundsHedged, noteThreadSightings, threadTouched, rareQueryWords, findConflicts, looksRefused, looksBlocked, strayHidden, pickTranscript, transcriptTerms, crossScriptPairs, crossScriptSame, pickPledgesToCheck, ensembleLabel, firstOf, listOf, joinValue, clampScore, splitPair, jsonRepairVariants, normalizeRecordLabels, BOND_KINDS, bondKindOf, summaryGaps, spanWindows, TIC_TYPES, readTicPicks } from './craft-engine.mjs';
 import { isOocText, looksOocReply, attributeQuote, addressTermsIn, tallyAddress, pickAddressLines, personNowLine } from './stage-engine.mjs';
 import { parseStoryDate, storyDatesOf, isIsoDate, trackerText, trackerLineOf, pickBeats, beatLines, veilLeaks } from './calendar-engine.mjs';
 import { peopleList, matchPerson, personPage, nameSuggestions, planMerge, pairKey, WIPE_KINDS, wipeCounts, NOW_ORDER } from './people-engine.mjs';
@@ -4419,8 +4419,8 @@ async function maybeSummarizeChunk(store, { flushAll = false, onProgress = null,
     // 요약을 건너뛴 창도 "지나갔다"고 기억해 통짜 재시도를 막는다.
     // 가운데 빈 구간부터 메운다 (요약을 걷어 낸 삭제·분기 뒤). 아래 루프는 맨 끝에서만 이어 가므로 여기서 안 하면 영영 비어 있다
     let made = 0;
-    if (!flushAll && store === getStore()) {
-        made += await fillSummaryGaps(store, { limit: 1 });
+    if (store === getStore()) { // 평소에는 한 번에 한 묶음, "지금 요약"은 빈 곳을 모두 (전체 다시 만들기는 초안에서 처음부터 만드니 해당 없음)
+        made += await fillSummaryGaps(store, { limit: flushAll ? 50 : 1 });
         if (getStore() !== store) return made;
     }
     let lastCovered = summaryCoveredTurn(store);
@@ -8252,6 +8252,13 @@ async function confirmDelete(what) {
     return result === ctx.POPUP_RESULT.AFFIRMATIVE || result === true;
 }
 
+/** 예/아니오 확인 팝업. 확인하면 true */
+async function confirmYes(message, okButton = '진행') {
+    const ctx = getContext();
+    const result = await ctx.callGenericPopup(escapeHtml(message), ctx.POPUP_TYPE.CONFIRM, '', { okButton, cancelButton: '취소' });
+    return result === ctx.POPUP_RESULT.AFFIRMATIVE || result === true;
+}
+
 function escapeHtml(str) {
     return String(str ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
@@ -9398,6 +9405,16 @@ async function openBundleManager() {
  * 묵은 말투 · 삼갈 표현
  * ============================================================ */
 
+const TIC_PROMPT = `You review phrases that keep coming back in a roleplay model's recent replies.
+
+From the numbered candidates, pick the ones that are real writing tics: stock body language, pet metaphors, filler beats, a sentence shape the model keeps falling back on, the same way of naming a feeling.
+Do NOT pick: names of people or places; a character's own catchphrase, verbal habit or speech style (that belongs to the character); terms the plot itself needs; ordinary connective wording.
+You may also add up to 5 tics you notice in the replies that are not among the candidates — copy each one exactly as it is written there, 2 to 6 words.
+
+Return one JSON object and nothing else:
+{"picks":[{"n":3,"type":"body|metaphor|filler|structure|emotion|other","why":"..."}],"extra":[{"phrase":"...","type":"...","why":"..."}]}
+"why" is one short clause in Korean. Pick nothing rather than pad the list.`;
+
 /** 최근 AI 답변 40개에서 여러 답변에 되풀이된 표현을 찾아, 고른 것을 삼갈 표현에 넣는다 */
 async function openRepeatFinder() {
     const ctx = getContext();
@@ -9414,15 +9431,52 @@ async function openRepeatFinder() {
     const already = new Set(bannedPhrases().map(p => p.toLowerCase()));
     const found = findRepeatedPhrases(replies, { names }).filter(f => !already.has(f.phrase.toLowerCase()));
     if (!found.length) return toastr.info(`최근 답변 ${replies.length}개에서 되풀이된 표현을 찾지 못했습니다.`, 'Memoria');
+    const rowHtml = (f, i) => `
+            <label class="memoria__row" data-i="${i}"><input type="checkbox" data-i="${i}"><span class="memoria__row-text">${escapeHtml(f.phrase)}${f.forms?.length > 1
+                ? `<small class="memoria__tic-forms" title="${escapeHtml(f.forms.slice(1).join(' / '))}"> 외 ${f.forms.length - 1}꼴</small>` : ''}<em class="memoria__tic-why"></em></span><small class="memoria__tic"></small><small>답변 ${f.count}개</small></label>`;
     const $dlg = $(`<div class="memoria__repeat-dialog">
         <h3>말버릇 찾기</h3>
-        <p class="memoria__hint">최근 AI 답변 ${replies.length}개에서 여러 답변에 나온 표현입니다. 체크한 표현을 삼갈 표현에 넣습니다. <b>캐릭터 고유의 말투는 체크하지 마세요</b> — 남긴 말과 회상에서도 빠집니다.</p>
-        <div class="memoria__row-list">${found.map((f, i) => `
-            <label class="memoria__row"><input type="checkbox" data-i="${i}"><span class="memoria__row-text">${escapeHtml(f.phrase)}</span><small>답변 ${f.count}개</small></label>`).join('')}</div>
+        <p class="memoria__hint">최근 AI 답변 ${replies.length}개에서 여러 답변에 나온 표현입니다. 조사만 다른 꼴은 하나로 묶었습니다. 체크한 표현을 삼갈 표현에 넣습니다. <b>캐릭터 고유의 말투는 체크하지 마세요</b> — 남긴 말과 회상에서도 빠집니다.</p>
+        <div class="memoria__button-row"><div class="menu_button memoria-repeat-ai" title="가벼운 모델에게 이 가운데 진짜 말버릇만 골라 달라고 합니다 (호출 1번). 고른 것은 체크되고 까닭이 붙습니다"><i class="fa-solid fa-wand-magic-sparkles"></i><span>AI 추천</span></div></div>
+        <div class="memoria__row-list">${found.map(rowHtml).join('')}</div>
     </div>`);
+    let asking = false;
+    $dlg.on('click', '.memoria-repeat-ai', async function () {
+        if (asking) return;
+        asking = true;
+        const $btn = $(this).addClass('disabled');
+        $btn.find('span').text('고르는 중');
+        try {
+            const list = found.map((f, i) => `${i + 1}. ${f.phrase} (${f.count}/${f.total} replies)`).join('\n');
+            const sample = replies.slice(0, 12).map((r, i) => `[${i + 1}] ${cleanStr(r, 700)}`).join('\n\n');
+            const reply = await callAuxLLM(TIC_PROMPT, `Names (never pick these): ${names.slice(0, 30).join(', ')}\n\nCandidates:\n${list}\n\nRecent replies:\n${sample}`, { task: 'light', maxTokens: auxTokens(1400) });
+            const { picks, extra } = readTicPicks(parseJsonLoose(reply) || {}, found, replies, { names });
+            for (const e of extra) {
+                if (already.has(e.phrase.toLowerCase())) continue;
+                found.push(e);
+                $dlg.find('.memoria__row-list').append(rowHtml(e, found.length - 1));
+                picks.set(found.length - 1, { type: e.type, why: e.why });
+            }
+            for (const [i, p] of picks) {
+                const $row = $dlg.find(`.memoria__row[data-i="${i}"]`);
+                $row.addClass('is-picked').find('input').prop('checked', true);
+                $row.find('.memoria__tic').text(TIC_TYPES[p.type] || '');
+                $row.find('.memoria__tic-why').text(p.why || '');
+            }
+            if (picks.size) $dlg.find('.memoria__row.is-picked').first()[0]?.scrollIntoView({ block: 'nearest' });
+            toastr.info(picks.size ? `말버릇으로 보이는 ${picks.size}개를 골라 체크했습니다. 넣기 전에 한 번 훑어보세요.` : '모델이 말버릇으로 꼽은 것이 없습니다.', 'Memoria');
+        } catch (e) {
+            toastr.error(`추천을 받지 못했습니다: ${e?.message || e}`, 'Memoria');
+        } finally {
+            asking = false;
+            $btn.removeClass('disabled').find('span').text('AI 추천');
+        }
+    });
     const ok = await ctx.callGenericPopup($dlg, ctx.POPUP_TYPE.CONFIRM, '', { okButton: '삼갈 표현에 넣기', cancelButton: '닫기', allowVerticalScrolling: true });
     if (!ok) return;
-    const picked = $dlg.find('input:checked').map(function () { return found[Number($(this).data('i'))]?.phrase; }).get().filter(Boolean);
+    // 조사만 다른 꼴도 함께 넣는다 — 한 꼴만 막으면 모델은 옆 꼴로 같은 말을 쓴다
+    const picked = [...new Set($dlg.find('input:checked').map(function () { const f = found[Number($(this).data('i'))]; return f ? (f.forms?.length ? f.forms : [f.phrase]) : []; }).get().flat().filter(Boolean))]
+        .filter(p => !already.has(p.toLowerCase()));
     if (!picked.length) return;
     const settings = getSettings();
     settings.bannedPhrases = [String(settings.bannedPhrases || '').trim(), ...picked].filter(Boolean).join('\n').slice(0, 4000);
@@ -10981,12 +11035,17 @@ function registerCommands() {
 
         SlashCommandParser.addCommandObject(SlashCommand.fromProps({
             name: 'memoria-ask',
-            helpString: '저장된 기억만 근거로 스토리에 대한 질문에 답합니다. 예: /memoria-ask 우리가 처음 만난 곳이 어디였지?',
+            helpString: '저장된 기억만 근거로 스토리에 대한 질문에 답합니다. 답은 화면에도 뜹니다 (quiet=true 로 끔). 예: /memoria-ask 우리가 처음 만난 곳이 어디였지?',
             unnamedArgumentList: [SlashCommandArgument.fromProps({ description: '질문', typeList: [ARGUMENT_TYPE.STRING], isRequired: true })],
-            callback: async (_, value) => {
+            callback: async (args, value) => {
+                // 명령만 따로 치면 돌려준 답이 어디에도 보이지 않는다 — 화면에도 띄운다. 다른 명령으로 넘겨 쓸 때는 quiet=true 로 끈다
+                const show = (text, bad) => { if (String(args?.quiet ?? '') !== 'true') (bad ? toastr.warning : toastr.info)(text, 'Memoria', { timeOut: 20000, extendedTimeOut: 10000, closeButton: true, escapeHtml: true }); };
                 try {
-                    return await askLibrarian(String(value || ''));
+                    const answer = await askLibrarian(String(value || ''));
+                    if (answer) show(String(answer), false);
+                    return answer;
                 } catch (e) {
+                    show(`답변 실패: ${e.message}`, true);
                     return `답변 실패: ${e.message}`;
                 }
             },
@@ -11407,6 +11466,48 @@ function saveReaderItems(items) {
     trimItems(items);
     try { globalThis.localStorage?.setItem(readerStoreKey(), JSON.stringify(items)); } catch { /* 저장 못 해도 이번 화면에는 보인다 */ }
 }
+/** 읽는 말로 옮기는 일. 창을 닫아도 끝까지 가고(한 번에 하나), 옮긴 글은 조각마다 저장해 다시 열면 바로 보인다 */
+let readerJob = null;
+
+function startReaderJob(store, want, todo, hooks) {
+    const chatId = getCurrentChatId();
+    if (readerJob && !readerJob.finished) {
+        if (readerJob.chatId === chatId && readerJob.lang === want) { readerJob.hooks = hooks; return readerJob; } // 같은 일이 돌고 있다 — 화면만 다시 붙인다
+        readerJob.stop = true;
+    }
+    const job = { chatId, lang: want, total: todo.length, done: 0, stop: false, finished: false, error: '', hooks };
+    readerJob = job;
+    (async () => {
+        const names = castNames(store);
+        for (const batch of packBatches(todo)) {
+            if (job.stop || getCurrentChatId() !== job.chatId) break;
+            job.hooks?.state?.(`옮기는 중 ${job.done}/${job.total}`);
+            let out = batch.map(() => null);
+            try { out = readReply(await callAuxLLM(readerSystem(want), readerUser(batch, names), { task: 'light', maxTokens: auxTokens(replyBudget(batch)) }), batch); }
+            catch (e) { job.error = String(e?.message || e); break; }
+            if (job.stop || getCurrentChatId() !== job.chatId) break;
+            const items = readerItems(); // 그사이 다른 조각이 저장됐을 수 있다 — 다시 읽어 합친다
+            batch.forEach((t, i) => {
+                if (!out[i]) return;
+                const key = readerKey(t, want);
+                items[key] = { t: out[i], at: Date.now() };
+                job.hooks?.piece?.(key, out[i]);
+            });
+            saveReaderItems(items);
+            job.done += batch.length;
+        }
+        job.finished = true;
+        const cut = job.stop || getCurrentChatId() !== job.chatId;
+        job.hooks?.state?.(job.error ? `옮기지 못했습니다: ${job.error}` : '');
+        if (!job.hooks && !cut) {
+            if (job.error) toastr.warning(`읽는 말로 옮기다 멈췄습니다 (${job.done}/${job.total}): ${job.error}`, 'Memoria');
+            else toastr.success('읽는 말로 옮기기를 마쳤습니다. 다시 열면 바로 보입니다.', 'Memoria');
+        }
+        if (readerJob === job) readerJob = null;
+    })();
+    return job;
+}
+
 async function openReader() {
     const store = getStore();
     const lang = String(getSettings().readerLang || 'ko');
@@ -11421,14 +11522,14 @@ async function openReader() {
         <h3>읽는 말로 보기</h3>
         <div class="memoria-pop__bar">
             <select class="text_pole memoria-pop__lang">${Object.entries(READER_LANGS).map(([k]) => `<option value="${k}">${{ ko: '한국어', en: 'English', 'zh-CN': '中文' }[k] || k}</option>`).join('')}</select>
+            <div class="menu_button memoria-pop__save" title="지금 보이는 그대로 .html 파일로 저장합니다 (아직 안 옮겨진 글은 원문으로)"><i class="fa-solid fa-download"></i><span>저장</span></div>
             <span class="memoria-pop__meta memoria-pop__status"></span>
         </div>
         <div class="memoria-pop__reader"></div>
     </div>`);
     $box.find('.memoria-pop__lang').val(lang);
-    let run = 0;
-    const draw = async () => {
-        const my = ++run;
+    let open = true;
+    const draw = () => {
         const want = String($box.find('.memoria-pop__lang').val());
         getSettings().readerLang = want;
         saveSettingsDebounced();
@@ -11445,32 +11546,128 @@ async function openReader() {
             $r.append($c);
             return { e, key, hit, $p: $c.find('p') };
         });
+        saveReaderItems(items);
         const todo = [...new Set(cells.filter(c => !c.hit && needsReading(c.e.text, want)).map(c => c.e.text))];
-        if (!todo.length) { $box.find('.memoria-pop__status').text(''); saveReaderItems(items); return; }
-        const names = castNames(store);
-        const batches = packBatches(todo);
-        let done = 0;
-        for (const batch of batches) {
-            if (my !== run) return;
-            $box.find('.memoria-pop__status').text(`옮기는 중 ${done}/${todo.length}`);
-            let out = batch.map(() => null);
-            try { out = readReply(await callAuxLLM(readerSystem(want), readerUser(batch, names), { task: 'light', maxTokens: auxTokens(replyBudget(batch)) }), batch); }
-            catch (e) { $box.find('.memoria-pop__status').text(`옮기지 못했습니다: ${e?.message || e}`); return; }
-            batch.forEach((t, i) => {
-                if (!out[i]) return;
-                const key = readerKey(t, want);
-                items[key] = { t: out[i], at: Date.now() };
-                for (const c of cells) if (c.key === key) c.$p.text(out[i]);
-            });
-            done += batch.length;
-            saveReaderItems(items);
+        const $status = $box.find('.memoria-pop__status');
+        if (!todo.length) {
+            if (readerJob && !readerJob.finished && readerJob.lang !== want) readerJob.stop = true;
+            $status.text('');
+            return;
         }
-        if (my === run) $box.find('.memoria-pop__status').text('');
+        startReaderJob(store, want, todo, {
+            state: (text) => { if (open) $status.text(text); },
+            piece: (key, text) => { if (open) for (const c of cells) if (c.key === key) c.$p.text(text); },
+        });
     };
     $box.find('.memoria-pop__lang').on('change', draw);
+    $box.find('.memoria-pop__save').on('click', () => {
+        const want = String($box.find('.memoria-pop__lang').val());
+        const items = readerItems();
+        let group = '';
+        const body = entries.map((e) => {
+            const head = e.group !== group ? `<h2>${esc(group = e.group)}</h2>\n` : '';
+            return `${head}<article><small>${esc(e.head)}</small><p>${esc(items[readerKey(e.text, want)]?.t || e.text)}</p></article>`;
+        }).join('\n');
+        const title = `${name2 || 'Memoria'} — 서고`;
+        const page = `<!doctype html>\n<html lang="${esc(want)}">\n<meta charset="utf-8">\n<meta name="viewport" content="width=device-width,initial-scale=1">\n<title>${esc(title)}</title>\n<style>body{font:16px/1.7 system-ui,sans-serif;max-width:720px;margin:0 auto;padding:24px 16px;color:#222;background:#faf9f5}h1{font-size:1.3em}h2{font-size:1.05em;margin:2.2em 0 .7em;padding-bottom:.3em;border-bottom:1px solid #ccc}article{margin:0 0 1.1em}small{color:#777}p{margin:.2em 0 0;white-space:pre-wrap;overflow-wrap:anywhere;word-break:keep-all}@media(prefers-color-scheme:dark){body{color:#ddd;background:#1c1c1a}h2{border-color:#444}small{color:#999}}</style>\n<h1>${esc(title)}</h1>\n${body}\n</html>\n`;
+        download(page, `memoria-${String(name2 || 'chat').replace(/[^\p{L}\p{N}_-]+/gu, '_')}-${want}.html`, 'text/html');
+    });
     draw();
     await showPopup($box);
-    run++;
+    open = false;
+    // 창을 닫아도 남은 글은 뒤에서 마저 옮긴다 (끝나면 알려 준다)
+    if (readerJob && !readerJob.finished) {
+        readerJob.hooks = null;
+        toastr.info(`남은 ${Math.max(0, readerJob.total - readerJob.done)}개는 뒤에서 계속 옮깁니다.`, 'Memoria');
+    }
+}
+
+/* ---------- 기록 언어 맞추기 ---------- */
+let alignJob = null;
+
+/**
+ * 요약 언어를 도중에 정했거나 모델이 채팅 언어로 흘려 적은 기록을, 정해 둔 요약 언어로 고쳐 적는다.
+ * 이름과 따옴표 안의 대사는 그대로 둔다 (영어로 정했을 때만 대사도 옮긴다 — 요약 언어 지시와 같은 규칙).
+ * 섞인 채로 두면 다음 요약이 그 말을 따라 써서 굳고, 검색어와 기록의 말이 달라 회상도 빗나간다.
+ */
+async function alignRecordLanguage() {
+    if (alignJob) {
+        if (await confirmYes('기록 언어 맞추기를 멈출까요? 이미 옮긴 것은 그대로 남습니다.')) alignJob.stop = true;
+        return;
+    }
+    const settings = getSettings();
+    const lang = settings.summaryLanguage;
+    const target = { ko: 'ko', en: 'en', hybrid: 'en', ja: 'ja' }[lang];
+    if (!target) return toastr.info('요약 언어를 하나로 정해 두었을 때 쓸 수 있습니다. (설정 → 요약 언어)', 'Memoria');
+    if (!getCurrentChatId()) return toastr.warning('열린 채팅이 없습니다.', 'Memoria');
+    const store = getStore();
+    const slots = [];
+    const add = (obj, key, after) => { const v = obj?.[key]; if (typeof v === 'string' && v.trim() && needsReading(v, target)) slots.push({ obj, key, after }); };
+    for (const t of store.turns) add(t, 'summary');
+    for (const m of store.memories) if (!(m.tags || []).includes('episode_raw')) add(m, 'summary', () => { m.vec = encodeVec(embedText(memoryIndexText(m))); m.avec = null; });
+    for (const x of [...store.chunkSummaries, ...store.arcSummaries]) add(x, 'text', () => { x.avec = null; });
+    for (const x of store.entityStates) if (String(x.entity || '').toLowerCase() !== 'scene') add(x, 'value');
+    for (const r of store.worldRules) add(r, 'value');
+    for (const l of store.locks) { add(l, 'summary'); if (l.latest) add(l.latest, 'text'); }
+    for (const c of store.characters) { add(c, 'core'); add(c, 'appearance'); for (const g of (Array.isArray(c.growth) ? c.growth : [])) add(g, 'text'); }
+    for (const bnd of (store.bonds || [])) for (const e of (bnd.log || [])) { add(e, 'stage'); add(e, 'basis'); add(e, 'unsaid'); }
+    for (const it of (store.items || [])) { add(it, 'meaning'); add(it, 'status'); }
+    for (const ms of (store.milestones || [])) { add(ms, 'title'); add(ms, 'summary'); }
+    const langName = { ko: '한국어', en: '영어', hybrid: '영어(대사는 원문)', ja: '일본어' }[lang];
+    if (!slots.length) return toastr.info(`요약 언어(${langName})와 다른 말로 적힌 기록이 없습니다.`, 'Memoria');
+    const texts = [...new Set(slots.map(x => x.obj[x.key]))];
+    const batches = packBatches(texts);
+    if (!await confirmYes(`기록 ${slots.length}칸이 요약 언어(${langName})와 다른 말로 적혀 있습니다. 가벼운 모델로 옮겨 적습니다 (호출 약 ${batches.length}번). 이름${lang === 'en' ? '은' : '과 따옴표 안의 대사는'} 그대로 둡니다. 시작 전 상태는 복구 지점에 남습니다.`)) return;
+    const job = { stop: false, done: 0, total: texts.length };
+    alignJob = job;
+    const $btn = $('#memoria_align_lang').addClass('is-busy');
+    const label = (text) => $btn.find('span').text(text);
+    const chatId = getCurrentChatId();
+    const names = castNames(store);
+    const system = readerSystem(target === 'ja' ? 'Japanese' : target, { keepQuotes: lang !== 'en' });
+    let changed = 0;
+    let failed = 0;
+    let error = '';
+    try {
+        checkpointBeforeChange(store, '기록 언어 맞추기 전');
+        for (const batch of batches) {
+            if (job.stop || getCurrentChatId() !== chatId) break;
+            label(`${job.done}/${job.total}`);
+            let out = batch.map(() => null);
+            try { out = readReply(await callAuxLLM(system, readerUser(batch, names), { task: 'light', maxTokens: auxTokens(replyBudget(batch)) }), batch); }
+            catch (e) { error = String(e?.message || e); break; }
+            if (getCurrentChatId() !== chatId || getStore() !== store) break;
+            batch.forEach((src, i) => {
+                const next = out[i];
+                // 옮긴 글이 여전히 다른 말이면(그대로 돌려줬으면) 받지 않는다
+                if (!next || next === src || refusedReply(next) || needsReading(next, target)) { failed++; return; }
+                for (const x of slots) {
+                    if (x.obj[x.key] !== src) continue;
+                    x.obj[x.key] = next;
+                    x.after?.();
+                    changed++;
+                }
+            });
+            job.done += batch.length;
+            persistStore();
+        }
+    } finally {
+        alignJob = null;
+        $btn.removeClass('is-busy');
+        label('언어 맞추기');
+    }
+    if (getCurrentChatId() !== chatId) return;
+    if (changed) {
+        vecCache.clear();
+        localSyncedChat = null;
+        scheduleLocalSync();
+        stableFreeze = null;
+        lastBuildKey = '';
+        persistStore(); renderAllPanels(); updateInjection({ quiet: true });
+        logActivity('update', `요약 언어와 다른 말로 적혀 있던 기록 ${changed}칸을 ${langName}로 고쳐 적었어요`);
+    }
+    const tail = [failed ? `${failed}개는 옮기지 못해 그대로 두었습니다` : '', error ? `도중에 멈췄습니다: ${error}` : '', job.stop ? '멈췄습니다' : ''].filter(Boolean).join(' · ');
+    (error || (failed && !changed) ? toastr.warning : toastr.success)(`기록 ${changed}칸을 ${langName}로 고쳐 적었습니다.${tail ? ` (${tail})` : ''}`, 'Memoria');
 }
 
 /* ---------- 메시지 — 중요 장면 · 이 메시지의 기억 ---------- */
@@ -11567,6 +11764,7 @@ function bindExtraUI() {
     });
     $('#memoria_recall_test').on('click', openRecallTest);
     $('#memoria_reader_open').on('click', openReader);
+    $('#memoria_align_lang').on('click', () => alignRecordLanguage().catch(e => toastr.error(String(e?.message || e), 'Memoria')));
     $('#memoria_wipe_open').on('click', openWipe);
     $('#memoria_settings').on('click', '.memoria-tracker-edit', function () { editTracker(String($(this).closest('.memoria__row').data('id'))); });
     $('#memoria_settings').on('click', '.memoria-tracker-delete', function () {

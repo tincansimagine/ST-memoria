@@ -91,10 +91,31 @@ export function stripPhrases(text, phrases) {
         .replace(/([(\[“‘「『])[ \t]+/g, '$1');
 }
 
+const KO_PARTICLES = ['에게서', '으로부터', '이라고', '에서', '에게', '한테', '으로', '까지', '부터', '처럼', '보다', '께서', '라고', '은', '는', '이', '가', '을', '를', '의', '에', '도', '만', '와', '과', '로'];
+
+/**
+ * 끝에 붙은 조사를 뗀 꼴. "입꼬리가"와 "입꼬리를"을 같은 표현으로 세려는 것으로, 묶는 열쇠로만 쓴다 (화면에는 실제로 쓰인 꼴을 보여 준다).
+ */
+export function phraseStem(word) {
+    const w = String(word || '').toLowerCase();
+    if (!/[가-힣]$/.test(w)) return w.replace(/[’']s$/, '');
+    for (const p of KO_PARTICLES) if ([...w].length - p.length >= 2 && w.endsWith(p)) return w.slice(0, -p.length);
+    return w;
+}
+
+// 표현의 처음이나 끝에 오면 안 되는 말 — 그 자체로는 아무 버릇도 아닌 대명사·접속어·흔한 서술어
+const KO_STOP_HEADS = '그|그녀|그것|이것|저것|그들|우리|나|내|너|네|당신|자신|서로|모두|무엇|누구|어디|언제|여기|거기|저기|이|저|것|수|때|곳|중|안|속|위|앞|뒤|옆|말|일|더|또|다시|아직|이미|그리고|그러나|하지만|그런데|그래서|그러자|그때|그런|이런|저런|어떤|모든|마치|정말|아주|매우|너무|조금|잠시|이제|바로|다만|역시|혹은|또는|및|등|한|두|세';
+const KO_STOP_RE = new RegExp(`^(?:${KO_STOP_HEADS})(?:은|는|이|가|을|를|의|에|에게|에서|도|만|와|과|로|으로|께|한테|처럼|보다|까지|부터|라고|이라고)?$`);
+const KO_STOP_WORDS = new Set('했다 한다 하는 하고 하며 했고 했지만 하지 됐다 된다 되었다 되는 있다 있었다 있는 있던 있고 있을 없다 없었다 없는 없이 없을 같다 같았다 같은 같이 않았다 않는다 않고 않은 않을 것이다 것이었다 것처럼 이었다 였다 아니다 아니었다 아닌 말했다 보았다 봤다'.split(' '));
+const EN_STOP_WORDS = new Set('the a an and or but of to in on at for with from by as is was were be been are it its his her he she they them their this that these those i you your my me we our not had has have do did does so then than there here when while if into out up down over just very would could should will can him himself herself which who what about before after again still even back more some one no all'.split(' '));
+const isStopWord = (w) => { const lw = String(w || '').toLowerCase(); return EN_STOP_WORDS.has(lw) || KO_STOP_WORDS.has(lw) || KO_STOP_RE.test(lw); };
+
 /**
  * 여러 답변에 되풀이된 표현 찾기 — 모델이 자기 최근 답변을 보고 같은 말을 또 쓰는 고리의 재료.
  * 단어 1~4개짜리 조각을 "몇 개의 답변에 나왔는지"로 센다 (한 답변 안의 반복은 한 번).
- * 흔한 조사·기능어, 인물 이름, 더 긴 표현에 그대로 포함되는 짧은 조각은 뺀다.
+ *  · 조사만 다른 꼴("입꼬리가 / 입꼬리를 미세하게")은 한 표현으로 묶고, 가장 많이 쓰인 꼴을 대표로 보여 준다 (forms에 나머지).
+ *  · 대명사·접속어·흔한 서술어로 시작하거나 끝나는 조각, 인물 이름, 더 긴 표현에 그대로 든 짧은 조각은 뺀다.
+ *  · 같은 횟수면 긴 표현이 위로 온다 — 길수록 우연이 아니라 버릇이다.
  */
 export function findRepeatedPhrases(replies, { minShare = 0.2, minReplies = 3, max = 24, names = [] } = {}) {
     const docs = (replies || []).map(r => String(r ?? '')).filter(r => r.trim());
@@ -107,9 +128,10 @@ export function findRepeatedPhrases(replies, { minShare = 0.2, minReplies = 3, m
         for (const n of nameSet) if (n.length >= 2 && lw.startsWith(n) && lw.length - n.length <= 2) return true; // 이름+조사
         return false;
     };
-    const counts = new Map(); // key → { phrase, docs }
+    const counts = new Map(); // 묶는 열쇠 → { forms: 꼴 → 답변 수, docs, words }
     for (const doc of docs) {
         const seen = new Set();
+        const seenForm = new Set();
         for (const sentence of doc.split(/[\n.!?…。！？"“”「」『』]+/)) {
             const words = sentence.match(/[\p{L}\p{N}'’]+/gu) || [];
             for (let n = 1; n <= 4; n++) {
@@ -123,12 +145,17 @@ export function findRepeatedPhrases(replies, { minShare = 0.2, minReplies = 3, m
                     if ([...letters].length < 4) continue;
                     // 이름으로 시작하거나 끝나는 조각은 안쪽 조각이 대신 잡는다 ("아리아는 웃었다" → "웃었다")
                     if (isName(slice[0]) || isName(slice[n - 1])) continue;
-                    const key = phrase.toLowerCase();
-                    if (seen.has(key)) continue;
-                    seen.add(key);
-                    const row = counts.get(key);
-                    if (row) row.docs++;
-                    else counts.set(key, { phrase, docs: 1, words: n });
+                    if (isStopWord(slice[0]) || isStopWord(slice[n - 1])) continue;
+                    const key = slice.map(phraseStem).join(' ');
+                    let row = counts.get(key);
+                    if (!row) { row = { key, forms: new Map(), docs: 0, words: n }; counts.set(key, row); }
+                    if (!seen.has(key)) { seen.add(key); row.docs++; }
+                    const form = phrase.toLowerCase();
+                    if (!seenForm.has(form)) {
+                        seenForm.add(form);
+                        const f = row.forms.get(form);
+                        if (f) f.docs++; else row.forms.set(form, { text: phrase, docs: 1 });
+                    }
                 }
             }
         }
@@ -138,14 +165,54 @@ export function findRepeatedPhrases(replies, { minShare = 0.2, minReplies = 3, m
     rows.sort((a, b) => b.words - a.words || b.docs - a.docs);
     const kept = [];
     for (const r of rows) {
-        const lower = ` ${r.phrase.toLowerCase()} `;
-        if (kept.some(k => ` ${k.phrase.toLowerCase()} `.includes(lower) && k.docs >= r.docs * 0.8)) continue;
+        const inner = ` ${r.key} `;
+        if (kept.some(k => ` ${k.key} `.includes(inner) && k.docs >= r.docs * 0.8)) continue;
         kept.push(r);
     }
     // 한 단어짜리는 흔한 낱말이 많이 걸리므로 문턱을 한 단계 더 높인다
     const strong = kept.filter(r => r.words > 1 || r.docs >= Math.max(need + 1, Math.ceil(docs.length * (minShare + 0.1))));
-    strong.sort((a, b) => b.docs - a.docs || b.words - a.words || a.phrase.localeCompare(b.phrase));
-    return strong.slice(0, max).map(r => ({ phrase: r.phrase, count: r.docs, total: docs.length }));
+    const score = (r) => r.docs * (1 + 0.3 * (r.words - 1));
+    strong.sort((a, b) => score(b) - score(a) || b.docs - a.docs || a.key.localeCompare(b.key));
+    return strong.slice(0, max).map((r) => {
+        const forms = [...r.forms.values()].sort((a, b) => b.docs - a.docs);
+        return { phrase: forms[0].text, count: r.docs, total: docs.length, forms: forms.slice(0, 4).map(f => f.text) };
+    });
+}
+
+export const TIC_TYPES = Object.freeze({ body: '몸짓', metaphor: '비유', filler: '군말', structure: '문장 틀', emotion: '감정 묘사', other: '그 밖' });
+
+/**
+ * 모델이 고른 말버릇을 읽는다. picks: 후보 번호(1부터), extra: 모델이 답변에서 따로 찾은 표현.
+ * 따로 찾은 표현은 실제 답변 두 개 이상에 글자 그대로 있어야 받는다 (지어낸 표현 차단). 이름이 든 것은 받지 않는다.
+ * 반환: { picks: Map(후보 자리 → { type, why }), extra: [{ phrase, count, total, forms, type, why }] }
+ */
+export function readTicPicks(obj, found, replies, { names = [], max = 8 } = {}) {
+    const picks = new Map();
+    const typeOf = (t) => (TIC_TYPES[String(t || '').toLowerCase()] ? String(t).toLowerCase() : 'other');
+    const whyOf = (w) => String(w ?? '').replace(/\s+/g, ' ').trim().slice(0, 90);
+    for (const p of listOf(firstOf(obj, 'picks', 'tics', 'selected'))) {
+        const isObj = p && typeof p === 'object';
+        const n = Number(isObj ? firstOf(p, 'n', 'id', 'index', 'no') : p);
+        if (!Number.isInteger(n) || n < 1 || n > found.length || picks.has(n - 1)) continue;
+        picks.set(n - 1, { type: typeOf(isObj ? p.type : ''), why: whyOf(isObj ? firstOf(p, 'why', 'reason') : '') });
+    }
+    const docs = (replies || []).map(r => String(r ?? '').toLowerCase());
+    const nameList = names.map(n => String(n || '').toLowerCase()).filter(n => n.length >= 2);
+    const have = new Set(found.flatMap(f => [f.phrase, ...(f.forms || [])]).map(x => x.toLowerCase()));
+    const extra = [];
+    for (const e of listOf(firstOf(obj, 'extra', 'more', 'added'))) {
+        if (extra.length >= max) break;
+        const isObj = e && typeof e === 'object';
+        const phrase = String((isObj ? firstOf(e, 'phrase', 'text') : e) ?? '').replace(/\s+/g, ' ').trim();
+        const lower = phrase.toLowerCase();
+        if ([...phrase].length < 4 || phrase.length > 60 || have.has(lower)) continue;
+        if (nameList.some(n => lower.split(' ').some(w => w.startsWith(n)))) continue;
+        const count = docs.filter(d => d.includes(lower)).length;
+        if (count < 2) continue;
+        have.add(lower);
+        extra.push({ phrase, count, total: docs.length, forms: [phrase], type: typeOf(isObj ? e.type : ''), why: whyOf(isObj ? firstOf(e, 'why', 'reason') : '') });
+    }
+    return { picks, extra };
 }
 
 /* ------------------------------------------------------------

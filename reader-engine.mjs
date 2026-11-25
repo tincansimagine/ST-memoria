@@ -18,7 +18,11 @@ Rules:
 3. Translate the meaning plainly and completely. Add nothing, drop nothing, do not summarize or explain. Quoted speech is translated as natural speech and keeps its quotation marks.
 4. An entry that is already in {LANG} is returned unchanged.
 5. Every id in the input appears once in the output.`;
-const readerSystem = (lang) => READER_PROMPT.replace(/\{LANG\}/g, READER_LANGS[lang] || lang);
+const KEEP_QUOTES_RULE = "Quoted speech is NOT translated: everything inside quotation marks is copied exactly as written, in its original language, with its quotation marks.";
+/** keepQuotes: 따옴표 안의 대사는 옮기지 않는다 (서고의 기록을 고쳐 적을 때 — 대사는 원문 그대로 남아야 회상에서 찾는다) */
+const readerSystem = (lang, { keepQuotes = false } = {}) => (keepQuotes
+  ? READER_PROMPT.replace("Quoted speech is translated as natural speech and keeps its quotation marks.", KEEP_QUOTES_RULE)
+  : READER_PROMPT).replace(/\{LANG\}/g, READER_LANGS[lang] || lang);
 function readerUser(texts, names = []) {
   const keep = [...new Set(names.map((n) => String(n || "").trim()).filter(Boolean))].slice(0, 40);
   const body = {};
@@ -56,6 +60,7 @@ function needsReading(text, lang) {
   if (lang === "ko") return hangul / all < 0.5;
   if (lang === "en") return (hangul + han + kana + other) / all > 0.25;
   if (lang === "zh-CN") return han / all < 0.5 || kana > 0;
+  if (lang === "ja") return kana < 1 || (kana + han) / all < 0.5;
   return true;
 }
 function packBatches(texts, { long = READER_LONG, chars = READER_BATCH_CHARS, items = READER_BATCH_ITEMS } = {}) {
