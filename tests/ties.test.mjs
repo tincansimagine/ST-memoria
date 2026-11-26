@@ -39,7 +39,7 @@ test('shifts join the change view without doubling a step the bond log already s
     assert.equal(rows.find(r => r.kind === 'growth').note, '받아들여짐');
 });
 
-test('a recorded turn names the tie and files shifts; rolling the turn back takes them away', async () => {
+test('a recorded turn reads the tie and files pivots; rolling the turn back takes them away', async () => {
     const a = await runtime();
     const store = a.getStore();
     a.getSettings().recordBatch = 1;
@@ -53,45 +53,56 @@ test('a recorded turn names the tie and files shifts; rolling the turn back take
         return JSON.stringify({
             digest: '시온이 비밀을 털어놓고 도겸이 받아들였다.', weight: 0.7, time_passed: '0',
             memories: [{ kind: 'event', summary: '시온이 도겸에게 비밀을 털어놓았다', importance: 0.7, entities: ['시온', '도겸'] }],
-            bonds: [{ from: '도겸', to: '시온', stage: '연인', basis: '손을 잡았다', name: '다 알고도 잡은 손', kind: 'love' }],
-            shifts: [{ kind: 'emotion', who: '도겸', toward: '시온', from: '서운함', to: '안도', why: '시온이 먼저 털어놓아서' }],
+            bonds: [{ from: '도겸', to: '시온', stage: '연인', basis: '손을 잡았다', types: ['affection:lover', '소꿉친구'], word: '다 알고도 잡은 손' }],
+            pivots: [{ way: 'closer', who: '도겸', with: '시온', was: '서운함', now: '안도', because: '시온이 먼저 털어놓아서' }],
         });
     };
     await a.run('commitTurns')([chat.length - 1]);
-    assert.match(asked, /RELATION NAMES AND SHIFTS/);
+    assert.match(asked, /TIE READINGS AND PIVOTS/);
     const bond = store.bonds.find(b => b.from === '도겸');
-    assert.equal(bond.name, '다 알고도 잡은 손');
-    assert.equal(store.shifts.length, 1);
+    assert.equal(bond.word, '다 알고도 잡은 손');
+    assert.deepEqual(bond.types.map(t => t.type), ['lover', 'childhood_friend'], 'the main type first, a known label read as its type');
+    assert.equal(store.pivots.length, 1);
+    assert.equal(store.pivots[0].way, 'closer');
     assert.equal(store.turns.at(-1).tie, true);
-    assert.match(a.run('formatBondLine')(bond), /도겸 → 시온 \(다 알고도 잡은 손\)/);
+    assert.match(a.run('formatBondLine')(bond), /도겸 → 시온 \[affection:lover \+ friendship:childhood_friend, "다 알고도 잡은 손"\]/);
     a.removeDerivedForTurn(store, store.turns.at(-1).turnIndex);
-    assert.equal(store.shifts.length, 0);
-    assert.equal(store.bonds.find(b => b.from === '도겸')?.name, undefined, 'the line that turn opened goes with it');
+    assert.equal(store.pivots.length, 0);
+    assert.equal(store.bonds.find(b => b.from === '도겸')?.word, undefined, 'the line that turn opened goes with it');
 });
 
-test('a tie name set by a later turn falls back to the earlier name when that turn is rolled back', async () => {
+test('a reading set by a later turn falls back to the earlier one when that turn is rolled back; old names and shifts are lifted', async () => {
     const a = await runtime();
     const store = a.getStore();
-    store.bonds = [{ id: 'b1', from: '도겸', to: '시온', log: [{ stage: '선후배', turn: 1 }, { stage: '연인', turn: 4 }], name: '설레는 후배 사랑', nameTurn: 4, nameWas: { name: '편한 후배', turn: 1 } }];
+    store.bonds = [{ id: 'b1', from: '도겸', to: '시온', log: [{ stage: '선후배', turn: 1 }, { stage: '연인', turn: 4 }], name: '설레는 후배 사랑', kind: 'love', nameTurn: 4, nameWas: { name: '편한 후배', turn: 1 } }];
+    store.shifts = [{ id: 's1', kind: 'relationship', who: '도겸', toward: '시온', from: '경계', to: '신뢰', turnIndex: 3 }];
     store.turns.push({ id: 't4', turnIndex: 4, mesId: 7, summary: 'x' });
+    a.run('liftStoreTies')(store);
+    assert.equal(store.bonds[0].word, '설레는 후배 사랑');
+    assert.deepEqual(store.bonds[0].types, [{ group: 'affection', type: 'lover' }]);
+    assert.equal(store.bonds[0].name, undefined);
+    assert.equal(store.shifts, undefined);
+    assert.equal(store.pivots[0].way, 'flip', 'wary into trust turned the tie over');
+    assert.equal(store.pivots[0].turn, 3);
     a.removeDerivedForTurn(store, 4);
-    assert.equal(store.bonds[0].name, '편한 후배');
-    store.bonds[0].nameManual = true;
-    store.bonds[0].nameTurn = 1;
+    assert.equal(store.bonds[0].word, '편한 후배');
+    a.run('setTieRead')(store.bonds[0], { types: ['senior_junior'], word: '편한 후배' });
+    assert.equal(store.bonds[0].tieHand, true);
+    store.bonds[0].tieTurn = 1;
     a.removeDerivedForTurn(store, 1);
-    assert.equal(store.bonds[0]?.name ?? '편한 후배', '편한 후배', 'a name the user wrote stays');
+    assert.equal(store.bonds[0]?.word ?? '편한 후배', '편한 후배', 'a reading the user wrote stays');
 });
 
-test('the ledger carries the latest feelings in its changing part', async () => {
+test('the ledger carries how the people in the scene stand now in its changing part', async () => {
     const a = await runtime();
     const parts = {
         rules: [], characters: [], bonds: [], items: [], summaries: [], locks: [], banned: [], states: [], publicRecall: [], protectedRecall: [], milestones: [],
-        feelings: [{ from: '도겸', to: '시온', now: '깊은 신뢰', was: '경계', why: '정체를 털어놓음', turn: 9 }],
+        feelings: [{ from: '도겸', to: '시온', read: { types: [{ group: 'affection', type: 'lover' }], word: '다 알고도 잡은 손' }, way: 'closer', now: '깊은 신뢰', was: '경계', why: '정체를 털어놓음', turn: 9 }],
     };
     const text = a.renderPacket(parts, {});
-    assert.match(text, /How They Feel Right Now/);
-    assert.match(text, /도겸 → 시온: 깊은 신뢰 \(was: 경계; since: 정체를 털어놓음\)/);
-    assert.doesNotMatch(a.renderPacket({ ...parts, feelings: [] }, {}), /How They Feel/);
+    assert.match(text, /Between Them Now/);
+    assert.match(text, /도겸 → 시온: "다 알고도 잡은 손", affection:lover; latest pivot \(closer\): 경계 → 깊은 신뢰, because 정체를 털어놓음/);
+    assert.doesNotMatch(a.renderPacket({ ...parts, feelings: [] }, {}), /Between Them Now/);
 });
 
 test('a card that introduces several people and not itself voices many characters', async () => {
