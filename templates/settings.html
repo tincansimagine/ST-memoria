@@ -49,8 +49,8 @@
                 <button class="memoria__tab" type="button" data-tab="config">
                     <i class="fa-solid fa-sliders"></i><span>설정</span>
                 </button>
-                <button class="memoria__tab" type="button" data-tab="audit" title="검사">
-                    <i class="fa-solid fa-stethoscope"></i><span>검사</span>
+                <button class="memoria__tab" type="button" data-tab="audit" title="대조 — 답을 기록과 맞대어 어긋난 곳 찾기 · 요약 손질">
+                    <i class="fa-solid fa-scale-balanced"></i><span>대조</span>
                 </button>
                 <button class="memoria__tab" type="button" data-tab="tools">
                     <i class="fa-solid fa-screwdriver-wrench"></i><span>도구</span>
@@ -391,10 +391,10 @@
                         <small>원문·요약에 이미 나온 비밀까지 가리지는 않습니다. 장부를 직접 고정했다면 고정을 해제해야 새 방식이 적용됩니다.</small>
                     </div>
                     <div class="memoria__perspective">
-                        <label for="memoria_card_cast">이 카드가 맡는 인물 (이 채팅만)</label>
-                        <select id="memoria_card_cast"><option value="">자동</option><option value="one">한 인물</option><option value="many">여러 인물 (해설자·시뮬레이터 카드)</option></select>
+                        <label for="memoria_card_cast">이 카드는 (이 채팅만)</label>
+                        <select id="memoria_card_cast"><option value="">자동</option><option value="one">한 사람</option><option value="many">무대 (여러 사람을 연기)</option></select>
                         <small id="memoria_card_cast_help" class="memoria__hint" aria-live="polite"></small>
-                        <small>한 카드가 여러 인물을 연기하면 카드 이름은 말머리일 뿐이에요. 그 이름으로 인물 카드·상태·관계선을 만들지 않고, 대사는 글에 적힌 화자에게 돌려요. 자동은 인물 목록과 카드 글로 알아봐요.</small>
+                        <small>이 대화에만 적용돼요. 위의 서술 방식과 함께, 기억을 적고 꺼내는 방식을 정해요. 무대 카드면 카드 이름으로 인물 카드 · 상태 · 관계선을 만들지 않고, 대사와 행동은 글에 나온 사람에게 돌려요.</small>
                     </div>
                     <label class="memoria__toggle-row" for="memoria_associative_recall">
                         <input type="checkbox" id="memoria_associative_recall">
@@ -938,7 +938,7 @@
                 <div class="memoria__section">
                     <div class="memoria__section-head">
                         <div>
-                            <h4>요약 점검 · 고쳐 쓰기</h4>
+                            <h4>요약 손질</h4>
                             <p>요약끼리 범위가 겹치거나 날짜·이름이 어긋난 곳을 먼저 찾아요 (호출 없음). 내용이 원문과 맞는지는 아래에서 AI로 확인할 수 있어요.</p>
                         </div>
                         <div class="memoria__compact-actions">

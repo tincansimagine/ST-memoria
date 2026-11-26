@@ -7,8 +7,8 @@ WHO KNOWS, WHO REMEMBERS — optional extra fields, use them only where the text
 - "guess_by" on a private or secret memory: characters who visibly suspect it without having the details. A name goes in "known_by" or "guess_by", never both.
 - "forgets" on any memory of something a character lived through but will not properly keep — they were asleep, unconscious, blackout drunk, feverish, drugged, or had the memory taken: [{"who":"Name","level":"partial|none","kept":"the little that stays with them, in one clause, or null"}]. Only when the text gives the cause. Never for the player's character unless the text states it outright.
 - "by" and "to" on a memory that carries a "quote": who spoke that line and who it was spoken to, names exactly as on file; null when the text leaves it unclear. Being in the room is not being addressed.
-- "unaware" on a private or secret memory: characters the text plainly shows do NOT know it — the text says they were somewhere else when it happened, or states that they don't know. Never infer it from silence or from simply not being mentioned.
-- "keep_from" on a private or secret memory: characters the holder is actively hiding it from, as the text shows (lying to them, hiding the evidence, asking others to keep quiet). Not knowing is "unaware"; being deliberately kept in the dark is "keep_from" — a name can be in both.`;
+- "in_the_dark" on a private or secret memory: characters the text plainly shows do NOT know it — the text says they were somewhere else when it happened, or states that they don't know. Never infer it from silence or from simply not being mentioned.
+- "keep_from" on a private or secret memory: characters the holder is actively hiding it from, as the text shows (lying to them, hiding the evidence, asking others to keep quiet). Simply not knowing is "in_the_dark"; being deliberately hidden from is "keep_from" — a name can be in both.`;
 /** 그때의 일인가 — 회상 · 꿈 · 전해 들은 이야기는 기록하되 "지금"을 바꾸지 않는다 */
 const WHEN_DIRECTIVE = `
 

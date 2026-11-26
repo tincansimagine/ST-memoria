@@ -88,7 +88,7 @@ const KIND_LABELS = {
 const LOCK_LABELS = {
     keep_unresolved: '미해결 유지', keep_secret: '비밀 유지', knowledge_gap: '정보 격차',
     consent: '동의 경계', world_limit: '세계 제약', loose_end: '열린 떡밥', foreshadow: '복선',
-    feeling: '풀리지 않은 감정', author_plan: '작가 계획',
+    feeling: '맺힌 마음', author_plan: '작가 계획',
     // 구버전 표기 호환
     do_not_resolve: '미해결 유지', secret_boundary: '비밀 유지', speaker_boundary: '정보 격차',
     consent_boundary: '동의 경계', world_constraint: '세계 제약', open_thread: '열린 떡밥',
@@ -105,7 +105,7 @@ const KIND_ALIASES = {
 const LOCK_KIND_ALIASES = {
     thread: 'loose_end', threads: 'loose_end', hook: 'foreshadow', hint: 'foreshadow', mystery: 'keep_unresolved', unresolved: 'keep_unresolved',
     secret: 'keep_secret', gap: 'knowledge_gap', boundary: 'consent', limit: 'world_limit', rule: 'world_limit', feelings: 'feeling', emotion: 'feeling',
-    '미해결 유지': 'keep_unresolved', '비밀 유지': 'keep_secret', '정보 격차': 'knowledge_gap', '동의 경계': 'consent', '세계 제약': 'world_limit', '열린 떡밥': 'loose_end', 떡밥: 'loose_end', 복선: 'foreshadow', '풀리지 않은 감정': 'feeling',
+    '미해결 유지': 'keep_unresolved', '비밀 유지': 'keep_secret', '정보 격차': 'knowledge_gap', '동의 경계': 'consent', '세계 제약': 'world_limit', '열린 떡밥': 'loose_end', 떡밥: 'loose_end', 복선: 'foreshadow', '풀리지 않은 감정': 'feeling', '맺힌 마음': 'feeling',
 };
 const VIS_ALIASES = { open: 'public', shared: 'public', personal: 'private', hidden: 'secret', 공개: 'public', 개인: 'private', 비공개: 'private', 비밀: 'secret' };
 const enumKey = (k) => String(k ?? '').trim().toLowerCase();
@@ -391,9 +391,9 @@ const DEFAULT_SETTINGS = Object.freeze({
     evidence: true,           // 상태 변화 · 비밀 · 무거운 기억은 원문에서 옮긴 근거 글귀가 원문에 실제로 있어야 받는다
     recallTune: true,         // 회상 다듬기 — 짧은 입력엔 직전 장면을 함께 보고, 지금 · 지난 일 · 자세한 사실 질문에 따라 비중을 조금씩 바꾼다
     embedCenter: true,        // (임베딩 API 사용 시) 서고 평균을 빼고 다시 견줘 아무 입력에나 걸리는 흔한 결을 덜 믿는다
-    tieNotes: true,           // 사이 이름 · 갈래와 변화 기록(관계 · 감정 · 상황 · 성장)을 턴 기록과 함께 받는다 — 사서 지시에 몇 줄이 붙을 뿐 호출은 늘지 않는다
+    tieNotes: true,           // 인연 읽기(갈래 · 한마디)와 전환점을 턴 기록과 함께 받는다 — 사서 지시에 몇 줄이 붙을 뿐 호출은 늘지 않는다
     feelingLines: 3,          // 장면에 있는 사람들끼리의 가장 최근 마음을 「지금」 쪽에 이 줄 수까지 싣는다 (0 = 끔 · 모델 호출 없음)
-    checkMode: '',            // 어긋난 곳 검사 방식 — '' 옛 설정(replyCheck) 그대로 | 'off' | 'each' 답변마다 | 'batch' 답 N개마다 한 번 (그때만 호출 1회)
+    checkMode: '',            // 어긋난 곳 대조 방식 — '' 옛 설정(replyCheck) 그대로 | 'off' | 'each' 답변마다 | 'batch' 답 N개마다 한 번 (그때만 호출 1회)
     checkEvery: 5,            // 답 몇 개마다 한 번 검사하나 (checkMode 'batch')
     driftNote: true,          // 검사에서 근거를 확인한 어긋남을 다음 답 3개 동안 「지금」 쪽에 짧은 메모로 싣는다 (모델 호출 없음 · 보고서가 없으면 아무것도 싣지 않는다)
     gradeMode: 'manual',      // 요약 채점 — 'manual' 단추로만 | 'flagged' 점검에 걸렸을 때만 | 'every' 새 요약 gradeEvery 개마다 (호출 1회)
@@ -1094,7 +1094,7 @@ function stampDrift(report, only = null) {
     }
     if (touched) getContext().saveChatDebounced?.();
 }
-/** 검사 한 번 (호출 1회). manual: 「지금 검사」 — 세어 둔 자리와 상관없이 끝의 N개를 본다. 반환: 보고서 | null (실패하면 manual 일 때만 오류를 던진다) */
+/** 검사 한 번 (호출 1회). manual: 「지금 대조」 — 세어 둔 자리와 상관없이 끝의 N개를 본다. 반환: 보고서 | null (실패하면 manual 일 때만 오류를 던진다) */
 async function driftNow({ manual = false } = {}) {
     const settings = getSettings();
     if (!settings.enabled || !getCurrentChatId()) return null;
@@ -1123,7 +1123,7 @@ async function driftNow({ manual = false } = {}) {
     let archive = render({ excerptLimit: 2, sourceLimit: 0 });
     if (await getTokenCountAsync(archive) > 6000) archive = render({ withExcerpts: false, recallLimit: 6, protectedLimit: 4, summaryLimit: 4, charLimit: 8, extraLimit: 6, sourceLimit: 0 });
     const user = `${hostNoteOf(store)}<archive>\n${archive}\n</archive>\n\n<messages>\n${lines.join('\n\n')}\n</messages>`;
-    auditBusy = '어긋난 곳 검사 중…';
+    auditBusy = '어긋난 곳 대조 중…';
     updateStatusUI(auditBusy);
     renderAuditPanel();
     let raw = null, out = '', why = '';
@@ -1157,12 +1157,12 @@ async function driftNow({ manual = false } = {}) {
     persistStore();
     stampDrift(report);
     const sure = findings.filter(f => f.ok).length;
-    logActivity('check', findings.length ? `어긋난 곳 검사 #${report.from}–#${report.to}: 근거 확인 ${sure}개 · 미확인 ${findings.length - sure}개` : `어긋난 곳 검사 #${report.from}–#${report.to}: ${report.checked}개 모두 기록과 맞아요`);
+    logActivity('check', findings.length ? `어긋난 곳 검사 #${report.from}–#${report.to}: 기록에서 찾음 ${sure}개 · 미확인 ${findings.length - sure}개` : `어긋난 곳 검사 #${report.from}–#${report.to}: ${report.checked}개 모두 기록과 맞아요`);
     renderAuditPanel();
     updateInjection({ quiet: true });
     return report;
 }
-/** 「괜찮아요」 — 그 건을 넘긴다 (바로잡기 메모와 ⚠ 배지에서 빠진다). on false 로 되돌린다 */
+/** 「그냥 두기」 — 그 건을 넘긴다 (바로잡기 메모와 ⚠ 배지에서 빠진다). on false 로 되돌린다 */
 function dismissDrift(id, on = true) {
     const report = getStore().audit?.drift, f = report?.findings.find(x => x.id === id);
     if (!report || !f) return;
@@ -1183,7 +1183,7 @@ function knownNamesForAudit() {
     try { const ctx = getContext(); if (selected_group) for (const g of ctx.groups || []) if (g.id === selected_group) for (const av of g.members || []) out.push(ctx.characters?.find(c => c.avatar === av)?.name); } catch { /* 그룹을 못 읽어도 된다 */ }
     return out.filter(Boolean);
 }
-/** 범위 · 날짜 · 이름 점검 (모델 호출 없음). 「괜찮아요」로 넘긴 것은 skipped 로 센다 */
+/** 범위 · 날짜 · 이름 점검 (모델 호출 없음). 「그냥 두기」로 넘긴 것은 skipped 로 센다 */
 function summaryIssues(store = getStore()) {
     const skip = new Set(store.audit?.skip || []);
     let strays = [];
@@ -1322,14 +1322,14 @@ async function afterSummariesAudit(store = getStore()) {
     const settings = getSettings();
     if (!settings.enabled || getStore() !== store) return;
     const st = auditState(store), keys = summaryIssues(store).list.map(i => i.key).sort(), seen = keys.join('\u0001'), fresh = seen !== (st.gradeSeen || ''), now = summaryCount(store);
-    if (fresh) { st.gradeSeen = seen; persistStore(); if (keys.length) logActivity('summary', `요약 점검에 걸린 곳 ${keys.length}개 — 검사 탭에서 볼 수 있어요`); }
+    if (fresh) { st.gradeSeen = seen; persistStore(); if (keys.length) logActivity('summary', `요약 점검에 걸린 곳 ${keys.length}개 — 대조 탭에서 볼 수 있어요`); }
     const auto = () => gradeSummaries({ auto: true }).catch(e => logActivity('error', `요약 확인 실패: ${e?.message || e}`));
     if (settings.gradeMode === 'every') {
         if (st.gradeCount == null) { st.gradeCount = now; persistStore(); } else if (now - st.gradeCount >= gradeEveryOf(settings)) auto();
     } else if (settings.gradeMode === 'flagged' && fresh && keys.length) auto();
 }
 
-// ── 검사 탭 그리기 ──
+// ── 대조 탭 그리기 ──
 function auditWhen(at) {
     const d = new Date(at), now = new Date(), pad = (n) => String(n).padStart(2, '0'), time = `${pad(d.getHours())}:${pad(d.getMinutes())}`;
     return d.toDateString() === now.toDateString() ? `오늘 ${time}` : `${d.getMonth() + 1}. ${d.getDate()}. ${time}`;
@@ -1341,7 +1341,7 @@ function auditFindingHtml(f, off = '', act = '') {
     return `<article class="memoria-au-card${off ? ' is-off' : ''}">
         <header>
             <span class="memoria-au-tag">${DRIFT_KIND_LABEL[f.kind] || f.kind}</span>
-            ${off ? `<span class="memoria-au-tag is-muted">${escapeHtml(off)}</span>` : '<span class="memoria-au-tag is-ok">근거 확인</span>'}
+            ${off ? `<span class="memoria-au-tag is-muted">${escapeHtml(off)}</span>` : '<span class="memoria-au-tag is-ok">기록에서 찾음</span>'}
             <span class="memoria-au-who">${auditJump(f.no)} ${escapeHtml(f.who || '')}</span>
         </header>
         <p class="memoria-au-text">${escapeHtml(f.text)}</p>
@@ -1377,13 +1377,13 @@ function renderAuditPanel() {
     const live = liveFindings(report, chat, mesHashOf), liveIds = new Set(live.map(f => f.id)), aside = (report?.findings || []).filter(f => !liveIds.has(f.id));
     const seg = [['off', '끔'], ['each', '답마다'], ['batch', 'N개마다']].map(([id, label]) => `<button type="button" class="memoria-au-mode${mode === id ? ' is-on' : ''}" data-mode="${id}" aria-pressed="${mode === id}">${label}</button>`).join('');
     const foot = mode === 'batch'
-        ? (due.anchored ? (due.need ? `다음 자동 검사까지 답 <b>${due.need}개</b> 남았어요` : '다음 답이 오면 검사해요') : `지금부터 세요 — 답이 ${every}개 쌓이면 처음 검사해요`)
-        : mode === 'each' ? '새 답이 올 때마다 검사해요 (답마다 호출 1회)' : '자동으로는 검사하지 않아요. ‘지금 검사’는 언제든 쓸 수 있어요';
+        ? (due.anchored ? (due.need ? `다음 자동 대조까지 답 <b>${due.need}개</b> 남았어요` : '다음 답이 오면 대조해요') : `지금부터 세요 — 답이 ${every}개 쌓이면 처음 대조해요`)
+        : mode === 'each' ? '새 답이 올 때마다 대조해요 (답마다 호출 1회)' : '자동으로는 대조하지 않아요. ‘지금 대조’는 언제든 쓸 수 있어요';
     let html = `<div class="memoria-au-controls">
-            <div class="memoria-au-seg" role="group" aria-label="검사 방식">${seg}</div>
+            <div class="memoria-au-seg" role="group" aria-label="대조 방식">${seg}</div>
             <div class="memoria-au-row">
                 ${mode === 'batch' ? `<label class="memoria-au-every">답 <input type="number" class="memoria-au-input" id="memoria_audit_every" min="2" max="30" step="1" value="${every}" aria-label="답 몇 개마다 검사할지"> 개마다</label>` : '<span></span>'}
-                <button type="button" class="memoria-au-btn is-primary"${settings.enabled ? '' : ' disabled'} id="memoria_audit_drift_now" title="최근 답 ${every}개를 지금 검사해요 (호출 1회)"><i class="fa-solid fa-magnifying-glass"></i><span>지금 검사</span></button>
+                <button type="button" class="memoria-au-btn is-primary"${settings.enabled ? '' : ' disabled'} id="memoria_audit_drift_now" title="최근 답 ${every}개를 지금 대조해요 (호출 1회)"><i class="fa-solid fa-magnifying-glass"></i><span>지금 대조</span></button>
             </div>
             <p class="memoria-au-foot">${foot}</p>
         </div>
@@ -1392,12 +1392,12 @@ function renderAuditPanel() {
         const rest = report.checked - new Set(live.map(f => f.no)).size;
         html += `<div class="memoria-au-result">
             <h5 class="memoria-au-sub">어긋난 곳 <b>${live.length}</b><small>${auditWhen(report.at)} · #${report.from}–#${report.to} · ${report.checked}개 검사</small></h5>
-            ${live.map(f => auditFindingHtml(f, '', `<button type="button" class="memoria-au-btn memoria-au-fine" data-id="${f.id}" title="이 건은 넘겨요 — 바로잡기 메모와 ⚠ 표시에서 빠져요">괜찮아요</button>`)).join('')}
-            <p class="memoria-au-foot">${live.length ? (rest > 0 ? `나머지 ${rest}개 메시지는 기록과 맞아요` : '') : `검사한 ${report.checked}개 메시지 모두 기록과 맞아요`}${note.lines ? ` · 다음 답 ${note.left}개까지 바로잡기 메모 ${note.lines}줄이 실려요` : ''}</p>
-            ${aside.length ? `<details class="memoria-au-aside"><summary>따로 둔 것 ${aside.length}개</summary><p class="memoria-au-foot">근거 문장을 기록에서 찾지 못했거나, 괜찮다고 넘겼거나, 그 뒤로 글이 바뀐 것이에요. 사실로 다루지 않아요.</p>${aside.map(f => auditFindingHtml(f, f.dismissed ? '괜찮아요' : !f.ok ? '근거 미확인' : '글이 바뀜', f.dismissed ? `<button type="button" class="memoria-au-btn memoria-au-unfine" data-id="${f.id}">되돌리기</button>` : '')).join('')}</details>` : ''}
-            <p class="memoria-au-foot is-faint">약 ${(report.tokIn + report.tokOut).toLocaleString()}토큰${report.manual ? ' · 직접 검사' : ''}</p>
+            ${live.map(f => auditFindingHtml(f, '', `<button type="button" class="memoria-au-btn memoria-au-fine" data-id="${f.id}" title="이 건은 넘겨요 — 바로잡기 메모와 ⚠ 표시에서 빠져요">그냥 두기</button>`)).join('')}
+            <p class="memoria-au-foot">${live.length ? (rest > 0 ? `나머지 ${rest}개 메시지는 기록과 맞아요` : '') : `대조한 ${report.checked}개 메시지 모두 기록과 맞아요`}${note.lines ? ` · 다음 답 ${note.left}개까지 바로잡기 메모 ${note.lines}줄이 실려요` : ''}</p>
+            ${aside.length ? `<details class="memoria-au-aside"><summary>따로 둔 것 ${aside.length}개</summary><p class="memoria-au-foot">기록 쪽 문장을 서고에서 찾지 못했거나, 그냥 두기로 했거나, 그 뒤로 글이 바뀐 것이에요. 사실로 다루지 않아요.</p>${aside.map(f => auditFindingHtml(f, f.dismissed ? '그냥 두기' : !f.ok ? '기록에 없음' : '글이 바뀜', f.dismissed ? `<button type="button" class="memoria-au-btn memoria-au-unfine" data-id="${f.id}">되돌리기</button>` : '')).join('')}</details>` : ''}
+            <p class="memoria-au-foot is-faint">약 ${(report.tokIn + report.tokOut).toLocaleString()}토큰${report.manual ? ' · 직접 대조' : ''}</p>
         </div>`;
-    } else html += `<p class="memoria-au-empty">${settings.enabled ? '아직 검사한 적이 없어요. ‘지금 검사’를 누르거나 ‘N개마다’를 켜 보세요.' : '장기기억이 꺼져 있어요. 켜면 검사할 수 있어요.'}</p>`;
+    } else html += `<p class="memoria-au-empty">${settings.enabled ? '아직 대조한 적이 없어요. ‘지금 대조’를 누르거나 ‘N개마다’를 켜 보세요.' : '장기기억이 꺼져 있어요. 켜면 검사할 수 있어요.'}</p>`;
     $drift.html(html);
 
     // ── 2. 요약 검수 · 채점 · 고쳐 쓰기
@@ -1416,12 +1416,12 @@ function renderAuditPanel() {
             const hint = !act && AUDIT_ISSUE_HINT[i.type] ? `<small class="memoria-au-hint">${AUDIT_ISSUE_HINT[i.type]}</small>` : '';
             return `<div class="memoria-au-issue">
                 <p>${escapeHtml(auditIssueText(i))}</p>
-                <div class="memoria-au-acts"><span class="memoria-au-meta">${i.type === 'order' ? '' : auditSpan(i.from, i.to)}${hint}</span><span class="memoria-au-btns">${act}<button type="button" class="memoria-au-btn memoria-au-skip" data-key="${escapeHtml(i.key)}" title="이 건은 넘겨요">괜찮아요</button></span></div>
+                <div class="memoria-au-acts"><span class="memoria-au-meta">${i.type === 'order' ? '' : auditSpan(i.from, i.to)}${hint}</span><span class="memoria-au-btns">${act}<button type="button" class="memoria-au-btn memoria-au-skip" data-key="${escapeHtml(i.key)}" title="이 건은 넘겨요">그냥 두기</button></span></div>
             </div>`;
         }).join('');
         sh += '</div>';
     } else sh += `<p class="memoria-au-foot">${all.length ? `범위·날짜·이름이 모두 맞아요 — 요약 ${all.length}개 확인` : '아직 요약이 없어요'}</p>`;
-    if (skipped) sh += `<p class="memoria-au-foot">괜찮다고 넘긴 항목 ${skipped}개 · <button type="button" class="memoria-au-textbtn" id="memoria_audit_unskip">다시 보기</button></p>`;
+    if (skipped) sh += `<p class="memoria-au-foot">그냥 두기로 한 항목 ${skipped}개 · <button type="button" class="memoria-au-textbtn" id="memoria_audit_unskip">다시 보기</button></p>`;
     // 요약 내용 확인 (AI) — 요약이 원문과 맞는지 물어본다
     const gradeLabel = !all.length ? '확인할 요약이 없어요' : plan.length ? `요약 ${plan.length}개 확인하기` : '최근 요약 다시 확인하기';
     sh += `<h5 class="memoria-au-sub">요약이 원문과 맞는지 AI로 확인</h5>
@@ -1477,12 +1477,12 @@ function bindAuditPanel() {
     $root.on('change', '#memoria_audit_note', function () { getSettings().driftNote = $(this).prop('checked'); saveSettingsDebounced(); updateInjection({ quiet: true }); renderAuditPanel(); });
     $root.on('click', '#memoria_audit_drift_now', async function () {
         if ($(this).prop('disabled') || auditBusy) return;
-        const work = workToast(`최근 답 ${checkEveryOf(getSettings())}개를 기록과 견주는 중이에요…`);
+        const work = workToast(`최근 답 ${checkEveryOf(getSettings())}개를 기록과 맞대는 중이에요…`);
         try {
             const r = await queueDrift({ manual: true });
-            if (r) { const n = r.findings.filter(f => f.ok).length; work.done(n ? 'warning' : 'success', n ? `어긋난 곳 ${n}개를 찾았어요 — 검사 탭에서 확인해 주세요` : `검사한 ${r.checked}개 모두 기록과 맞아요`); }
+            if (r) { const n = r.findings.filter(f => f.ok).length; work.done(n ? 'warning' : 'success', n ? `어긋난 곳 ${n}개를 찾았어요 — 대조 탭에서 확인해 주세요` : `대조한 ${r.checked}개 모두 기록과 맞아요`); }
             else work.done();
-        } catch (e) { work.done('error', `검사하지 못했어요: ${e?.message || e}`); }
+        } catch (e) { work.done('error', `대조하지 못했어요: ${e?.message || e}`); }
         renderAuditPanel();
     });
     $root.on('click', '.memoria-au-fine', function () { dismissDrift(String($(this).data('id')), true); renderAuditPanel(); });
@@ -1508,7 +1508,7 @@ function bindAuditPanel() {
         const work = workToast('요약이 원문과 맞는지 확인하는 중이에요…');
         try {
             const r = await gradeSummaries({ force: Number($(this).data('force')) === 1 });
-            work.done(r ? (r.items.length ? 'warning' : 'success') : 'info', !r ? '확인할 요약이 없어요' : r.items.length ? `걸린 곳 ${r.items.length}개를 찾았어요 — 검사 탭에서 볼 수 있어요` : '걸린 곳이 없어요');
+            work.done(r ? (r.items.length ? 'warning' : 'success') : 'info', !r ? '확인할 요약이 없어요' : r.items.length ? `걸린 곳 ${r.items.length}개를 찾았어요 — 대조 탭에서 볼 수 있어요` : '걸린 곳이 없어요');
         } catch (e) { work.done('error', `확인하지 못했어요: ${e?.message || e}`); }
         renderAuditPanel();
     });
@@ -3203,7 +3203,7 @@ function sanitizeExtraction(raw, userText, assistantText, { memoryCap = 12 } = {
             // 그때의 일 — 회상 · 꿈 · 전해 들은 이야기 (없으면 지금 일)
             when: normWhen(m?.when),
             // 본문에 모른다고 나온 사람 · 가진 사람이 일부러 숨기는 상대 (기록할 때의 근거로만)
-            unaware: listOf(m?.unaware).map(e => cleanStr(e, 60)).filter(Boolean).slice(0, 6),
+            unaware: listOf(firstOf(m, 'in_the_dark', 'unaware', 'inTheDark')).map(e => cleanStr(e, 60)).filter(Boolean).slice(0, 6),
             keepFrom: listOf(firstOf(m, 'keep_from', 'keepFrom', 'hidden_from')).map(e => cleanStr(e, 60)).filter(Boolean).slice(0, 6),
             // 근거 글귀 — 원문에 그대로 있어야 한다
             said: cleanStr(m?.said, 160),
@@ -3551,7 +3551,7 @@ function removeDerivedForTurn(store, turnIndex) {
         for (const b of store.bonds) b.log = (b.log || []).flatMap(e => (e.manual || e.turn !== turnIndex ? [e] : e.was ? [e.was] : []));
         store.bonds = store.bonds.filter(b => b.log.length);
     }
-    dropTies(store, turnIndex); // 이 턴이 붙인 사이 이름 · 변화 기록
+    dropTies(store, turnIndex); // 이 턴이 적은 인연 읽기 · 전환점
     if (Array.isArray(store.bonds)) {
     }
     for (const l of store.locks) {
@@ -4597,7 +4597,7 @@ async function commitTurns(mesIds, { silent = true, force = false, retry = 1 } =
     let clockAsked = false; // 시계가 빠져 한 번 다시 요청했는가
     let nowNote = '';       // 사서가 직접 쓴 "지금이 언제인지" 한 줄
     let replied = false; // 모델이 답은 했는가 (연결 오류와 "읽을 수 없는 답"을 구분한다)
-    let ties = null;     // 같은 답에 함께 받은 사이 이름 · 변화 기록
+    let ties = null;     // 같은 답에 함께 받은 인연 읽기 · 전환점
     let fresh = null;    // 이번에 모델이 준 답 (스와이프로 돌아왔을 때 다시 쓰려고 간직한다)
     const sysPrompt = `${settings.prompts.archivist}${clockDirective}${archivistTrackingDirective()}${askDue ? DUE_DIRECTIVE : ''}${pledgeDirective}${shelfDirective}${extraDirective}${batchDirective}\n\n${languageDirective()}`;
     // 같은 답을 다시 만났을 때(스와이프로 앞선 답으로 돌아옴) — 그 답을 읽은 사서의 답을 그대로 다시 쓴다. 모델을 부르지 않는다.
@@ -4952,7 +4952,7 @@ async function commitTurns(mesIds, { silent = true, force = false, retry = 1 } =
 
     // 사서가 해소됐다고 판정한 서약 처리 (스와이프 시 되돌릴 수 있게 턴 기록)
     // 수기 서약은 사서가 직접 닫지 못한다 — 대신 "해소된 듯" 의견만 붙여 사용자가 ✔로 확정
-    // 근거 확인: 장면에서 옮긴 글귀가 원문에 실제로 있고, 판정이 말끝을 흐리지 않을 때만 닫는다.
+    // 기록에서 찾음: 장면에서 옮긴 글귀가 원문에 실제로 있고, 판정이 말끝을 흐리지 않을 때만 닫는다.
     // 근거가 모자라면 닫지 않고 "해소된 듯" 의견만 붙인다 — 사용자가 ✔로 확정한다.
     const exchangeText = runText;
     let unsure = 0;
@@ -4997,7 +4997,7 @@ async function commitTurns(mesIds, { silent = true, force = false, retry = 1 } =
     }
     if (retiredNow) logActivity('record', `지나간 기억 ${retiredNow}개를 물렸어요 (기억 탭에서 되살릴 수 있어요)`);
     for (const b of (extracted.bonds || [])) upsertBond(store, b, turn.turnIndex);
-    if (ties) { // 사이 이름 · 변화 기록 (같은 호출에 함께 받은 것)
+    if (ties) { // 인연 읽기 · 전환점 (같은 호출에 함께 받은 것)
         for (const u of units) u.turn.tie = true; // 이 턴은 받아 두었다 — 지난 요약 훑기가 다시 읽지 않는다
         const t = applyTies(store, ties, turn.turnIndex, hostCard);
         if (t.read || t.pivots) logActivity('record', `인연 ${t.read}줄 · 전환점 ${t.pivots}개를 적었어요`);
@@ -7313,7 +7313,7 @@ async function buildPacketSections(query, supervisorPlan) {
 
     // 검사가 찾은 어긋남 — 기록 쪽 문장과 함께 다음 답 몇 개 동안만 (보고서가 없으면 한 줄도 싣지 않는다)
     const driftNotes = driftNoteLines(store.audit, chat, mesHashOf, settings.driftNote !== false);
-    // 지금의 마음: 장면에 함께 있는 사람들끼리 가장 최근에 적힌 마음 몇 줄 — 얼려 둔 관계선보다 새것이라 매 턴 바뀌는 구간에 싣는다 (모델 호출 없음)
+    // 지금 사이: 장면에 함께 있는 사람들끼리의 인연 읽기와 가장 늦은 전환점 몇 줄 — 얼려 둔 관계선보다 새것이라 매 턴 바뀌는 구간에 싣는다 (모델 호출 없음)
     const feelings = standRowsOf(store, new Set([...sceneNames, meName ? entityKey(meName) : ''].filter(Boolean)), Math.max(0, Math.min(6, Math.round(Number(settings.feelingLines ?? 3) || 0))));
     // 최근에 어긴 약속 · 새어 나간 비밀 — 그 일을 당한 사람은 잊지 않는다 (120턴 안, 셋까지)
     const broken = store.locks.filter(l => l.status === 'resolved' && l.outcome === 'broken' && store.turnCounter - (l.resolvedTurn ?? -999) <= 120)
@@ -9465,7 +9465,7 @@ function renderRecallDiagnostics() {
     if (diag.fallback) view.append($('<p class="memoria__diagnostic-warning"></p>').text('예산이 최소 장부보다 작습니다. 담을 수 있는 서약만 보냈으며 일부 제약도 빠질 수 있습니다. 주입 예산을 늘려 주세요.'));
     if (diag.narratorMode) view.append($('<p class="memoria__hint"></p>').text('소설·풀사칭 · 여러 인물의 기억을 서술자가 참고합니다. 각 인물이 모르는 비밀까지 공유하지 않도록 지시합니다.'));
     view.append($('<p class="memoria__hint"></p>').text(`실제 주입 ${diag.rows.filter(r => r.included).length}개 · 중복/예산 제외 ${diag.rows.filter(r => !r.included).length}개 · 시점 밖 비공개 ${diag.hidden}개`));
-    const labels = { Canon: '캐논', Cast: '인물', 'Notable Items': '물건', 'Turning Points': '전환점', 'Story So Far': '요약', Pledges: '서약', Broken: '어긴 약속', 'How They Feel Right Now': '지금의 마음', 'Keep Consistent with the Record': '바로잡기 메모', 'Recalled Moments': '회상', 'Hidden Knowledge': '비공개', 'Source Excerpts': '자료실', 'Scene Now': '현재 장면', 'Status Board': '상태', Direction: '연출' };
+    const labels = { Canon: '캐논', Cast: '인물', 'Notable Items': '물건', 'Turning Points': '전환점', 'Story So Far': '요약', Pledges: '서약', Broken: '어긴 약속', 'Between Them Now': '지금 사이', 'Keep Consistent with the Record': '바로잡기 메모', 'Recalled Moments': '회상', 'Hidden Knowledge': '비공개', 'Source Excerpts': '자료실', 'Scene Now': '현재 장면', 'Status Board': '상태', Direction: '연출' };
     const total = diag.sections.reduce((n, s) => n + s.chars, 0) || 1;
     const sections = $('<div class="memoria__packet-shares" aria-label="장부 구성 비중 (글자 수 기준)"></div>').appendTo(view);
     for (const s of diag.sections) sections.append($('<span class="memoria__chip"></span>').text(`${labels[s.name] || s.name} ${Math.round(s.chars / total * 100)}%`));
@@ -10326,7 +10326,7 @@ function renderPerspectiveHelp() {
     if (!getSettings().authorizeCharPrivate && perspective !== '__public__') help += ' 현재 비공개 기억 허용이 꺼져 있어 공개 기억만 참고합니다.';
     $('#memoria_perspective_help').text(help);
     $('#memoria_card_cast').val(getStore().cardCast || '');
-    $('#memoria_card_cast_help').text(getCurrentChatId() && !selected_group ? (hostCardOf(getStore()) ? `지금은 "${name2}"를 여러 인물을 맡는 해설자로 봐요 — 그 이름으로는 인물 카드·상태·관계선을 만들지 않아요.` : `지금은 "${name2 || '캐릭터'}"를 한 인물로 봐요.`) : '');
+    $('#memoria_card_cast_help').text(getCurrentChatId() && !selected_group ? (getStore().cardCast === 'many' ? `「${name2}」은(는) 무대의 이름이에요 — 사람으로 기록하지 않고, 대사와 행동은 글에 나온 사람에게 돌려요.` : getStore().cardCast === 'one' ? `「${name2}」을(를) 이야기 속 한 사람으로 기록해요.` : `자동 — 지금은 「${hostCardOf(getStore()) ? '무대' : '한 사람'}」(으)로 보고 있어요. 카드 글이 사람을 여럿 소개하는데 그 가운데 카드 이름이 없으면 무대로 봐요.`) : '캐릭터가 여럿인 대화는 카드마다 한 사람이에요.');
     $('#memoria_perspective_scope_help').text(hasChatPerspective(getStore())
         ? '이 채팅만 별도로 사용합니다. 체크를 끄면 다른 채팅과 같은 기본 방식으로 돌아갑니다.'
         : '기본 방식으로 저장됩니다. 다른 봇·채팅으로 이동하거나 새로고침해도 유지되며, 따로 설정한 채팅만 예외입니다.');
@@ -11508,7 +11508,7 @@ function bindUI() {
                     <option value="consent">동의 경계 — 넘지 말아야 할 선</option>
                     <option value="world_limit">세계 제약 — 세계관의 불변 규칙</option>
                     <option value="foreshadow">복선 — 때가 되면 회수할 장치</option>
-                    <option value="feeling">풀리지 않은 감정 — 두 사람 사이에 남은 앙금</option>
+                    <option value="feeling">맺힌 마음 — 두 사람 사이에 남은 응어리</option>
                     <option value="author_plan">작가 계획 — 인물은 모르는 답 (가린 줄만 실림)</option>
                 </select>
                 <label>내용</label>
@@ -12797,7 +12797,7 @@ async function fixStoryDate() {
 function lockExtraHtml(store, l) {
     const bits = [];
     const kind = normLockKind(l.kind);
-    if (kind === 'feeling' && (l.cause || l.needs)) bits.push([l.cause ? `왜: ${l.cause}` : '', l.needs ? `풀리려면: ${l.needs}` : ''].filter(Boolean).join(' · '));
+    if (kind === 'feeling' && (l.cause || l.needs)) bits.push([l.cause ? `까닭: ${l.cause}` : '', l.needs ? `응어리를 풀 실마리: ${l.needs}` : ''].filter(Boolean).join(' · '));
     if (kind === 'author_plan') bits.push(l.veil ? `AI에게 가는 줄: ${l.veil}` : '가린 줄 없음 — 실리지 않습니다');
     if (l.due && l.status === 'active' && getSettings().storyClock) {
         const d = pickStoryDeadlines(store, 50).find(x => x.lock === l);
@@ -12812,8 +12812,8 @@ function memoryWhoHtml(m) {
     if ((m.guessers || []).length) bits.push(`짐작: ${m.guessers.join(', ')}`);
     const knowsNow = new Set([m.owner, ...(m.knowers || [])].filter(Boolean).map(entityKey));
     const blind = (m.unaware || []).filter(n => !knowsNow.has(entityKey(n))), hideFrom = (m.keepFrom || []).filter(n => !knowsNow.has(entityKey(n)));
-    if (blind.length) bits.push(`모름: ${blind.join(', ')}`);
-    if (hideFrom.length) bits.push(`숨기는 상대: ${hideFrom.join(', ')}`);
+    if (blind.length) bits.push(`알 리 없음: ${blind.join(', ')}`);
+    if (hideFrom.length) bits.push(`감출 상대: ${hideFrom.join(', ')}`);
     for (const d of (m.dim || [])) bits.push(`${d.who}: ${d.level === 'none' ? '기억 없음' : '흐릿함'}${d.kept ? ` (${d.kept})` : ''}`);
     if ((m.witnesses || []).length) bits.push(`본 사람: ${m.witnesses.slice(0, 6).join(', ')}`);
     return bits.length ? `<div class="memoria__mem-meta memoria__mem-who">${esc(bits.join(' · '))}</div>` : '';
@@ -12828,9 +12828,9 @@ async function editKnowers(id) {
         <p class="memoria-pop__meta">${esc(m.summary)}</p>
         <label>아는 사람 <input type="text" class="text_pole" name="k" placeholder="이름, 쉼표로"></label>
         <label>짐작만 하는 사람 <input type="text" class="text_pole" name="g" placeholder="이름, 쉼표로"></label>
-        <label>모르는 사람 <input type="text" class="text_pole" name="u" placeholder="본문에서 모른다고 나온 사람"></label>
-        <label>숨기는 상대 <input type="text" class="text_pole" name="h" placeholder="가진 사람이 일부러 알리지 않는 상대"></label>
-        <p class="memoria-pop__meta">"모름"은 그 일을 모르는 사람, "숨기는 상대"는 알면 안 되는 사람이에요 — 한 사람이 둘 다일 수도 있어요. 저장하면 사서가 덮어쓰지 않습니다. 「풀기」를 누르면 다시 사서에게 맡깁니다.</p>
+        <label>알 리 없는 사람 <input type="text" class="text_pole" name="u" placeholder="본문에서 이 일을 알 수 없었다고 나온 사람"></label>
+        <label>감출 상대 <input type="text" class="text_pole" name="h" placeholder="가진 사람이 일부러 감추려는 상대"></label>
+        <p class="memoria-pop__meta">‘알 리 없음’은 그 일을 알 수 없었던 사람, ‘감출 상대’는 가진 사람이 일부러 감추려는 — 알아서는 안 되는 사람이에요.</p>
     </div>`);
     $dlg.find('[name="k"]').val((m.knowers || []).join(', '));
     $dlg.find('[name="g"]').val((m.guessers || []).join(', '));
