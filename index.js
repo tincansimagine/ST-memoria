@@ -11050,6 +11050,17 @@ function bindUI() {
         renderAllPanels();
     });
 
+    // 탭 줄: 넘치면 옆으로 넘기고, 더 있는 쪽 끝을 흐리게
+    const $tabRow = $('#memoria_settings .memoria__tabs');
+    const tabEdges = () => {
+        const el = $tabRow[0];
+        if (!el) return;
+        $tabRow.toggleClass('more-l', el.scrollLeft > 2).toggleClass('more-r', el.scrollLeft + el.clientWidth < el.scrollWidth - 2);
+    };
+    $tabRow.on('scroll', tabEdges);
+    $(window).on('resize', tabEdges);
+    setTimeout(tabEdges, 0);
+
     // ── 개요
     $('#memoria_record_now').on('click', async function () {
         let lastAssistant = -1;
