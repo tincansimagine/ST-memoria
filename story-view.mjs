@@ -139,6 +139,9 @@ export function flowHtml(nodes) {
  * 연표 — 위에서 아래로 흐르는 노선도
  * ------------------------------------------------------------ */
 
+/** 연표 줄의 색 (사람마다) */
+const LANE_COLORS = ['#c98f5a', '#4fa66b', '#6c8cc6', '#c583b4', '#b8a23c', '#2f9f9a', '#e0802f', '#9670cc'];
+
 /**
  * layout: layoutTimelineGraph()의 결과 (lanes, points, bands).
  * 줄(인물·장소)마다 색이 있고, 사건은 그 줄 위의 정거장이다. 여러 인물이 함께한 사건은 가로로 이어진다.
@@ -148,18 +151,20 @@ export function railHtml(layout, { dim = new Set(), open = '' } = {}) {
     const { lanes, points, bands } = layout;
     if (!points.length || !lanes.length) return '';
     const n = lanes.length;
-    const legend = lanes.map((l, i) => `<span class="mmv-legend" style="--mmv-lane:${i}"><i></i>${esc(clip(l, 10))}</span>`).join('');
+    // 줄마다 색 — 사람마다 다른 색, "그 밖"만 회색 (테마의 글자색과 섞이지 않게 줄에 바로 적는다)
+    const lc = (i) => `--mmv-lane:${i};--mmv-lane-color:${lanes[i] === '그 밖' ? '#9a9a9a' : LANE_COLORS[i % LANE_COLORS.length]}`;
+    const legend = lanes.map((l, i) => `<span class="mmv-lane-key" style="${lc(i)}"><i></i>${esc(clip(l, 10))}</span>`).join('');
     const bandAt = new Map(bands.map(b => [b.from, b.label]));
     const rows = points.map((p) => {
         const r = p.row;
         const stars = importanceStars(r.importance);
         const first = p.lanes[0];
         const last = p.lanes[p.lanes.length - 1];
-        const cells = lanes.map((_, i) => `<span class="mmv-cell${p.lanes.includes(i) ? ' is-on' : ''}" style="--mmv-lane:${i}"></span>`).join('');
+        const cells = lanes.map((_, i) => `<span class="mmv-cell${p.lanes.includes(i) ? ' is-on' : ''}" style="${lc(i)}"></span>`).join('');
         const link = last > first ? `<span class="mmv-link" style="--mmv-from:${first};--mmv-span:${last - first}"></span>` : '';
         const cls = `mmv-stop${stars >= 4 ? ' is-major' : ''}${r.star ? ' is-star' : ''}${r.hidden ? ' is-hidden' : ''}${dim.has(r.id) ? ' is-dim' : ''}${open === r.id ? ' is-open' : ''}`;
         const meta = [r.when, r.where, r.people.join(', ')].filter(Boolean).map(esc).join(' · ');
-        const band = bandAt.has(p.x) && bandAt.get(p.x) ? `<li class="mmv-day"><span class="mmv-rail" style="--mmv-lanes:${n}">${lanes.map((_, i) => `<span class="mmv-cell" style="--mmv-lane:${i}"></span>`).join('')}</span><b>${esc(bandAt.get(p.x))}</b></li>` : '';
+        const band = bandAt.has(p.x) && bandAt.get(p.x) ? `<li class="mmv-day"><span class="mmv-rail" style="--mmv-lanes:${n}">${lanes.map((_, i) => `<span class="mmv-cell" style="${lc(i)}"></span>`).join('')}</span><b>${esc(bandAt.get(p.x))}</b></li>` : '';
         return `${band}<li class="${cls}" data-id="${esc(r.id)}" tabindex="0" role="button">
             <span class="mmv-rail" style="--mmv-lanes:${n}">${cells}${link}</span>
             <span class="mmv-stop-body">
