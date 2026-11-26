@@ -139,12 +139,18 @@
                             <option value="secret">비밀</option>
                             <option value="impression">인상</option>
                         </select>
+                        <button type="button" class="menu_button memoria__filt-btn" id="memoria_memory_filt" aria-expanded="false" aria-controls="memoria_memory_filters" title="종류 고르기 · 회상하지 않을 말">
+                            <i class="fa-solid fa-sliders" aria-hidden="true"></i>
+                            <span>필터</span>
+                        </button>
                     </div>
+                    <div id="memoria_memory_filters" class="memoria__filters">
                     <div id="memoria_kind_chips" class="memoria__kindbar" role="group" aria-label="종류로 고르기"></div>
                     <label class="memoria__search memoria__mute" for="memoria_recall_mute" title="이 채팅에서 회상하지 않을 말 (쉼표로 구분). 그 말이 들어간 기억과 옛 챕터는 회상으로 싣지 않습니다. 기억은 지워지지 않고, 채팅마다 따로 저장됩니다.">
                         <i class="fa-solid fa-volume-xmark" aria-hidden="true"></i>
                         <input type="text" id="memoria_recall_mute" placeholder="회상하지 않을 말 (쉼표로 구분)" autocomplete="off">
                     </label>
+                    </div>
                     <small class="memoria__count" id="memoria_memory_count"></small>
                     <div id="memoria_memory_list" class="memoria__mem-list"></div>
                 </div>

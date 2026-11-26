@@ -9496,6 +9496,8 @@ function renderMemoriesPanel() {
     const search = String($('#memoria_memory_search').val() || '').toLowerCase();
     if (!$('#memoria_recall_mute').is(':focus')) $('#memoria_recall_mute').val((store.recallMute || []).join(', '));
     const kindFilter = String($('#memoria_memory_kind_filter').val() || '');
+    // 휴대폰에서 접어 둔 「필터」 — 종류를 골랐거나 회상하지 않을 말이 있으면 단추에 표시한다
+    $('#memoria_memory_filt').toggleClass('is-on', !!kindFilter || !!(store.recallMute || []).length);
 
     let items = [...store.memories].sort((a, b) => b.turnIndex - a.turnIndex);
     if (kindFilter) items = items.filter(m => m.kind === kindFilter);
@@ -9949,11 +9951,18 @@ function renderMilestonesPanel() {
         return;
     }
     for (const e of [...store.milestones].sort((a, b) => (a.turnIndex || 0) - (b.turnIndex || 0))) {
+        // 윗줄은 배지 · 때와 사람 · 단추, 그 아래 제목, 설명은 폭 전체 (배지와 제목이 한 줄에 엉켜 꺾이던 것)
+        const meta = [`t${e.turnIndex || '?'}`, (e.participants || []).map(escapeHtml).join(', ')].filter(Boolean).join(' · ');
         list.append($(`
-            <div class="memoria__row" data-id="${e.id}">
-                <span class="memoria__row-text"><span class="memoria__badge ${e.grade === 'major' ? 'memoria__badge--arc' : ''}">${e.grade === 'major' ? '전환점' : '사건'}</span> <b>${escapeHtml(e.title)}</b>${e.pinned ? ' <span class="memoria__badge">늘 실림</span>' : ''}${e.summary ? ` — ${escapeHtml(e.summary)}` : ''} <small>(t${e.turnIndex || '?'}${(e.participants || []).length ? ` · ${e.participants.map(escapeHtml).join(', ')}` : ''})</small></span>
-                <i class="fa-solid fa-thumbtack memoria-milestone-pin${e.pinned ? ' is-on' : ''}" title="${e.pinned ? '고정 풀기' : '고정 — 오래돼도 장부에서 밀려나지 않게 (여섯까지)'}"></i>
-                <i class="fa-solid fa-trash memoria-milestone-delete" title="삭제"></i>
+            <div class="memoria__row memoria__mile${e.grade === 'major' ? ' is-major' : ''}" data-id="${e.id}">
+                <div class="memoria__mile-top">
+                    <span class="memoria__badge ${e.grade === 'major' ? 'memoria__badge--arc' : ''}">${e.grade === 'major' ? '전환점' : '사건'}</span>${e.pinned ? '<span class="memoria__badge">늘 실림</span>' : ''}
+                    <small class="memoria__mile-meta">${meta}</small>
+                    <i class="fa-solid fa-thumbtack memoria-milestone-pin${e.pinned ? ' is-on' : ''}" title="${e.pinned ? '고정 풀기' : '고정 — 오래돼도 장부에서 밀려나지 않게 (여섯까지)'}"></i>
+                    <i class="fa-solid fa-trash memoria-milestone-delete" title="삭제"></i>
+                </div>
+                <b class="memoria__mile-title">${escapeHtml(e.title)}</b>
+                ${e.summary ? `<p class="memoria__mile-desc">${escapeHtml(e.summary)}</p>` : ''}
             </div>
         `));
     }
@@ -11077,6 +11086,11 @@ function bindUI() {
     // ── 기억 브라우저
     $('#memoria_memory_search').on('input', renderMemoriesPanel);
     $('#memoria_memory_kind_filter').on('change', renderMemoriesPanel);
+    $('#memoria_memory_filt').on('click', function () {
+        const open = !$('#memoria_memory_filters').hasClass('is-open');
+        $('#memoria_memory_filters').toggleClass('is-open', open);
+        $(this).attr('aria-expanded', String(open));
+    });
     $('#memoria_settings').on('click', '.memoria__kindchip', function () {
         const kind = String($(this).data('kind') ?? '');
         const $sel = $('#memoria_memory_kind_filter');
@@ -11113,6 +11127,7 @@ function bindUI() {
         const store = getStore();
         store.recallMute = parsePhraseList($(this).val()).slice(0, 60);
         $(this).val(store.recallMute.join(', '));
+        $('#memoria_memory_filt').toggleClass('is-on', !!$('#memoria_memory_kind_filter').val() || !!store.recallMute.length);
         persistStore(); updateInjection();
     });
     $('#memoria_settings').on('click', '.memoria-mem-revive', function () {

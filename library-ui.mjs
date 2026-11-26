@@ -41,10 +41,18 @@ export async function showArchiveLibrary({ getContext, getRequestHeaders, downlo
         const selected = new Set();
         let activeOwner = null, overviewState = null, selectionControls = [];
         let backupErrors = [];
+        // 체크 칸과 아래 백업 막대는 「골라서 백업」을 눌렀을 때만 — 평소 목록은 읽기 쉽게 비워 둔다
+        let picking = false;
         const options = () => ({ query: ui('search').value, filter: ui('filter').value, sort: ui('sort').value });
         const ownerEntries = () => (snapshot?.entries || []).filter(e => ownerKey(e) === activeOwner?.key);
         const filtered = () => filterLibrary(activeOwner ? ownerEntries() : snapshot?.entries || [], options());
         const message = text => { ui('message').textContent = text; ui('message').hidden = !text; };
+        // 다 끝난 다운로드 안내는 잠깐 뜨는 알림으로 (알림을 못 띄우는 곳에서는 목록 위 글로)
+        const notice = text => {
+            const toast = globalThis.toastr;
+            if (typeof toast?.success === 'function') { try { toast.success(text, 'Memoria'); message(''); return; } catch { /* 글로 남긴다 */ } }
+            message(text);
+        };
         const element = (tag, className, text) => {
             const node = document.createElement(tag);
             if (className) node.className = className;
@@ -99,8 +107,13 @@ export async function showArchiveLibrary({ getContext, getRequestHeaders, downlo
         }
 
         function renderSelection() {
-            ui('selection').textContent = selected.size ? `총 ${number(selected.size)}개 선택` : '선택 없음';
-            action('backup').textContent = selected.size ? `${number(selected.size)}개 백업` : '선택 백업';
+            root.classList.toggle('is-picking', picking);
+            root.classList.toggle('is-backing', busy === 'backup');
+            ui('selection').textContent = !picking ? '백업을 준비하고 있어요…' : selected.size ? `${number(selected.size)}개 골랐어요` : '체크 칸을 눌러 백업할 채팅을 골라요';
+            action('backup').textContent = selected.size ? `${number(selected.size)}개 백업` : '백업';
+            action('pick').textContent = picking ? '고르기 끝' : '골라서 백업';
+            action('pick').setAttribute('aria-pressed', String(picking));
+            action('pick').disabled = busy === 'scan';
             action('backup').disabled = !!busy || !selected.size;
             action('select').disabled = !!busy || !filtered().some(e => e.hasStore);
             action('clear').disabled = !!busy || !selected.size;
@@ -240,7 +253,7 @@ export async function showArchiveLibrary({ getContext, getRequestHeaders, downlo
                     const payload = await readLibraryExport(entries[0], { post, live, signal: controller.signal });
                     if (disposed || controller.signal.aborted) return;
                     download(JSON.stringify(payload, null, 2), backupFilename(entries[0]), 'application/json');
-                    message('JSON 다운로드를 요청했습니다. 기기의 다운로드 목록에서 파일을 확인해 주세요.');
+                    notice('JSON 다운로드를 요청했어요. 기기의 다운로드 목록에서 파일을 확인해 주세요.');
                 } else {
                     const result = await buildLibraryBackup(entries, { post, live, signal: controller.signal, scanIncomplete: snapshot?.phase !== 'complete',
                         onProgress: p => { if (!disposed) message(`백업 준비 ${number(p.done)} / ${number(p.total)} · 성공 ${number(p.successes)} · 실패 ${number(p.failures)}`); } });
@@ -248,7 +261,8 @@ export async function showArchiveLibrary({ getContext, getRequestHeaders, downlo
                     backupErrors = result.failures;
                     if (result.blob) {
                         download(result.blob, `Memoria_서고백업_${new Date().toISOString().replace(/[:.]/g, '-')}.zip`, 'application/zip');
-                        message(`${number(result.successes.length)}개 채팅의 ZIP 다운로드를 요청했습니다.${result.failures.length ? ` ${number(result.failures.length)}개는 백업하지 못했습니다. 실패 내역을 확인해 주세요.` : ' 기기의 다운로드 목록에서 파일을 확인해 주세요.'}`);
+                        if (result.failures.length) message(`${number(result.successes.length)}개 채팅의 ZIP 다운로드를 요청했어요. ${number(result.failures.length)}개는 백업하지 못했어요. 실패 내역을 확인해 주세요.`);
+                        else notice(`${number(result.successes.length)}개 채팅의 ZIP 다운로드를 요청했어요.`);
                     } else message('백업한 채팅이 없습니다. 실패 내역을 확인해 주세요.');
                 }
             } catch (error) { if (!disposed) message(controller.signal.aborted ? '백업 준비를 중단했습니다. 파일은 내려받지 않았습니다.' : error.message); }
@@ -272,9 +286,15 @@ export async function showArchiveLibrary({ getContext, getRequestHeaders, downlo
         for (const key of ['search', 'filter', 'sort']) ui(key).addEventListener(key === 'search' ? 'input' : 'change', () => { page = 0; renderList(); });
         action('select').addEventListener('click', () => { for (const e of filtered()) if (e.hasStore) selected.add(e.key); renderList(); });
         action('clear').addEventListener('click', () => { selected.clear(); renderList(); });
+        action('pick').addEventListener('click', () => {
+            picking = !picking;
+            if (!picking) selected.clear();
+            renderList();
+            if (picking) root.querySelector('.ml-check-wrap input')?.focus({ preventScroll: true });
+        });
         const movePage = delta => {
             page += delta; renderList();
-            ui('list').style.scrollMarginTop = `${root.querySelector('.ml-backup-bar').offsetHeight + 16}px`;
+            ui('list').style.scrollMarginTop = '16px';
             ui('list').scrollIntoView({ block: 'start' });
         };
         action('prev').addEventListener('click', () => movePage(-1));
