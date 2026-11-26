@@ -1778,3 +1778,5 @@ body[data-memoria-paper="dark"] :is(#memoria_settings.memoria, .memoria-library,
     #memoria_settings .memoria__tabs { gap: 2px; }
     #memoria_settings .memoria__tab { padding: 7px 8px; }
 }
+/* 사이 이름 — 관계 카드 머리에 */
+.mmv-tie-name { margin-left: 8px; padding: 1px 8px; border-radius: 999px; border: 1px solid var(--mmv-line); font-size: .82em; font-weight: 600; color: var(--mmv-ink); white-space: nowrap; }

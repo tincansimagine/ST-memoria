@@ -1039,7 +1039,7 @@ export function normalizeRecordLabels(text) {
 export const BOND_KINDS = Object.freeze({
     love: '사랑', crush: '호감·짝사랑', family: '가족', friend: '우정', ally: '동료·편', rival: '라이벌', hostile: '적대', work: '일·계약', mixed: '복잡', other: '그 밖',
 });
-const BOND_KIND_ALIASES = { complicated: 'mixed', complex: 'mixed', enemy: 'hostile', enemies: 'hostile', lover: 'love', lovers: 'love', romance: 'love', romantic: 'love', friends: 'friend', friendship: 'friend', colleague: 'ally', partner: 'ally', business: 'work', contract: 'work' };
+const BOND_KIND_ALIASES = { one_sided: 'crush', unrequited: 'crush', complicated: 'mixed', complex: 'mixed', enemy: 'hostile', enemies: 'hostile', lover: 'love', lovers: 'love', romance: 'love', romantic: 'love', friends: 'friend', friendship: 'friend', colleague: 'ally', partner: 'ally', business: 'work', contract: 'work' };
 // 앞의 것이 이긴다: 뒤섞인 감정은 먼저, 미움은 사랑보다 먼저 본다 ("사랑했지만 이제는 증오" → 적대)
 const BOND_KIND_RULES = [
     ['mixed', /애증|복잡|미묘|뒤섞|갈팡|혼란스러운|love[- ]hate|complicated|conflicted|mixed feelings|torn/i],
@@ -1192,4 +1192,121 @@ export function mergeLoss(parts, merged, max = 2400) {
     if (all < 0.12) return ''; // 요약 언어가 달라 글자로 견줄 수 없다
     const head = coverOf(mergeGrams(src[0]), whole), tail = coverOf(mergeGrams(src[src.length - 1]), whole);
     return head < 0.2 && head < tail * 0.45 ? 'head' : '';
+}
+
+/* ------------------------------------------------------------
+ * 사이 이름 · 변화 기록 · 지금의 마음
+ * - 사이 이름: 한 사람이 다른 한 사람에게 품은 마음의 핵심을 관계 전체에서 읽어 붙인 짧은 이름 ("죄책감 섞인 집착")
+ * - 변화 기록: 한 번의 기록에서 무엇이 무엇으로 왜 바뀌었는지 (관계 · 감정 · 상황 · 성장)
+ * - 지금의 마음: 장면에 있는 사람들끼리의 가장 최근 마음 몇 줄 (장부의 매 턴 바뀌는 구간에 싣는다)
+ * ------------------------------------------------------------ */
+
+/** 말끝을 흐리는 말 — 사이 이름은 근거대로 단정해 적는다 */
+const TIE_HEDGE = /[?？]|아마|불확실|불명|모름|미정|일지도|인 ?듯|같음|같다|maybe|perhaps|unclear|uncertain|unknown|possibl|probabl|seem|\btbd\b|\bn\/a\b|不确定|可能|也许|或许|不明|たぶん|かも/i;
+const TIE_BLANK = /^(null|none|n\/a|없음|无|なし|-|—)?$/i;
+const tieSquash = (s, max) => String(s ?? '').replace(/\s+/g, ' ').trim().slice(0, max);
+/** 사이 이름 다듬기: 따옴표 · 끝 문장부호를 떼고, 말끝을 흐린 괄호는 걷어 낸다. 그래도 흐린 말이 남으면 받지 않는다 ('') */
+export function cleanTieName(raw, max = 60) {
+    let t = tieSquash(raw, max * 2).replace(/^["'“”‘’「『《〈]+|["'“”‘’」』》〉]+$/g, '').replace(/[.。,，;；:：]+$/, '').trim();
+    if (TIE_BLANK.test(t)) return '';
+    if (TIE_HEDGE.test(t)) t = t.replace(/\s*[(（\[][^()（）\[\]]*[)）\]]\s*/g, ' ').replace(/\s+/g, ' ').trim();
+    if (!t || TIE_HEDGE.test(t)) return '';
+    return t.length > max ? t.slice(0, max).trim() : t;
+}
+
+export const SHIFT_KINDS = Object.freeze({ relationship: '관계', emotion: '감정', situation: '상황', growth: '성장' });
+export function shiftKind(raw) {
+    const t = String(raw ?? '').trim().toLowerCase();
+    if (SHIFT_KINDS[t]) return t;
+    if (/relat|bond|tie|관계|사이|关系|関係/.test(t)) return 'relationship';
+    if (/grow|develop|matur|character|arc|성장|성숙|成长|成長/.test(t)) return 'growth';
+    if (/situat|circum|status|state|event|상황|처지|신변|状况|状況|处境/.test(t)) return 'situation';
+    return 'emotion';
+}
+/** 변화 한 줄을 정제한다 — 누가 · 무엇으로 바뀌었는지가 없으면 받지 않는다 (null) */
+export function cleanShift(raw) {
+    if (!raw || typeof raw !== 'object') return null;
+    const na = (v, n) => { const t = tieSquash(v, n); return TIE_BLANK.test(t) ? '' : t; };
+    let who = na(raw.who, 60), toward = na(raw.toward, 60), from = na(raw.from, 90), to = na(raw.to, 90);
+    if (!toward) { const p = splitPair(who); if (p) { who = p.from; toward = p.to; } }
+    if (!from) { const p = splitPair(to); if (p) { from = p.from; to = p.to; } }
+    if (!who || !to || tieNorm(from) === tieNorm(to)) return null;
+    return { kind: shiftKind(raw.kind), who, toward, from, to, why: na(raw.why, 180) };
+}
+const tieNorm = (s) => String(s ?? '').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '');
+const tieGrams = (s) => { const g = new Set(); for (let i = 0; i < s.length - 1; i++) g.add(s.slice(i, i + 2)); return g; };
+/** 두 글이 사실상 같은 말인가 (띄어쓰기 · 문장부호 · 조사 조금 차이는 같은 것으로) */
+export function sameText(a, b) {
+    const x = tieNorm(a), y = tieNorm(b);
+    if (!x || !y) return x === y;
+    if (x === y || (x.length >= 4 && y.length >= 4 && (x.includes(y) || y.includes(x)))) return true;
+    const ga = tieGrams(x), gb = tieGrams(y);
+    if (ga.size < 3 || gb.size < 3) return false;
+    let hit = 0;
+    for (const g of ga) if (gb.has(g)) hit++;
+    return hit / Math.min(ga.size, gb.size) >= 0.75;
+}
+/** 같은 변화를 두 번 적은 것인가 — 같은 사람 · 같은 상대 · 같은 종류이고 "무엇으로"가 같은 말이다. key: 이름을 견줄 열쇠 */
+export function sameShift(a, b, key = tieNorm) {
+    return a.kind === b.kind && key(a.who) === key(b.who) && key(a.toward || '') === key(b.toward || '') && sameText(a.to, b.to);
+}
+/** 사서의 답에서 사이 이름과 변화를 읽는다 — 관계선의 단계가 없어도 이름만 적힌 줄을 받는다 */
+export function readTies(raw) {
+    const rows = (v) => (Array.isArray(v) ? v : []).filter(x => x && typeof x === 'object');
+    const out = { names: [], shifts: [] };
+    for (const b of rows(raw?.bonds ?? raw?.relationships).slice(0, 14)) {
+        let from = tieSquash(b.from, 60), to = tieSquash(b.to, 60);
+        if (!to) { const p = splitPair(from); if (p) { from = p.from; to = p.to; } }
+        const name = cleanTieName(b.name), kind = b.kind ? bondKindOf('', b.kind) : '';
+        if (from && to && tieNorm(from) !== tieNorm(to) && (name || (kind && kind !== 'other'))) out.names.push({ from, to, name, kind: kind === 'other' ? '' : kind });
+    }
+    for (const s of rows(raw?.shifts ?? raw?.changes).slice(0, 8)) {
+        const c = cleanShift(s);
+        if (c && out.shifts.length < 4 && !out.shifts.some(x => sameShift(x, c))) out.shifts.push(c);
+    }
+    return out;
+}
+/**
+ * 장면에 함께 있는 사람들끼리의 가장 최근 마음. 변화 기록(감정 · 관계) 가운데 그 둘 사이의 가장 늦은 것을 쓰고, 변화 기록이 없으면 사이 이름을 쓴다.
+ * inScene: 그 이름이 지금 장면에 있는가. 늦게 적힌 것부터 max 줄
+ */
+export function latestFeelings(shifts, bonds, inScene, key = tieNorm, max = 3) {
+    const rows = new Map();
+    for (const s of shifts || []) {
+        if ((s.kind !== 'emotion' && s.kind !== 'relationship') || !s.toward || !s.to || !inScene(s.who) || !inScene(s.toward)) continue;
+        const k = `${key(s.who)}\u0001${key(s.toward)}`, old = rows.get(k), turn = s.turnIndex ?? -1;
+        if (!old || turn >= old.turn) rows.set(k, { from: s.who, to: s.toward, now: s.to, was: s.from || '', why: s.why || '', turn });
+    }
+    for (const b of bonds || []) {
+        if (!b.name || !inScene(b.from) || !inScene(b.to)) continue;
+        const k = `${key(b.from)}\u0001${key(b.to)}`;
+        if (!rows.has(k)) rows.set(k, { from: b.from, to: b.to, now: b.name, was: '', why: '', turn: b.nameTurn ?? -1 });
+    }
+    return [...rows.values()].sort((a, b) => b.turn - a.turn || a.from.localeCompare(b.from) || a.to.localeCompare(b.to)).slice(0, Math.max(0, max));
+}
+
+/* ------------------------------------------------------------
+ * 한 카드가 여러 인물을 맡는 채팅
+ * ------------------------------------------------------------ */
+
+const castNameKey = (s) => String(s ?? '').toLowerCase().replace(/[\s._\-'"`·]+/g, '');
+/** 인물 소개 줄의 머리말 — "이름: 한서진", "Name: Jun", "캐릭터 1: …", "[인물] …" */
+const CARD_NAME_LINE = /^[ \t>*_#\-•·\d.)\[\]【】]*(?:이름|성명|캐릭터(?:\s*이름|\s*\d+)?|인물(?:\s*\d+)?|등장인물(?:\s*\d+)?|name|full\s*name|character(?:\s*name|\s*\d+)?|npc(?:\s*\d+)?|姓名|名字|名前)[ \t*_\]】]*[:：=][ \t*_"'「『]*([^\n,，/(（|:：*"'」』]{1,40})/gimu;
+/**
+ * 카드 글(소개 · 성격 · 시나리오)이 인물을 둘 넘게 소개하고 그 가운데 카드 이름이 없으면, 이 카드는 여러 인물을 연기한다 — 소개된 이름들을 돌려준다 (아니면 빈 목록).
+ * 인물 명단이 비어 있는 첫 턴에도 알아볼 수 있다. 내 캐릭터(사용자) 이름과 {{user}} · {{char}} 자리는 세지 않는다
+ */
+export function cardVoicesMany(card, userName = '') {
+    const label = castNameKey(card?.name), text = [card?.description, card?.personality, card?.scenario].filter(Boolean).join('\n');
+    if (!label || text.length < 40) return [];
+    const names = new Map();
+    let self = false;
+    for (const m of text.matchAll(CARD_NAME_LINE)) {
+        const raw = m[1].replace(/\{\{[^}]*\}\}/g, '').trim(), k = castNameKey(raw);
+        if (!k) { if (/\{\{\s*char\s*\}\}/i.test(m[1])) self = true; continue; }
+        if (k.length > 24 || k === castNameKey(userName)) continue;
+        if (k === label || k.includes(label) || (label.includes(k) && k.length * 2 >= label.length)) { self = true; continue; }
+        if (!names.has(k)) names.set(k, raw);
+    }
+    return !self && names.size >= 2 ? [...names.values()].slice(0, 12) : [];
 }

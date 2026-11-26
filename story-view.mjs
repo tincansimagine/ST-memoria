@@ -261,7 +261,7 @@ export function bondMapSvg(bonds, { picked = '', focus = '' } = {}) {
     const CAP_PX = 10.5;
     const BOX_H = 26;
     const size = new Map(names.map(x => [x, Math.max(44, Math.min(132, textW(clip(x, 10), NAME_PX) + 20))]));
-    const caps = list.map(b => clip(b.stage, 12));
+    const caps = list.map(b => clip(b.name || b.stage, 12));
     const longest = Math.max(0, ...caps.map(c => textW(c, CAP_PX)));
 
     // 자리: 둘이면 나란히, 셋부터는 타원 위에. 선에 글을 적을 만큼은 벌린다
@@ -332,7 +332,7 @@ export function bondMapSvg(bonds, { picked = '', focus = '' } = {}) {
             <path class="mmv-edge-line" d="${d}"/>
             <path class="mmv-edge-head" d="${head}"/>
             ${caps[i] ? `<text x="${r1(spot.cx)}" y="${r1(spot.cy)}" text-anchor="middle" dy="0.35em">${esc(caps[i])}</text>` : ''}
-            <title>${esc(`${b.from} → ${b.to}: ${b.stage}`)}</title>
+            <title>${esc(`${b.from} → ${b.to}: ${b.name ? `${b.name} — ` : ''}${b.stage}`)}</title>
         </g>`,
         };
     });
@@ -394,7 +394,7 @@ export function bondCardsHtml(bonds, { picked = '', focus = '' } = {}) {
             + shown.map((st, i) => `<li class="${i === shown.length - 1 ? 'is-now' : ''}" style="--mmv-step:${i}"><b>${esc(st.stage)}</b>${st.basis ? `<small>${esc(st.basis)}</small>` : ''}</li>`).join('');
         const extra = [now.calls ? `<span class="mmv-chip">부르는 말 · ${esc(now.calls)}</span>` : '', now.unsaid ? `<span class="mmv-chip mmv-chip--open">말하지 못한 것 · ${esc(now.unsaid)}</span>` : ''].join('');
         return `<section class="mmv-bond${picked === bond.id ? ' is-picked' : ''}" data-id="${esc(bond.id)}">
-            <h5>${esc(bond.from)} <span class="mmv-arrow">→</span> ${esc(bond.to)}${bond.kind && bond.kind !== 'other' && bond.kindLabel ? `<span class="mmv-kind-tag mmv-kind--${esc(bond.kind)}"><i aria-hidden="true"></i>${esc(bond.kindLabel)}</span>` : ''}</h5>
+            <h5>${esc(bond.from)} <span class="mmv-arrow">→</span> ${esc(bond.to)}${bond.name ? `<span class="mmv-tie-name" title="사이 이름 — 관계 전체에서 본 마음의 핵심">${esc(bond.name)}</span>` : ''}${bond.kind && bond.kind !== 'other' && bond.kindLabel ? `<span class="mmv-kind-tag mmv-kind--${esc(bond.kind)}"><i aria-hidden="true"></i>${esc(bond.kindLabel)}</span>` : ''}</h5>
             <ol class="mmv-stairs">${stairs}</ol>
             ${extra ? `<div class="mmv-chips">${extra}</div>` : ''}
         </section>`;
@@ -428,7 +428,7 @@ export const CHANGE_KINDS = Object.freeze({ bond: '관계', mood: '감정', stat
  * characters: [{ name, growth: [{ text, turn }] }]. moodSlots·skipSlots: 감정으로 볼 칸 / 자잘해서 뺄 칸.
  * 반환: 최근 것부터 [{ id, kind, turn, who: [이름], title, before, after, note }]
  */
-export function buildChanges({ bonds = [], states = [], characters = [], moodSlots = [], skipSlots = [], slotLabel = (s) => s } = {}) {
+export function buildChanges({ bonds = [], states = [], characters = [], shifts = [], moodSlots = [], skipSlots = [], slotLabel = (s) => s } = {}) {
     const out = [];
     const same = (p, q) => String(p ?? '').trim() === String(q ?? '').trim();
     for (const b of bonds || []) {
@@ -450,6 +450,15 @@ export function buildChanges({ bonds = [], states = [], characters = [], moodSlo
         for (const g of (Array.isArray(c?.growth) ? c.growth : [])) {
             if (g?.text) out.push({ kind: 'growth', turn: Number(g.turn) || 0, who: [c.name], title: c.name, before: '', after: g.text, note: '' });
         }
+    }
+    // 사서가 직접 적은 변화 — 같은 턴 · 같은 사람의 같은 갈래 줄이 이미 있으면 그 줄에 까닭만 붙이고, 없으면 새 줄로
+    const SHIFT_AS = { relationship: 'bond', emotion: 'mood', situation: 'state', growth: 'growth' };
+    for (const x of shifts || []) {
+        if (!x?.who || !x.to) continue;
+        const kind = SHIFT_AS[x.kind] || 'mood', turn = Number(x.turnIndex ?? x.turn) || 0, who = [x.who, ...(x.toward ? [x.toward] : [])];
+        const twin = out.find(r => r.kind === kind && r.turn === turn && r.who.length === who.length && r.who.every((n, i) => n === who[i]));
+        if (twin) { if (!twin.note && x.why) twin.note = x.why; continue; }
+        out.push({ kind, turn, who, title: x.toward ? `${x.who} → ${x.toward}` : x.who, before: x.from || '', after: x.to, note: x.why || '' });
     }
     out.sort((p, q) => q.turn - p.turn);
     return out.map((r, i) => ({ ...r, id: `ch${i}` }));

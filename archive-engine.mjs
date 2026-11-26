@@ -127,6 +127,13 @@ export function validateArchive(value) {
     if (copy.perspectiveScope != null && !['default', 'chat'].includes(copy.perspectiveScope)) throw new Error('기억·서술 방식의 적용 범위가 올바르지 않습니다.');
     if (copy.perspectiveScope === 'chat' && typeof copy.perspective !== 'string') throw new Error('이 채팅에 적용할 기억·서술 방식이 없습니다.');
     if (copy.packetPin != null && typeof copy.packetPin.text !== 'string') throw new Error('고정 장부의 형식이 올바르지 않습니다.');
+    // 변화 기록 · 검사 상태 · 채팅별 카드 설정 — 모양이 어긋난 것만 걷어 낸다
+    if (copy.shifts != null) {
+        if (Array.isArray(copy.shifts)) copy.shifts = copy.shifts.filter(s => s && typeof s === 'object' && typeof s.who === 'string' && typeof s.to === 'string' && Number.isFinite(s.turnIndex));
+        else delete copy.shifts;
+    }
+    if (copy.audit != null && (typeof copy.audit !== 'object' || Array.isArray(copy.audit))) delete copy.audit;
+    if (copy.cardCast != null && copy.cardCast !== 'one' && copy.cardCast !== 'many') delete copy.cardCast;
     return copy;
 }
 

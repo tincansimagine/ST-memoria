@@ -191,6 +191,10 @@
                             <p>한 사람이 다른 한 사람을 지금 어떻게 대하는지 — 단계, 근거가 된 장면, 부르는 말, 아직 말하지 못한 것. 관계가 실제로 움직인 장면에서만 기록되고, 지나온 단계가 함께 남아 AI가 감정선을 건너뛰거나 되돌리지 않게 합니다.</p>
                         </div>
                         <div class="memoria__compact-actions">
+                            <div class="menu_button" id="memoria_ties_scan" title="지난 요약에서 사이 이름 · 변화를 찾아 채워요 (요약만 읽어요 · 한 번 누를 때 호출 4번까지)">
+                                <i class="fa-solid fa-wand-magic-sparkles"></i>
+                                <span>찾기</span>
+                            </div>
                             <div class="menu_button" id="memoria_bond_add" title="관계선 추가">
                                 <i class="fa-solid fa-heart-circle-plus"></i>
                                 <span>추가</span>
@@ -377,6 +381,12 @@
                         <small id="memoria_perspective_scope_help" class="memoria__hint" aria-live="polite"></small>
                         <small id="memoria_perspective_help" class="memoria__hint" aria-live="polite"></small>
                         <small>원문·요약에 이미 나온 비밀까지 가리지는 않습니다. 장부를 직접 고정했다면 고정을 해제해야 새 방식이 적용됩니다.</small>
+                    </div>
+                    <div class="memoria__perspective">
+                        <label for="memoria_card_cast">이 카드가 맡는 인물 (이 채팅만)</label>
+                        <select id="memoria_card_cast"><option value="">자동</option><option value="one">한 인물</option><option value="many">여러 인물 (해설자·시뮬레이터 카드)</option></select>
+                        <small id="memoria_card_cast_help" class="memoria__hint" aria-live="polite"></small>
+                        <small>한 카드가 여러 인물을 연기하면 카드 이름은 말머리일 뿐이에요. 그 이름으로 인물 카드·상태·관계선을 만들지 않고, 대사는 글에 적힌 화자에게 돌려요. 자동은 인물 목록과 카드 글로 알아봐요.</small>
                     </div>
                     <label class="memoria__toggle-row" for="memoria_associative_recall">
                         <input type="checkbox" id="memoria_associative_recall">
@@ -778,6 +788,10 @@
                         <input type="checkbox" id="memoria_forget_hidden">
                         <span><strong>직접 숨긴 메시지 잊기</strong><small>기록한 뒤에 직접 숨긴 메시지의 기록을 걷어 냅니다. 자동 숨김은 그대로입니다.</small></span>
                     </label>
+                    <label class="memoria__toggle-row" for="memoria_tie_notes">
+                        <input type="checkbox" id="memoria_tie_notes">
+                        <span><strong>사이 이름 · 변화 기록</strong><small>관계선마다 마음의 핵심을 짧은 이름으로(예: 죄책감 섞인 집착), 관계·감정·상황·성장이 바뀐 순간을 까닭과 함께 받아 둡니다. 턴 기록과 같은 호출에 받아 호출은 늘지 않습니다.</small></span>
+                    </label>
                     <div class="memoria__field-grid">
                         <div class="memoria__field">
                             <label for="memoria_scene_cards" title="옛 구간을 떠올릴 때 그때 있었던 일을 순서대로, 실제 대사와 함께 펼치는 수 (0 = 끔).">장면 카드 수</label>
@@ -786,6 +800,10 @@
                         <div class="memoria__field">
                             <label for="memoria_mind_lines" title="장면 속 인물마다 마음에 둔 것(속마음 기억)을 몇 줄까지 따로 실을지 (0 = 끔).">속마음 줄 수</label>
                             <input type="number" id="memoria_mind_lines" min="0" max="3" step="1">
+                        </div>
+                        <div class="memoria__field">
+                            <label for="memoria_feeling_lines" title="장면에 함께 있는 사람들끼리 가장 최근에 적힌 마음을 '지금' 장부에 몇 줄까지 실을지 (0 = 끔). 고정 장부의 관계선보다 새것입니다.">지금의 마음 줄 수</label>
+                            <input type="number" id="memoria_feeling_lines" min="0" max="6" step="1">
                         </div>
                         <div class="memoria__field">
                             <label for="memoria_recall_voice" title="캐릭터가 지난 일을 얼마나 먼저 꺼낼지.">지난 일 꺼내기</label>
