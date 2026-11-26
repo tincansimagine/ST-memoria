@@ -1611,12 +1611,16 @@ function bannedPhrases() {
     return bannedCache.list;
 }
 
-function persistStore() {
+/**
+ * 서고를 저장한다. ride: 실리태번이 곧 채팅을 저장한다(답을 받은 직후 등) — 서고는 채팅 파일 맨 앞의 정보 칸에 있어 그 저장에 함께 실린다.
+ * 그때는 따로 저장을 보내지 않는다 (긴 채팅은 저장 한 번에 대화 전체를 서버로 보낸다)
+ */
+function persistStore({ ride = false } = {}) {
     lastBuildKey = ''; // 같은 턴에서 편집·정리한 결과도 즉시 주입에 반영
     injectionEpoch++;
     markPanelsDirty(); // 닫혀 있는 탭은 다음에 열 때 다시 그린다
     if (!getCurrentChatId()) return;
-    saveMetadataDebounced();
+    if (!ride) saveMetadataDebounced();
     scheduleLocalSync();
 }
 
@@ -6612,7 +6616,7 @@ function auditRecallEcho(mes, mesId = chat.indexOf(mes)) {
     const audit = recallAudit;
     recallAudit = null; // 1회 소모
     // 이 답(스와이프마다)을 만들 때 실린 기억을 적어 둔다 — 메시지의 👁 단추가 보여 준다
-    if (audit && Date.now() - audit.at <= 30 * 60 * 1000 && noteShown(getStore(), mes, mesId, lastPacketDiagnostics, lastPacketTokens)) persistStore();
+    if (audit && Date.now() - audit.at <= 30 * 60 * 1000 && noteShown(getStore(), mes, mesId, lastPacketDiagnostics, lastPacketTokens)) persistStore({ ride: true }); // 답을 받은 직후 — 곧 있을 채팅 저장에 함께 실린다
     // 이 답변에 실렸던 회상을 이력에 적는다 — 다음 턴들의 "쉬어가기" 판단에 쓴다 (빈 묶음도 한 턴으로 센다)
     if (audit && mesId >= 0) noteRecallHistory(getCurrentChatId(), mesId, audit.ids);
     if (!audit || !audit.ids.length) return;
@@ -7815,6 +7819,8 @@ async function buildPacketWithinBudget(query, supervisorPlan) {
     for (const lock of parts.locks) {
         const nextBody = `${body}- [${normLockKind(lock.kind)}] ${lock.summary}\n`;
         const candidate = `${header}${nextBody}${PACKET_FOOTER}`;
+        // 어림으로도 넘치는 줄은 세지 않고 건너뛴다 (토큰 세기는 서버 왕복일 수 있다)
+        if (density > 0 && candidate.length * density > settings.tokenBudget * 1.15) continue;
         const count = await getTokenCountAsync(candidate);
         if (count <= settings.tokenBudget) { body = nextBody; text = candidate; tokens = count; }
     }

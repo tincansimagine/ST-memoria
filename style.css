@@ -2549,6 +2549,11 @@ select.mm-yn-whof { width: 100%; min-height: 36px; max-width: none; }
 
 #memoria_settings .memoria__mem-more { align-self: center; margin-top: 4px; }
 
+
+
+/* 긴 카드 목록: 화면 밖의 카드는 그리지 않고 자리만 잡아 둔다 (스크롤하면 그때 그린다) */
+#memoria_settings :is(.memoria__mem-card, .memoria__char-card, .mm-yn-card) { content-visibility: auto; contain-intrinsic-size: auto 160px; }
+
 /* ⟦armor:start⟧ — tools/armor.mjs 가 짓는 덩어리입니다. 손으로 고치지 말고 위쪽 규칙을 고친 뒤 node tools/armor.mjs 를 돌리세요. */
 #memoria_settings .inline-drawer-content :where(button, .menu_button, select, textarea, input:not([type="checkbox"]):not([type="radio"]):not([type="range"])), #memoria_tie_picker :where(button, select, input) { box-shadow: none !important; text-shadow: none !important; filter: none !important; text-transform: none !important; border-radius: 0 !important; margin: 0 !important; }
 :is(#memoria_settings, #memoria_tie_picker) .memoria__perspective select { width: 100% !important; min-width: 0 !important; }
