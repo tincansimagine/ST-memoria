@@ -1886,3 +1886,53 @@ body[data-memoria-paper="dark"] :is(#memoria_settings.memoria, .memoria-library,
 #memoria_settings .memoria-au-issues { border-top: 0; }
 #memoria_settings .memoria-au-cardtitle { font-size: .94em; font-weight: 700; margin-right: 4px; }
 #memoria_settings .memoria-au-auto { justify-content: flex-start; }
+
+/* ── 검사 탭: 테마가 menu_button · text_pole · button 에 입히는 모양을 받지 않는 전용 단추 · 입력칸, 묶음 사이 간격 ── */
+#memoria_settings #memoria_audit_drift, #memoria_settings #memoria_audit_sums { display: flex; flex-direction: column; gap: 16px; }
+#memoria_settings #memoria_audit_drift > *, #memoria_settings #memoria_audit_sums > * { margin: 0; }
+#memoria_settings .memoria-au-controls { gap: 14px; }
+#memoria_settings .memoria-au-result { gap: 14px; }
+#memoria_settings .memoria-au-sub { margin: 8px 0 0 !important; padding-top: 20px; }
+#memoria_settings .memoria-au-sub + .memoria-au-foot { margin-top: -8px !important; }
+#memoria_settings .memoria-au-row { gap: 12px; }
+#memoria_settings .memoria-au-issue, #memoria_settings #memoria_audit_sums .memoria-au-issue.mmv-gap { gap: 12px; padding: 16px 0; }
+#memoria_settings .memoria-au-card { gap: 10px; padding: 14px 16px; }
+#memoria_settings .memoria-au-gitem { gap: 6px; padding: 12px 0; }
+
+#memoria_settings button.memoria-au-btn {
+    display: inline-flex !important; align-items: center; justify-content: center; gap: 8px; width: auto !important;
+    height: 40px !important; min-height: 40px !important; margin: 0 !important; padding: 0 16px !important;
+    border: 1px solid var(--ink-line) !important; border-radius: 4px !important; background: var(--surface) !important;
+    box-shadow: none !important; filter: none !important; opacity: 1; text-shadow: none !important;
+    color: var(--text) !important; font: 600 14px/1 var(--font) !important; letter-spacing: 0; white-space: nowrap; cursor: pointer;
+}
+#memoria_settings button.memoria-au-btn * { color: inherit !important; font: inherit !important; opacity: 1 !important; }
+#memoria_settings button.memoria-au-btn:hover:enabled { border-color: var(--ink) !important; }
+#memoria_settings button.memoria-au-btn.is-primary { background: var(--ink) !important; border-color: var(--ink) !important; color: var(--surface) !important; }
+#memoria_settings button.memoria-au-btn.is-primary:hover:enabled { opacity: .88; }
+#memoria_settings button.memoria-au-btn:disabled { opacity: .35 !important; cursor: default; }
+
+#memoria_settings .memoria-au-input {
+    height: 40px !important; min-height: 40px !important; margin: 0 !important; padding: 0 10px !important;
+    border: 1px solid var(--ink-line) !important; border-radius: 4px !important; background: var(--surface) !important;
+    box-shadow: none !important; color: var(--text) !important; font: 500 15px var(--font) !important;
+}
+#memoria_settings input.memoria-au-input { width: 64px !important; text-align: center; }
+#memoria_settings select.memoria-au-input { width: auto !important; min-width: 170px; }
+#memoria_settings .memoria-au-every { gap: 10px; font-size: 15px; }
+
+/* 메시지 번호 링크 — 테마의 button 테두리 · 배경을 받지 않게 */
+#memoria_settings button.memoria-au-link.mmv-jump {
+    display: inline !important; height: auto !important; min-height: 0 !important; padding: 2px 1px !important; margin: 0 !important;
+    border: 0 !important; border-radius: 0 !important; background: none !important; box-shadow: none !important;
+    color: var(--accent) !important; font: 600 14px var(--font) !important; text-decoration: underline; text-underline-offset: 3px;
+}
+#memoria_settings button.memoria-au-textbtn { border: 0 !important; background: none !important; box-shadow: none !important; padding: 0 !important; min-height: 0 !important; height: auto !important; color: var(--accent) !important; }
+#memoria_settings button.memoria-au-mode {
+    height: 44px !important; min-height: 44px !important; margin: 0 !important; padding: 0 6px !important;
+    border: 0 !important; border-right: 1px solid var(--ink-line) !important; border-radius: 0 !important;
+    background: var(--surface) !important; box-shadow: none !important; color: var(--text) !important; font: 600 15px var(--font) !important;
+}
+#memoria_settings button.memoria-au-mode:last-child { border-right: 0 !important; }
+#memoria_settings button.memoria-au-mode.is-on { background: var(--ink) !important; color: var(--surface) !important; }
+#memoria_settings .memoria-au-issues .memoria-au-issue:first-child { padding-top: 2px; }

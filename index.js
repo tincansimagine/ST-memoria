@@ -1378,8 +1378,8 @@ function renderAuditPanel() {
     let html = `<div class="memoria-au-controls">
             <div class="memoria-au-seg" role="group" aria-label="검사 방식">${seg}</div>
             <div class="memoria-au-row">
-                ${mode === 'batch' ? `<label class="memoria-au-every">답 <input type="number" class="text_pole" id="memoria_audit_every" min="2" max="30" step="1" value="${every}" aria-label="답 몇 개마다 검사할지"> 개마다</label>` : '<span></span>'}
-                <div class="menu_button${settings.enabled ? '' : ' disabled'}" id="memoria_audit_drift_now" title="최근 답 ${every}개를 지금 검사해요 (호출 1회)"><i class="fa-solid fa-magnifying-glass"></i><span>지금 검사</span></div>
+                ${mode === 'batch' ? `<label class="memoria-au-every">답 <input type="number" class="memoria-au-input" id="memoria_audit_every" min="2" max="30" step="1" value="${every}" aria-label="답 몇 개마다 검사할지"> 개마다</label>` : '<span></span>'}
+                <button type="button" class="memoria-au-btn is-primary"${settings.enabled ? '' : ' disabled'} id="memoria_audit_drift_now" title="최근 답 ${every}개를 지금 검사해요 (호출 1회)"><i class="fa-solid fa-magnifying-glass"></i><span>지금 검사</span></button>
             </div>
             <p class="memoria-au-foot">${foot}</p>
         </div>
@@ -1388,9 +1388,9 @@ function renderAuditPanel() {
         const rest = report.checked - new Set(live.map(f => f.no)).size;
         html += `<div class="memoria-au-result">
             <h5 class="memoria-au-sub">어긋난 곳 <b>${live.length}</b><small>${auditWhen(report.at)} · #${report.from}–#${report.to} · ${report.checked}개 검사</small></h5>
-            ${live.map(f => auditFindingHtml(f, '', `<div class="menu_button memoria-au-fine" data-id="${f.id}" title="이 건은 넘겨요 — 바로잡기 메모와 ⚠ 표시에서 빠져요">괜찮아요</div>`)).join('')}
+            ${live.map(f => auditFindingHtml(f, '', `<button type="button" class="memoria-au-btn memoria-au-fine" data-id="${f.id}" title="이 건은 넘겨요 — 바로잡기 메모와 ⚠ 표시에서 빠져요">괜찮아요</button>`)).join('')}
             <p class="memoria-au-foot">${live.length ? (rest > 0 ? `나머지 ${rest}개 메시지는 기록과 맞아요` : '') : `검사한 ${report.checked}개 메시지 모두 기록과 맞아요`}${note.lines ? ` · 다음 답 ${note.left}개까지 바로잡기 메모 ${note.lines}줄이 실려요` : ''}</p>
-            ${aside.length ? `<details class="memoria-au-aside"><summary>따로 둔 것 ${aside.length}개</summary><p class="memoria-au-foot">근거 문장을 기록에서 찾지 못했거나, 괜찮다고 넘겼거나, 그 뒤로 글이 바뀐 것이에요. 사실로 다루지 않아요.</p>${aside.map(f => auditFindingHtml(f, f.dismissed ? '괜찮아요' : !f.ok ? '근거 미확인' : '글이 바뀜', f.dismissed ? `<div class="menu_button memoria-au-unfine" data-id="${f.id}">되돌리기</div>` : '')).join('')}</details>` : ''}
+            ${aside.length ? `<details class="memoria-au-aside"><summary>따로 둔 것 ${aside.length}개</summary><p class="memoria-au-foot">근거 문장을 기록에서 찾지 못했거나, 괜찮다고 넘겼거나, 그 뒤로 글이 바뀐 것이에요. 사실로 다루지 않아요.</p>${aside.map(f => auditFindingHtml(f, f.dismissed ? '괜찮아요' : !f.ok ? '근거 미확인' : '글이 바뀜', f.dismissed ? `<button type="button" class="memoria-au-btn memoria-au-unfine" data-id="${f.id}">되돌리기</button>` : '')).join('')}</details>` : ''}
             <p class="memoria-au-foot is-faint">약 ${(report.tokIn + report.tokOut).toLocaleString()}토큰${report.manual ? ' · 직접 검사' : ''}</p>
         </div>`;
     } else html += `<p class="memoria-au-empty">${settings.enabled ? '아직 검사한 적이 없어요. ‘지금 검사’를 누르거나 ‘N개마다’를 켜 보세요.' : '장기기억이 꺼져 있어요. 켜면 검사할 수 있어요.'}</p>`;
@@ -1405,14 +1405,14 @@ function renderAuditPanel() {
         sh += `<h5 class="memoria-au-sub">확인해 주세요 <b>${list.length + gaps.length}</b></h5><div class="memoria-au-issues">`;
         sh += gaps.map(g => `<div class="memoria-au-issue mmv-gap" data-from="${g.fromTurn}" data-to="${g.toTurn}">
                 <p>t${g.fromTurn}–t${g.toTurn} — ${g.manual ? '직접 지운 요약 자리예요' : '어느 요약에도 들어 있지 않아요'}</p>
-                <div class="memoria-au-acts"><span></span><div class="menu_button memoria-gap-fill" title="이 구간의 턴 기록으로 요약을 만들어 제자리에 끼워요 (호출 1회)">${gapFilling.has(`${g.fromTurn}-${g.toTurn}`) ? '채우는 중…' : '채우기'}</div></div>
+                <div class="memoria-au-acts"><span></span><button type="button" class="memoria-au-btn memoria-gap-fill" title="이 구간의 턴 기록으로 요약을 만들어 제자리에 끼워요 (호출 1회)">${gapFilling.has(`${g.fromTurn}-${g.toTurn}`) ? '채우는 중…' : '채우기'}</button></div>
             </div>`).join('');
         sh += list.map(i => {
-            const act = i.fix && AUDIT_FIX_LABEL[i.fix] ? `<div class="menu_button memoria-au-fix" data-key="${escapeHtml(i.key)}" title="${AUDIT_FIX_TITLE[i.fix]}">${AUDIT_FIX_LABEL[i.fix]}</div>` : '';
+            const act = i.fix && AUDIT_FIX_LABEL[i.fix] ? `<button type="button" class="memoria-au-btn memoria-au-fix" data-key="${escapeHtml(i.key)}" title="${AUDIT_FIX_TITLE[i.fix]}">${AUDIT_FIX_LABEL[i.fix]}</button>` : '';
             const hint = !act && AUDIT_ISSUE_HINT[i.type] ? `<small class="memoria-au-hint">${AUDIT_ISSUE_HINT[i.type]}</small>` : '';
             return `<div class="memoria-au-issue">
                 <p>${escapeHtml(auditIssueText(i))}</p>
-                <div class="memoria-au-acts"><span class="memoria-au-meta">${i.type === 'order' ? '' : auditSpan(i.from, i.to)}${hint}</span><span class="memoria-au-btns">${act}<div class="menu_button memoria-au-skip" data-key="${escapeHtml(i.key)}" title="이 건은 넘겨요">괜찮아요</div></span></div>
+                <div class="memoria-au-acts"><span class="memoria-au-meta">${i.type === 'order' ? '' : auditSpan(i.from, i.to)}${hint}</span><span class="memoria-au-btns">${act}<button type="button" class="memoria-au-btn memoria-au-skip" data-key="${escapeHtml(i.key)}" title="이 건은 넘겨요">괜찮아요</button></span></div>
             </div>`;
         }).join('');
         sh += '</div>';
@@ -1423,11 +1423,11 @@ function renderAuditPanel() {
     sh += `<h5 class="memoria-au-sub">요약이 원문과 맞는지 AI로 확인</h5>
         <p class="memoria-au-foot">요약과 그 구간의 원문을 함께 보내, 틀린 곳 · 빠진 곳 · 지어낸 곳을 메시지 번호와 함께 받아요. 누를 때마다 호출 1번이에요.</p>
         <div class="memoria-au-row">
-            <div class="menu_button${settings.enabled && all.length ? '' : ' disabled'}" id="memoria_audit_grade" data-force="${plan.length ? 0 : 1}" title="요약과 원문을 함께 보내 맞는지 확인해요 (호출 1회)"><i class="fa-solid fa-list-check"></i><span>${gradeLabel}</span></div>
+            <button type="button" class="memoria-au-btn is-primary"${settings.enabled && all.length ? '' : ' disabled'} id="memoria_audit_grade" data-force="${plan.length ? 0 : 1}" title="요약과 원문을 함께 보내 맞는지 확인해요 (호출 1회)"><i class="fa-solid fa-list-check"></i><span>${gradeLabel}</span></button>
         </div>
         <div class="memoria-au-row memoria-au-auto">
-            <label class="memoria-au-every">자동으로 확인 <select class="text_pole" id="memoria_audit_grade_mode">${[['manual', '안 함'], ['flagged', '위 점검에 걸렸을 때'], ['every', '새 요약이 쌓일 때마다']].map(([v, t]) => `<option value="${v}"${(settings.gradeMode || 'manual') === v ? ' selected' : ''}>${t}</option>`).join('')}</select></label>
-            ${settings.gradeMode === 'every' ? `<label class="memoria-au-every">요약 <input type="number" class="text_pole" id="memoria_audit_grade_every" min="1" max="20" step="1" value="${gradeEveryOf(settings)}" aria-label="새 요약 몇 개마다 확인할지"> 개마다</label>` : ''}
+            <label class="memoria-au-every">자동으로 확인 <select class="memoria-au-input" id="memoria_audit_grade_mode">${[['manual', '안 함'], ['flagged', '위 점검에 걸렸을 때'], ['every', '새 요약이 쌓일 때마다']].map(([v, t]) => `<option value="${v}"${(settings.gradeMode || 'manual') === v ? ' selected' : ''}>${t}</option>`).join('')}</select></label>
+            ${settings.gradeMode === 'every' ? `<label class="memoria-au-every">요약 <input type="number" class="memoria-au-input" id="memoria_audit_grade_every" min="1" max="20" step="1" value="${gradeEveryOf(settings)}" aria-label="새 요약 몇 개마다 확인할지"> 개마다</label>` : ''}
         </div>`;
     if (grade) {
         const kindLabel = { wrong: '틀림', missing: '빠짐', invented: '지어냄' };
@@ -1443,12 +1443,12 @@ function renderAuditPanel() {
             <p class="memoria-au-foot is-faint">AI의 의견이라 틀릴 수 있어요. 번호를 누르면 그 메시지로 가요.</p>
         </article>`;
     }
-    if (fixes.length) sh += `<div class="memoria-au-row"><div class="menu_button${settings.enabled ? '' : ' disabled'}" id="memoria_audit_repair" title="걸린 요약만 그 구간의 기록 · 원문과 함께 보내 다시 쓰게 해요 (호출 1회). 훨씬 짧아지면 옛 글을 그대로 둬요."><i class="fa-solid fa-pen-to-square"></i><span>걸린 요약 ${fixes.length}개 고쳐 쓰기</span></div></div>
+    if (fixes.length) sh += `<div class="memoria-au-row"><button type="button" class="memoria-au-btn is-primary"${settings.enabled ? '' : ' disabled'} id="memoria_audit_repair" title="걸린 요약만 그 구간의 기록 · 원문과 함께 보내 다시 쓰게 해요 (호출 1회). 훨씬 짧아지면 옛 글을 그대로 둬요."><i class="fa-solid fa-pen-to-square"></i><span>걸린 요약 ${fixes.length}개 고쳐 쓰기</span></button></div>
         <p class="memoria-au-foot">고치기 전 글은 남겨 둬서 아래에서 되돌릴 수 있어요.</p>`;
     if (restorable.length) {
         sh += `<h5 class="memoria-au-sub">고친 요약</h5><div class="memoria-au-issues">` + restorable.map(x => `<div class="memoria-au-issue">
             <p>${escapeHtml(whenOf(x.s) || (x.level === 'arc' ? '연대기' : '요약'))}</p>
-            <div class="memoria-au-acts"><span class="memoria-au-meta">${auditSpan(x.from, x.to)}</span><span class="memoria-au-btns"><div class="menu_button memoria-au-restore" data-id="${x.s.id}" title="고치기 전 글과 고친 글을 서로 바꿔요 (호출 없음)">${x.s.fixedAt && x.s.was?.at === x.s.fixedAt ? '이전 글로 되돌리기' : '고친 글로 다시'}</div></span></div>
+            <div class="memoria-au-acts"><span class="memoria-au-meta">${auditSpan(x.from, x.to)}</span><span class="memoria-au-btns"><button type="button" class="memoria-au-btn memoria-au-restore" data-id="${x.s.id}" title="고치기 전 글과 고친 글을 서로 바꿔요 (호출 없음)">${x.s.fixedAt && x.s.was?.at === x.s.fixedAt ? '이전 글로 되돌리기' : '고친 글로 다시'}</button></span></div>
         </div>`).join('') + '</div>';
     }
     $('#memoria_audit_sums').html(sh);
@@ -1472,7 +1472,7 @@ function bindAuditPanel() {
     $root.on('change', '#memoria_audit_every', function () { const n = Math.round(Number($(this).val())); if (n >= 2 && n <= 30) setCheckMode('batch', n); });
     $root.on('change', '#memoria_audit_note', function () { getSettings().driftNote = $(this).prop('checked'); saveSettingsDebounced(); updateInjection({ quiet: true }); renderAuditPanel(); });
     $root.on('click', '#memoria_audit_drift_now', async function () {
-        if ($(this).hasClass('disabled') || auditBusy) return;
+        if ($(this).prop('disabled') || auditBusy) return;
         const work = workToast(`최근 답 ${checkEveryOf(getSettings())}개를 기록과 견주는 중이에요…`);
         try {
             const r = await queueDrift({ manual: true });
@@ -1500,7 +1500,7 @@ function bindAuditPanel() {
     $root.on('change', '#memoria_audit_grade_mode', function () { getSettings().gradeMode = String($(this).val() || 'manual'); saveSettingsDebounced(); renderAuditPanel(); });
     $root.on('change', '#memoria_audit_grade_every', function () { const n = Math.round(Number($(this).val())); if (n >= 1 && n <= 20) { getSettings().gradeEvery = n; saveSettingsDebounced(); } });
     $root.on('click', '#memoria_audit_grade', async function () {
-        if ($(this).hasClass('disabled') || auditBusy) return;
+        if ($(this).prop('disabled') || auditBusy) return;
         const work = workToast('요약이 원문과 맞는지 확인하는 중이에요…');
         try {
             const r = await gradeSummaries({ force: Number($(this).data('force')) === 1 });
@@ -1509,7 +1509,7 @@ function bindAuditPanel() {
         renderAuditPanel();
     });
     $root.on('click', '#memoria_audit_repair', async function () {
-        if ($(this).hasClass('disabled') || auditBusy) return;
+        if ($(this).prop('disabled') || auditBusy) return;
         const work = workToast('걸린 요약을 고쳐 쓰는 중이에요…');
         try {
             const r = await repairSummaries();
