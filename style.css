@@ -1777,41 +1777,89 @@ body[data-memoria-paper="dark"] :is(#memoria_settings.memoria, .memoria-library,
 .memoria-milestone-pin { opacity: .45; cursor: pointer; }
 .memoria-milestone-pin.is-on { opacity: 1; color: var(--mm-accent); }
 
-/* ── 검사 탭 ── */
-#memoria_settings .memoria-au-status { display: flex; align-items: center; gap: 8px; margin: 2px 2px 10px; }
-#memoria_settings .memoria-au-lamp { width: 8px; height: 8px; border-radius: 50%; background: var(--line); flex: none; }
-#memoria_settings .memoria-au-lamp.is-busy { background: var(--mm-accent); animation: memoria-au-pulse 1.2s ease-in-out infinite; }
+/* ── 검사 탭 — 읽기 편하게: 글자는 줄이지 않고, 선은 얇게, 단추 높이는 하나로 ── */
+#memoria_settings .memoria-au-status { display: flex; align-items: center; gap: 8px; margin: 0 2px; padding: 0; border: 0; font-size: .86em; color: var(--dim); }
+#memoria_settings .memoria-au-lamp { width: 8px; height: 8px; border-radius: 50%; background: var(--ink-line); flex: none; }
+#memoria_settings .memoria-au-lamp.is-busy { background: var(--accent); animation: memoria-au-pulse 1.2s ease-in-out infinite; }
 @keyframes memoria-au-pulse { 50% { opacity: .35; } }
-#memoria_settings .memoria-au-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 6px 0; }
-#memoria_settings .memoria-au-seg { display: inline-flex; padding: 3px; gap: 2px; border-radius: 999px; background: var(--surface2); }
-#memoria_settings .memoria-au-mode { min-height: 30px; padding: 4px 12px; border: 0; border-radius: 999px; background: none; color: var(--dim); font: 600 .86em var(--font); cursor: pointer; }
-#memoria_settings .memoria-au-mode.is-on { background: var(--surface); color: var(--text); box-shadow: 0 0 0 1px var(--line); }
-#memoria_settings .memoria-au-num { display: inline-flex; align-items: center; gap: 6px; font-size: .86em; color: var(--dim); }
-#memoria_settings .memoria-au-num input { width: 4.2em; min-height: 32px; margin: 0; }
-#memoria_settings .memoria-au-num select { width: auto; min-height: 32px; margin: 0; }
-#memoria_settings .memoria-au-head { margin: 12px 0 6px; font-weight: 700; }
-#memoria_settings .memoria-au-head small, #memoria_settings .memoria-au-card header small { font-weight: 400; color: var(--dim); }
-#memoria_settings .memoria-au-sub { margin: 14px 0 6px; font-size: .92em; }
-#memoria_settings .memoria-au-card { margin: 8px 0; padding: 10px 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); min-width: 0; }
-#memoria_settings .memoria-au-card.is-off { opacity: .72; border-style: dashed; }
+
+#memoria_settings .memoria-au-controls { display: flex; flex-direction: column; gap: 10px; }
+#memoria_settings .memoria-au-seg { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); border: 1px solid var(--ink); }
+#memoria_settings .memoria-au-mode {
+    min-height: 40px; margin: 0; padding: 0 6px; border: 0; border-right: 1px solid var(--ink-line); border-radius: 0; background: var(--surface);
+    color: var(--text); font: 600 .92em var(--font); cursor: pointer; transition: background .15s;
+}
+#memoria_settings .memoria-au-mode:last-child { border-right: 0; }
+#memoria_settings .memoria-au-mode:hover { background: var(--surface2); }
+#memoria_settings .memoria-au-mode.is-on { background: var(--ink); color: var(--surface); }
+#memoria_settings .memoria-au-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+#memoria_settings .memoria-au-every { display: inline-flex; align-items: center; gap: 8px; margin: 0; font-size: .92em; color: var(--text); }
+#memoria_settings .inline-drawer-content .memoria-au-every input,
+#memoria_settings .inline-drawer-content .memoria-au-every select {
+    width: auto; min-width: 0; height: 36px; min-height: 36px; margin: 0; padding: 0 10px;
+    border: 1px solid var(--ink-line); border-radius: 4px; background: var(--surface); box-shadow: none; color: var(--text); font-size: 1em;
+}
+#memoria_settings .inline-drawer-content .memoria-au-every input { width: 64px; text-align: center; }
+#memoria_settings .memoria-au-foot { margin: 0; font-size: .88em; line-height: 1.6; color: var(--dim); }
+#memoria_settings .memoria-au-foot b { color: var(--text); }
+#memoria_settings .memoria-au-foot.is-faint { font-size: .8em; color: var(--faint); }
+#memoria_settings .memoria-au-empty { margin: 0; padding: 14px; border: 1px dashed var(--ink-line); font-size: .9em; line-height: 1.6; color: var(--dim); text-align: center; }
+#memoria_settings .memoria-au-result { display: flex; flex-direction: column; gap: 10px; }
+
+#memoria_settings .memoria-au-sub { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; margin: 6px 0 0; padding-top: 12px; border-top: 1px solid var(--ink-line); font: 700 .98em var(--font); color: var(--text); }
+#memoria_settings .memoria-au-sub b { color: var(--accent); }
+#memoria_settings .memoria-au-sub small { font-weight: 400; font-size: .82em; color: var(--dim); }
+
+/* 어긋난 곳 · 채점 결과 */
+#memoria_settings .memoria-au-card { display: flex; flex-direction: column; gap: 8px; margin: 0; padding: 12px 14px; border: 1px solid var(--ink-line); border-radius: 4px; background: var(--surface); min-width: 0; }
+#memoria_settings .memoria-au-card.is-off { opacity: .7; }
 #memoria_settings .memoria-au-card header { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
-#memoria_settings .memoria-au-card p { margin: 6px 0; overflow-wrap: anywhere; word-break: keep-all; }
-#memoria_settings .memoria-au-card blockquote { margin: 6px 0; padding-left: 10px; border-left: 2px solid var(--line); color: var(--dim); overflow-wrap: anywhere; }
-#memoria_settings .memoria-au-card footer { display: flex; justify-content: flex-end; gap: 6px; margin-top: 6px; }
-#memoria_settings .memoria-au-evid { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: .88em; color: var(--dim); overflow-wrap: anywhere; }
+#memoria_settings .memoria-au-card header small { font-size: .82em; color: var(--dim); }
+#memoria_settings .memoria-au-who { margin-left: auto; display: inline-flex; align-items: center; gap: 4px; font-size: .9em; font-weight: 600; }
+#memoria_settings .memoria-au-tag { display: inline-block; padding: 1px 7px; border: 1px solid var(--ink-line); border-radius: 3px; font-size: .8em; font-weight: 600; line-height: 1.5; color: var(--text); white-space: nowrap; }
+#memoria_settings .memoria-au-tag.is-ok { border-color: var(--accent); color: var(--accent); }
+#memoria_settings .memoria-au-tag.is-muted { color: var(--dim); border-style: dashed; }
+#memoria_settings .memoria-au-text { margin: 0; font-size: .95em; line-height: 1.65; overflow-wrap: anywhere; word-break: keep-all; }
+#memoria_settings .memoria-au-quote { margin: 0; padding: 2px 0 2px 10px; border-left: 2px solid var(--ink-line); font-size: .9em; line-height: 1.6; color: var(--dim); overflow-wrap: anywhere; }
+#memoria_settings .memoria-au-evid { display: flex; flex-direction: column; gap: 2px; font-size: .88em; line-height: 1.6; color: var(--text); overflow-wrap: anywhere; }
+#memoria_settings .memoria-au-evid b { font-weight: 600; color: var(--dim); margin-right: 4px; }
+#memoria_settings .memoria-au-evid small { font-size: .92em; color: var(--dim); }
+#memoria_settings .memoria-au-card footer { display: flex; justify-content: flex-end; gap: 6px; }
+#memoria_settings .memoria-au-gitem { display: flex; flex-direction: column; gap: 4px; padding: 8px 0; border-top: 1px solid var(--ink-line); }
+#memoria_settings .memoria-au-gitem:first-of-type { border-top: 0; padding-top: 0; }
+#memoria_settings .memoria-au-gitem.is-done { opacity: .6; }
+#memoria_settings .memoria-au-gitem p { margin: 0; font-size: .93em; line-height: 1.65; overflow-wrap: anywhere; word-break: keep-all; }
+#memoria_settings .memoria-au-gitem small { font-size: .84em; color: var(--dim); }
+#memoria_settings .memoria-au-aside > summary { cursor: pointer; padding: 6px 0; font-size: .9em; color: var(--dim); }
+#memoria_settings .memoria-au-aside[open] { display: flex; flex-direction: column; gap: 8px; }
+
+/* 확인할 항목 — 한 줄에 글, 아래 줄에 번호와 단추 */
+#memoria_settings .memoria-au-issues { display: flex; flex-direction: column; border-top: 1px solid var(--ink-line); }
+#memoria_settings .memoria-au-issue, #memoria_settings #memoria_audit_sums .memoria-au-issue.mmv-gap {
+    display: flex; flex-direction: column; gap: 8px; margin: 0; padding: 12px 0; border: 0; border-bottom: 1px solid var(--ink-line); border-radius: 0; background: none; min-width: 0;
+}
+#memoria_settings .memoria-au-issue p { margin: 0; font-size: .94em; line-height: 1.6; color: var(--text); overflow-wrap: anywhere; word-break: keep-all; }
+#memoria_settings .memoria-au-acts { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+#memoria_settings .memoria-au-meta { display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; min-width: 0; }
+#memoria_settings .memoria-au-btns { display: inline-flex; gap: 6px; margin-left: auto; }
+#memoria_settings .memoria-au-hint { font-size: .84em; color: var(--dim); }
 #memoria_settings .memoria-au-span { display: inline-flex; align-items: center; gap: 2px; }
 #memoria_settings .memoria-au-span i { font-style: normal; color: var(--dim); }
-#memoria_settings .memoria-au-dash { background: none; border: 1px dashed var(--line); color: var(--dim); }
-#memoria_settings .memoria-au-issue { padding: 8px 0; border-top: 1px solid var(--line); min-width: 0; }
-#memoria_settings .memoria-au-issue:first-of-type { border-top: 0; }
-#memoria_settings .memoria-au-issue.is-done { opacity: .6; }
-#memoria_settings .memoria-au-issue p { margin: 0 0 6px; overflow-wrap: anywhere; word-break: keep-all; }
-#memoria_settings .memoria-au-acts { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
-#memoria_settings .memoria-au-acts small { color: var(--dim); }
-#memoria_settings .memoria-au-aside summary { cursor: pointer; color: var(--dim); margin: 8px 0; }
-#memoria_settings .memoria-au-link { text-decoration: underline; cursor: pointer; }
-#memoria_settings .memoria-au-tok { font-variant-numeric: tabular-nums; }
-#memoria_settings .memoria-au-card .menu_button, #memoria_settings .memoria-au-issue .menu_button { min-height: 32px; padding: 4px 10px; font-size: .84em; }
+/* 메시지 번호 — 알약 대신 밑줄 친 글자 (누르면 그 메시지로) */
+#memoria_settings .memoria-au-link.mmv-jump {
+    display: inline; min-height: 0; padding: 2px 1px; margin: 0; border: 0; border-radius: 0; background: none;
+    color: var(--accent); font: 600 .9em var(--font); font-variant-numeric: tabular-nums; text-decoration: underline; text-underline-offset: 3px; cursor: pointer;
+}
+#memoria_settings .memoria-au-textbtn { display: inline; min-height: 0; padding: 0; margin: 0; border: 0; background: none; color: var(--accent); font: inherit; text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
+/* 이 탭의 단추는 높이 하나 · 각진 모서리 */
+#memoria_settings #memoria_audit_drift .menu_button, #memoria_settings #memoria_audit_sums .menu_button {
+    min-height: 36px; padding: 0 14px; border: 1px solid var(--ink-line); border-radius: 4px; background: var(--surface); font-size: .88em;
+}
+#memoria_settings #memoria_audit_drift .menu_button:hover, #memoria_settings #memoria_audit_sums .menu_button:hover { border-color: var(--ink); background: var(--surface); }
+#memoria_settings :is(#memoria_audit_drift_now, #memoria_audit_grade, #memoria_audit_repair) { background: var(--ink) !important; border-color: var(--ink) !important; color: var(--surface) !important; }
+#memoria_settings :is(#memoria_audit_drift_now, #memoria_audit_grade, #memoria_audit_repair) i { color: inherit !important; }
+#memoria_settings :is(#memoria_audit_drift_now, #memoria_audit_grade, #memoria_audit_repair):hover { opacity: .88; }
+#memoria_settings :is(#memoria_audit_drift, #memoria_audit_sums) .menu_button.disabled { opacity: .35; pointer-events: none; }
 @media (max-width: 480px) {
     #memoria_settings .memoria__tabs { gap: 2px; }
     #memoria_settings .memoria__tab { padding: 7px 8px; }
@@ -1833,3 +1881,8 @@ body[data-memoria-paper="dark"] :is(#memoria_settings.memoria, .memoria-library,
 .memoria-shown__main small { display: block; opacity: .7; margin-top: 2px; }
 .memoria-shown-pin { cursor: pointer; opacity: .45; padding: 4px; }
 .memoria-shown-pin.is-on { opacity: 1; color: var(--mm-accent); }
+#memoria_settings #memoria_audit_sums > .memoria-au-sub:first-child { margin-top: 0; padding-top: 0; border-top: 0; }
+#memoria_settings .memoria-au-issues .memoria-au-issue:last-child { border-bottom: 0; }
+#memoria_settings .memoria-au-issues { border-top: 0; }
+#memoria_settings .memoria-au-cardtitle { font-size: .94em; font-weight: 700; margin-right: 4px; }
+#memoria_settings .memoria-au-auto { justify-content: flex-start; }

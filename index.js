@@ -1208,7 +1208,7 @@ function queueAuditJob(label, fn) {
 }
 /** 채점 (호출 1회) — 요약과 그 요약이 덮는 원문 발췌를 함께 보내 틀린 곳 · 빠진 곳 · 지어낸 곳을 메시지 번호와 함께 받는다. 채점할 것이 없으면 null */
 function gradeSummaries({ force = false, auto = false } = {}) {
-    return queueAuditJob('요약 채점 중…', async () => {
+    return queueAuditJob('요약이 원문과 맞는지 확인하는 중…', async () => {
         const store = getStore(), secs = gradePlan(store, force);
         if (!secs.length) return null;
         const tags = new Map(), budget = Math.max(2000, Math.floor(10000 / secs.length)), clean = (m) => visibleProse(m.mes || '');
@@ -1230,7 +1230,7 @@ function gradeSummaries({ force = false, auto = false } = {}) {
         st.grade = report;
         st.gradeCount = summaryCount(store);
         persistStore();
-        logActivity('summary', `요약 ${secs.length}개 채점: 확인할 곳 ${report.items.length}개`);
+        logActivity('summary', `요약 ${secs.length}개를 원문과 확인: 걸린 곳 ${report.items.length}개`);
         return report;
     });
 }
@@ -1319,7 +1319,7 @@ async function afterSummariesAudit(store = getStore()) {
     if (!settings.enabled || getStore() !== store) return;
     const st = auditState(store), keys = summaryIssues(store).list.map(i => i.key).sort(), seen = keys.join('\u0001'), fresh = seen !== (st.gradeSeen || ''), now = summaryCount(store);
     if (fresh) { st.gradeSeen = seen; persistStore(); if (keys.length) logActivity('summary', `요약 점검에 걸린 곳 ${keys.length}개 — 검사 탭에서 볼 수 있어요`); }
-    const auto = () => gradeSummaries({ auto: true }).catch(e => logActivity('error', `요약 채점 실패: ${e?.message || e}`));
+    const auto = () => gradeSummaries({ auto: true }).catch(e => logActivity('error', `요약 확인 실패: ${e?.message || e}`));
     if (settings.gradeMode === 'every') {
         if (st.gradeCount == null) { st.gradeCount = now; persistStore(); } else if (now - st.gradeCount >= gradeEveryOf(settings)) auto();
     } else if (settings.gradeMode === 'flagged' && fresh && keys.length) auto();
@@ -1330,64 +1330,70 @@ function auditWhen(at) {
     const d = new Date(at), now = new Date(), pad = (n) => String(n).padStart(2, '0'), time = `${pad(d.getHours())}:${pad(d.getMinutes())}`;
     return d.toDateString() === now.toDateString() ? `오늘 ${time}` : `${d.getMonth() + 1}. ${d.getDate()}. ${time}`;
 }
-const auditJump = (n) => (Number.isInteger(n) && n >= 0 ? `<button type="button" class="mmv-jump" data-mes="${n}">#${n}</button>` : '');
-const auditSpan = (from, to) => (Number.isInteger(from) && from >= 0 ? `<span class="memoria-au-span">${auditJump(from)}${to > from ? `<i>–</i>${auditJump(to)}` : ''}</span>` : '');
+const auditJump = (n) => (Number.isInteger(n) && n >= 0 ? `<button type="button" class="mmv-jump memoria-au-link" data-mes="${n}" title="#${n} 메시지로 가기">#${n}</button>` : '');
+const auditSpan = (from, to) => (Number.isInteger(from) && from >= 0 ? `<span class="memoria-au-span">${auditJump(from)}${to > from ? `<i aria-hidden="true">–</i>${auditJump(to)}` : ''}</span>` : '');
 function auditFindingHtml(f, off = '', act = '') {
     const srcName = f.src ? [DRIFT_SRC_LABEL[f.src.kind] || f.src.kind, f.src.name].filter(Boolean).join(' · ') : '';
     return `<article class="memoria-au-card${off ? ' is-off' : ''}">
-        <header>${auditJump(f.no)}<b>${escapeHtml(f.who || '')}</b><span class="memoria__badge">${DRIFT_KIND_LABEL[f.kind] || f.kind}</span>${off ? `<span class="memoria__badge memoria-au-dash">${escapeHtml(off)}</span>` : '<span class="memoria__badge memoria__badge--arc">근거 확인</span>'}</header>
-        <p>${escapeHtml(f.text)}</p>
-        ${f.quote ? `<blockquote>“${escapeHtml(f.quote)}”</blockquote>` : ''}
-        ${f.evidence ? `<div class="memoria-au-evid"><span>기록에는: “${escapeHtml(f.evidence)}”</span>${srcName ? `<small>${escapeHtml(srcName)}</small>` : ''}${f.src ? auditSpan(f.src.from, f.src.to) : ''}</div>` : ''}
+        <header>
+            <span class="memoria-au-tag">${DRIFT_KIND_LABEL[f.kind] || f.kind}</span>
+            ${off ? `<span class="memoria-au-tag is-muted">${escapeHtml(off)}</span>` : '<span class="memoria-au-tag is-ok">근거 확인</span>'}
+            <span class="memoria-au-who">${auditJump(f.no)} ${escapeHtml(f.who || '')}</span>
+        </header>
+        <p class="memoria-au-text">${escapeHtml(f.text)}</p>
+        ${f.quote ? `<blockquote class="memoria-au-quote">“${escapeHtml(f.quote)}”</blockquote>` : ''}
+        ${f.evidence ? `<div class="memoria-au-evid"><b>기록에는</b> “${escapeHtml(f.evidence)}”${srcName || f.src ? `<small>${escapeHtml(srcName)} ${f.src ? auditSpan(f.src.from, f.src.to) : ''}</small>` : ''}</div>` : ''}
         ${act ? `<footer>${act}</footer>` : ''}
     </article>`;
 }
 function auditIssueText(i) {
-    const span = Number.isInteger(i.from) && i.from >= 0 ? `#${i.from}–#${i.to}` : '';
     switch (i.type) {
         case 'range': return '요약 하나가 기록에 없는 범위를 가리켜요';
         case 'order': return '요약이 이야기 순서대로 놓여 있지 않아요';
-        case 'overlap': return `두 요약이 ${span || '같은 범위'}에서 겹쳐요`;
-        case 'empty': return `${span ? `${span} ` : ''}요약이 비어 있어요`;
-        case 'short': return `${span ? `${span} ` : ''}요약이 덮는 분량에 비해 너무 짧아요 (${i.n}자)`;
-        case 'date': return `요약 머리에는 ${i.said}일째라고 적혀 있는데, 이야기 시계로는 ${i.real}일째예요`;
-        case 'name': return `요약에 나오는 ‘${i.name}’ — 인물 목록에 없는 이름이에요`;
+        case 'overlap': return '두 요약의 범위가 겹쳐요';
+        case 'empty': return '요약이 비어 있어요';
+        case 'short': return `덮는 분량에 비해 요약이 너무 짧아요 (${i.n}자)`;
+        case 'date': return `요약 머리에는 ${i.said}일째, 이야기 시계로는 ${i.real}일째예요`;
+        case 'name': return `‘${i.name}’ — 인물 목록에 없는 이름이 요약에 나와요`;
         default: return i.type;
     }
 }
 const AUDIT_FIX_LABEL = { sort: '순서대로 놓기', clamp: '범위 맞추기', trim: '겹친 범위 정리' };
 const AUDIT_FIX_TITLE = { sort: '요약을 범위 순서대로 다시 놓아요', clamp: '요약의 끝 번호를 마지막 기록에 맞춰요', trim: '뒤 요약의 시작을 앞 요약 끝 다음으로 옮겨요 (요약 글은 그대로)' };
+const AUDIT_ISSUE_HINT = { date: '아래 ‘AI로 확인’에서 확인해 보세요', name: '세계 탭 인물 도감에서 확인해 보세요', empty: '‘고쳐 달라고 보내기’에 함께 실려요', short: '‘고쳐 달라고 보내기’에 함께 실려요' };
 
 function renderAuditPanel() {
     const $drift = $('#memoria_audit_drift');
     if (!$drift.length) return;
     const settings = getSettings(), store = getStore(), st = store.audit || {}, has = !!getCurrentChatId();
-    $('#memoria_audit_status').html(`<i class="memoria-au-lamp${auditBusy ? ' is-busy' : ''}"></i>${escapeHtml(auditBusy || '쉬는 중 — 검사는 답이 쌓이면 저절로 돌아요')}`);
+    $('#memoria_audit_status').html(`<i class="memoria-au-lamp${auditBusy ? ' is-busy' : ''}"></i><span>${escapeHtml(auditBusy || '쉬는 중 — 검사는 답이 쌓이면 저절로 돌아요')}</span>`);
     if (!has) { $drift.html('<div class="memoria__empty">열린 채팅이 없어요.</div>'); $('#memoria_audit_sums').empty(); return; }
     // ── 1. 어긋난 곳
     const mode = checkModeOf(settings), every = checkEveryOf(settings), report = st.drift || null, due = driftDue(store), note = driftNoteState(store);
     const live = liveFindings(report, chat, mesHashOf), liveIds = new Set(live.map(f => f.id)), aside = (report?.findings || []).filter(f => !liveIds.has(f.id));
-    const seg = [['off', '끔'], ['each', '답마다'], ['batch', `${every}개마다`]].map(([id, label]) => `<button type="button" class="memoria-au-mode${mode === id ? ' is-on' : ''}" data-mode="${id}" aria-pressed="${mode === id}">${label}</button>`).join('');
+    const seg = [['off', '끔'], ['each', '답마다'], ['batch', 'N개마다']].map(([id, label]) => `<button type="button" class="memoria-au-mode${mode === id ? ' is-on' : ''}" data-mode="${id}" aria-pressed="${mode === id}">${label}</button>`).join('');
     const foot = mode === 'batch'
-        ? (due.anchored ? (due.need ? `다음 자동 검사까지 답 ${due.need}개 남았어요` : '다음 답이 오면 검사해요') : `지금부터 세요 — 답이 ${every}개 쌓이면 처음 검사해요`)
-        : mode === 'each' ? '새 답이 올 때마다 검사해요 (답마다 호출 1회, 경고가 나오면 재확인 1회 더).' : '자동으로는 검사하지 않아요. ‘지금 검사’는 언제든 쓸 수 있어요 (호출 1회).';
-    let html = `<div class="memoria-au-row"><span class="memoria-au-seg" role="group" aria-label="검사 방식">${seg}</span>
-        ${mode === 'batch' ? `<label class="memoria-au-num">답<input type="number" class="text_pole" id="memoria_audit_every" min="2" max="30" step="1" value="${every}" aria-label="답 몇 개마다 검사할지">개마다</label>` : ''}
-        <div class="menu_button${settings.enabled ? '' : ' disabled'}" id="memoria_audit_drift_now" title="최근 답 ${every}개를 지금 검사해요 (호출 1회)"><i class="fa-solid fa-magnifying-glass"></i><span>지금 검사</span></div></div>
-        <p class="memoria__hint">${foot}</p>
-        <label class="memoria__toggle-row" for="memoria_audit_note"><input type="checkbox" id="memoria_audit_note"${settings.driftNote !== false ? ' checked' : ''}><span><strong>다음 답에 바로잡기 메모 싣기</strong><small>근거를 확인한 어긋남을 기록 쪽 문장과 함께 다음 답 ${NOTE_REPLIES}개 동안 ‘지금’ 장부에 짧게 실어요. 호출은 늘지 않고, ‘괜찮아요’로 넘긴 것은 빠져요.</small></span></label>`;
+        ? (due.anchored ? (due.need ? `다음 자동 검사까지 답 <b>${due.need}개</b> 남았어요` : '다음 답이 오면 검사해요') : `지금부터 세요 — 답이 ${every}개 쌓이면 처음 검사해요`)
+        : mode === 'each' ? '새 답이 올 때마다 검사해요 (답마다 호출 1회)' : '자동으로는 검사하지 않아요. ‘지금 검사’는 언제든 쓸 수 있어요';
+    let html = `<div class="memoria-au-controls">
+            <div class="memoria-au-seg" role="group" aria-label="검사 방식">${seg}</div>
+            <div class="memoria-au-row">
+                ${mode === 'batch' ? `<label class="memoria-au-every">답 <input type="number" class="text_pole" id="memoria_audit_every" min="2" max="30" step="1" value="${every}" aria-label="답 몇 개마다 검사할지"> 개마다</label>` : '<span></span>'}
+                <div class="menu_button${settings.enabled ? '' : ' disabled'}" id="memoria_audit_drift_now" title="최근 답 ${every}개를 지금 검사해요 (호출 1회)"><i class="fa-solid fa-magnifying-glass"></i><span>지금 검사</span></div>
+            </div>
+            <p class="memoria-au-foot">${foot}</p>
+        </div>
+        <label class="memoria__toggle-row" for="memoria_audit_note"><input type="checkbox" id="memoria_audit_note"${settings.driftNote !== false ? ' checked' : ''}><span><strong>다음 답에 바로잡기 메모 싣기</strong><small>근거를 확인한 어긋남을 다음 답 ${NOTE_REPLIES}개 동안 장부에 짧게 실어요. 호출은 늘지 않아요.</small></span></label>`;
     if (report) {
         const rest = report.checked - new Set(live.map(f => f.no)).size;
-        html += `<p class="memoria-au-head">어긋난 곳 ${live.length}개<small> · ${auditWhen(report.at)} · #${report.from}–#${report.to} · ${report.checked}개 검사</small></p>`;
-        html += live.map(f => auditFindingHtml(f, '', `<div class="menu_button memoria-au-fine" data-id="${f.id}" title="이 건은 넘겨요 — 바로잡기 메모와 ⚠ 표시에서 빠져요">괜찮아요</div>`)).join('');
-        html += `<p class="memoria__hint">${live.length ? (rest > 0 ? `나머지 ${rest}개 메시지는 기록과 맞아요` : '') : `검사한 ${report.checked}개 메시지 모두 기록과 맞아요`}</p>`;
-        if (aside.length) {
-            html += `<details class="memoria-au-aside"><summary>따로 둔 것 · ${aside.length}개</summary><p class="memoria__hint">근거 문장을 기록에서 찾지 못했거나, 괜찮다고 넘겼거나, 그 뒤로 글이 바뀐 것이에요. 사실로 다루지 않고, 다음 답에도 싣지 않아요.</p>`
-                + aside.map(f => auditFindingHtml(f, f.dismissed ? '괜찮아요' : !f.ok ? '근거 미확인' : '글이 바뀜', f.dismissed ? `<div class="menu_button memoria-au-unfine" data-id="${f.id}">되돌리기</div>` : '')).join('') + '</details>';
-        }
-        if (note.lines) html += `<p class="memoria__hint">다음 답 ${note.left}개까지 바로잡기 메모 ${note.lines}줄이 실려요</p>`;
-        html += `<p class="memoria__hint memoria-au-tok">약 ${(report.tokIn + report.tokOut).toLocaleString()}토큰 · ${report.manual && mode !== 'batch' ? '직접 검사' : mode === 'batch' ? `답 ${every}개마다 자동 감지` : mode === 'each' ? '답변마다 검사' : '자동 감지 꺼짐'}</p>`;
-    } else html += `<div class="memoria__empty">${settings.enabled ? '아직 검사한 적이 없어요. ‘지금 검사’를 누르거나 ‘N개마다’를 켜 보세요.' : '장기기억이 꺼져 있어요. 켜면 검사할 수 있어요.'}</div>`;
+        html += `<div class="memoria-au-result">
+            <h5 class="memoria-au-sub">어긋난 곳 <b>${live.length}</b><small>${auditWhen(report.at)} · #${report.from}–#${report.to} · ${report.checked}개 검사</small></h5>
+            ${live.map(f => auditFindingHtml(f, '', `<div class="menu_button memoria-au-fine" data-id="${f.id}" title="이 건은 넘겨요 — 바로잡기 메모와 ⚠ 표시에서 빠져요">괜찮아요</div>`)).join('')}
+            <p class="memoria-au-foot">${live.length ? (rest > 0 ? `나머지 ${rest}개 메시지는 기록과 맞아요` : '') : `검사한 ${report.checked}개 메시지 모두 기록과 맞아요`}${note.lines ? ` · 다음 답 ${note.left}개까지 바로잡기 메모 ${note.lines}줄이 실려요` : ''}</p>
+            ${aside.length ? `<details class="memoria-au-aside"><summary>따로 둔 것 ${aside.length}개</summary><p class="memoria-au-foot">근거 문장을 기록에서 찾지 못했거나, 괜찮다고 넘겼거나, 그 뒤로 글이 바뀐 것이에요. 사실로 다루지 않아요.</p>${aside.map(f => auditFindingHtml(f, f.dismissed ? '괜찮아요' : !f.ok ? '근거 미확인' : '글이 바뀜', f.dismissed ? `<div class="menu_button memoria-au-unfine" data-id="${f.id}">되돌리기</div>` : '')).join('')}</details>` : ''}
+            <p class="memoria-au-foot is-faint">약 ${(report.tokIn + report.tokOut).toLocaleString()}토큰${report.manual ? ' · 직접 검사' : ''}</p>
+        </div>`;
+    } else html += `<p class="memoria-au-empty">${settings.enabled ? '아직 검사한 적이 없어요. ‘지금 검사’를 누르거나 ‘N개마다’를 켜 보세요.' : '장기기억이 꺼져 있어요. 켜면 검사할 수 있어요.'}</p>`;
     $drift.html(html);
 
     // ── 2. 요약 검수 · 채점 · 고쳐 쓰기
@@ -1396,31 +1402,55 @@ function renderAuditPanel() {
     const restorable = all.filter(x => typeof x.s.was?.text === 'string');
     let sh = '';
     if (list.length || gaps.length) {
-        sh += `<h5 class="memoria-au-sub">확인해 주세요 · ${list.length + gaps.length}개</h5>`;
-        sh += gaps.map(g => `<div class="mmv-gap" data-from="${g.fromTurn}" data-to="${g.toTurn}"><span class="mmv-gap-text"><b>t${g.fromTurn}–t${g.toTurn}</b>${g.manual ? '직접 지운 요약 자리예요' : '어느 요약에도 들어 있지 않아요'}</span><div class="menu_button memoria-gap-fill" title="이 구간의 턴 기록으로 요약을 만들어 제자리에 끼워요 (호출 1회)">${gapFilling.has(`${g.fromTurn}-${g.toTurn}`) ? '채우는 중…' : '채우기'}</div></div>`).join('');
+        sh += `<h5 class="memoria-au-sub">확인해 주세요 <b>${list.length + gaps.length}</b></h5><div class="memoria-au-issues">`;
+        sh += gaps.map(g => `<div class="memoria-au-issue mmv-gap" data-from="${g.fromTurn}" data-to="${g.toTurn}">
+                <p>t${g.fromTurn}–t${g.toTurn} — ${g.manual ? '직접 지운 요약 자리예요' : '어느 요약에도 들어 있지 않아요'}</p>
+                <div class="memoria-au-acts"><span></span><div class="menu_button memoria-gap-fill" title="이 구간의 턴 기록으로 요약을 만들어 제자리에 끼워요 (호출 1회)">${gapFilling.has(`${g.fromTurn}-${g.toTurn}`) ? '채우는 중…' : '채우기'}</div></div>
+            </div>`).join('');
         sh += list.map(i => {
-            const act = i.fix && AUDIT_FIX_LABEL[i.fix]
-                ? `<div class="menu_button memoria-au-fix" data-key="${escapeHtml(i.key)}" title="${AUDIT_FIX_TITLE[i.fix]}">${AUDIT_FIX_LABEL[i.fix]}</div>`
-                : `<small>${i.type === 'date' ? '채점으로 확인해 보세요' : i.type === 'name' ? '세계 탭의 인물에서 확인해 보세요' : '‘고쳐 달라고 보내기’에 함께 실려요'}</small>`;
-            return `<div class="memoria-au-issue"><p>${escapeHtml(auditIssueText(i))}</p><div class="memoria-au-acts">${i.type === 'order' ? '' : auditSpan(i.from, i.to)}${act}<div class="menu_button memoria-au-skip" data-key="${escapeHtml(i.key)}" title="이 건은 넘겨요">괜찮아요</div></div></div>`;
+            const act = i.fix && AUDIT_FIX_LABEL[i.fix] ? `<div class="menu_button memoria-au-fix" data-key="${escapeHtml(i.key)}" title="${AUDIT_FIX_TITLE[i.fix]}">${AUDIT_FIX_LABEL[i.fix]}</div>` : '';
+            const hint = !act && AUDIT_ISSUE_HINT[i.type] ? `<small class="memoria-au-hint">${AUDIT_ISSUE_HINT[i.type]}</small>` : '';
+            return `<div class="memoria-au-issue">
+                <p>${escapeHtml(auditIssueText(i))}</p>
+                <div class="memoria-au-acts"><span class="memoria-au-meta">${i.type === 'order' ? '' : auditSpan(i.from, i.to)}${hint}</span><span class="memoria-au-btns">${act}<div class="menu_button memoria-au-skip" data-key="${escapeHtml(i.key)}" title="이 건은 넘겨요">괜찮아요</div></span></div>
+            </div>`;
         }).join('');
-    } else sh += `<p class="memoria__hint">${all.length ? `범위·날짜·이름이 모두 맞아요 — 요약 ${all.length}개 확인` : '아직 요약이 없어요'}</p>`;
-    if (skipped) sh += `<p class="memoria__hint">괜찮다고 넘긴 항목 ${skipped}개 <span class="memoria-au-link" id="memoria_audit_unskip">다시 보기</span></p>`;
-    sh += `<h5 class="memoria-au-sub">채점</h5><div class="memoria-au-row">
-        <div class="menu_button${settings.enabled && all.length ? '' : ' disabled'}" id="memoria_audit_grade" data-force="${plan.length ? 0 : 1}" title="요약과 그 요약이 덮는 원문 발췌를 함께 보내 틀린 곳·빠진 곳·지어낸 곳을 물어요 (호출 1회)"><i class="fa-solid fa-list-check"></i><span>${plan.length ? '채점' : '다시 채점'}</span></div>
-        <label class="memoria-au-num">자동<select class="text_pole" id="memoria_audit_grade_mode">${[['manual', '직접 누를 때만'], ['flagged', '점검에 걸렸을 때만'], ['every', '새 요약이 쌓일 때마다']].map(([v, t]) => `<option value="${v}"${(settings.gradeMode || 'manual') === v ? ' selected' : ''}>${t}</option>`).join('')}</select></label>
-        ${settings.gradeMode === 'every' ? `<label class="memoria-au-num">요약<input type="number" class="text_pole" id="memoria_audit_grade_every" min="1" max="20" step="1" value="${gradeEveryOf(settings)}" aria-label="새 요약 몇 개마다 채점할지">개마다</label>` : ''}</div>
-        <p class="memoria__hint">${all.length ? (plan.length ? `아직 채점하지 않은 요약 ${plan.length}개를 봐요 · 호출 1회` : '요약을 모두 채점했어요 — 다시 채점하면 최근 요약부터 봐요') : '채점할 요약이 아직 없어요'}</p>`;
+        sh += '</div>';
+    } else sh += `<p class="memoria-au-foot">${all.length ? `범위·날짜·이름이 모두 맞아요 — 요약 ${all.length}개 확인` : '아직 요약이 없어요'}</p>`;
+    if (skipped) sh += `<p class="memoria-au-foot">괜찮다고 넘긴 항목 ${skipped}개 · <button type="button" class="memoria-au-textbtn" id="memoria_audit_unskip">다시 보기</button></p>`;
+    // 요약 내용 확인 (AI) — 요약이 원문과 맞는지 물어본다
+    const gradeLabel = !all.length ? '확인할 요약이 없어요' : plan.length ? `요약 ${plan.length}개 확인하기` : '최근 요약 다시 확인하기';
+    sh += `<h5 class="memoria-au-sub">요약이 원문과 맞는지 AI로 확인</h5>
+        <p class="memoria-au-foot">요약과 그 구간의 원문을 함께 보내, 틀린 곳 · 빠진 곳 · 지어낸 곳을 메시지 번호와 함께 받아요. 누를 때마다 호출 1번이에요.</p>
+        <div class="memoria-au-row">
+            <div class="menu_button${settings.enabled && all.length ? '' : ' disabled'}" id="memoria_audit_grade" data-force="${plan.length ? 0 : 1}" title="요약과 원문을 함께 보내 맞는지 확인해요 (호출 1회)"><i class="fa-solid fa-list-check"></i><span>${gradeLabel}</span></div>
+        </div>
+        <div class="memoria-au-row memoria-au-auto">
+            <label class="memoria-au-every">자동으로 확인 <select class="text_pole" id="memoria_audit_grade_mode">${[['manual', '안 함'], ['flagged', '위 점검에 걸렸을 때'], ['every', '새 요약이 쌓일 때마다']].map(([v, t]) => `<option value="${v}"${(settings.gradeMode || 'manual') === v ? ' selected' : ''}>${t}</option>`).join('')}</select></label>
+            ${settings.gradeMode === 'every' ? `<label class="memoria-au-every">요약 <input type="number" class="text_pole" id="memoria_audit_grade_every" min="1" max="20" step="1" value="${gradeEveryOf(settings)}" aria-label="새 요약 몇 개마다 확인할지"> 개마다</label>` : ''}
+        </div>`;
     if (grade) {
-        sh += `<article class="memoria-au-card"><header><b>채점 · 참고용</b><small>${auditWhen(grade.at)} · 요약 ${grade.sums.length}개 · 약 ${(grade.tokIn + grade.tokOut).toLocaleString()}토큰</small></header>`
-            + (grade.items.length ? grade.items.map(g => {
+        const kindLabel = { wrong: '틀림', missing: '빠짐', invented: '지어냄' };
+        sh += `<article class="memoria-au-card">
+            <header><b class="memoria-au-cardtitle">확인 결과</b><small>${auditWhen(grade.at)} · 요약 ${grade.sums.length}개 확인 · ${grade.items.length ? `걸린 곳 ${grade.items.length}개` : '걸린 곳 없음'}</small></header>
+            ${grade.items.map(g => {
                 const x = secOf.get(g.sum), done = grade.fixed?.includes(g.sum);
-                return `<div class="memoria-au-issue${done ? ' is-done' : ''}"><p><span class="memoria__badge">${{ wrong: '틀림', missing: '빠짐', invented: '지어냄' }[g.kind] || g.kind}</span>${done ? ' <span class="memoria__badge memoria__badge--arc">고침</span>' : ''} ${escapeHtml(g.text)}</p><div class="memoria-au-acts">${x ? `<small>요약</small>${auditSpan(x.from, x.to)}` : ''}${g.refs.length ? '<small>원문</small>' : ''}${g.refs.map(auditJump).join('')}</div></div>`;
-            }).join('') : '<p class="memoria__hint">걸린 곳이 없어요</p>')
-            + '<p class="memoria__hint">모델의 의견이에요. 번호를 눌러 원문을 직접 확인해 보세요.</p></article>';
+                return `<div class="memoria-au-gitem${done ? ' is-done' : ''}">
+                    <p><span class="memoria-au-tag">${kindLabel[g.kind] || g.kind}</span>${done ? ' <span class="memoria-au-tag is-ok">고쳤어요</span>' : ''} ${escapeHtml(g.text)}</p>
+                    <small>${x ? `이 요약: ${auditSpan(x.from, x.to)}` : ''}${g.refs.length ? `${x ? ' · ' : ''}원문에서 확인: ${g.refs.map(auditJump).join(' ')}` : ''}</small>
+                </div>`;
+            }).join('')}
+            <p class="memoria-au-foot is-faint">AI의 의견이라 틀릴 수 있어요. 번호를 누르면 그 메시지로 가요.</p>
+        </article>`;
     }
-    if (fixes.length) sh += `<div class="memoria-au-row"><div class="menu_button${settings.enabled ? '' : ' disabled'}" id="memoria_audit_repair" title="걸린 요약만 턴 기록과 원문 발췌를 함께 보내 다시 쓰게 해요 (호출 1회). 훨씬 짧아지거나 칸이 빠지면 한 번 더 시키고, 그래도 그러면 옛 글을 둬요."><i class="fa-solid fa-pen-to-square"></i><span>고쳐 달라고 보내기</span></div><span class="memoria__hint">요약 ${fixes.length}개 · 호출 1회 · 이전 글은 남겨 둬요</span></div>`;
-    if (restorable.length) sh += restorable.map(x => `<div class="memoria-au-issue"><p>고친 요약 · ${escapeHtml(whenOf(x.s) || (x.level === 'arc' ? '연대기' : '요약'))}</p><div class="memoria-au-acts">${auditSpan(x.from, x.to)}<div class="menu_button memoria-au-restore" data-id="${x.s.id}" title="고치기 전 글과 고친 글을 서로 바꿔요 (호출 없음)">${x.s.fixedAt && x.s.was?.at === x.s.fixedAt ? '이전 요약으로 되돌리기' : '고친 요약으로 다시'}</div></div></div>`).join('');
+    if (fixes.length) sh += `<div class="memoria-au-row"><div class="menu_button${settings.enabled ? '' : ' disabled'}" id="memoria_audit_repair" title="걸린 요약만 그 구간의 기록 · 원문과 함께 보내 다시 쓰게 해요 (호출 1회). 훨씬 짧아지면 옛 글을 그대로 둬요."><i class="fa-solid fa-pen-to-square"></i><span>걸린 요약 ${fixes.length}개 고쳐 쓰기</span></div></div>
+        <p class="memoria-au-foot">고치기 전 글은 남겨 둬서 아래에서 되돌릴 수 있어요.</p>`;
+    if (restorable.length) {
+        sh += `<h5 class="memoria-au-sub">고친 요약</h5><div class="memoria-au-issues">` + restorable.map(x => `<div class="memoria-au-issue">
+            <p>${escapeHtml(whenOf(x.s) || (x.level === 'arc' ? '연대기' : '요약'))}</p>
+            <div class="memoria-au-acts"><span class="memoria-au-meta">${auditSpan(x.from, x.to)}</span><span class="memoria-au-btns"><div class="menu_button memoria-au-restore" data-id="${x.s.id}" title="고치기 전 글과 고친 글을 서로 바꿔요 (호출 없음)">${x.s.fixedAt && x.s.was?.at === x.s.fixedAt ? '이전 글로 되돌리기' : '고친 글로 다시'}</div></span></div>
+        </div>`).join('') + '</div>';
+    }
     $('#memoria_audit_sums').html(sh);
 }
 
@@ -1443,10 +1473,12 @@ function bindAuditPanel() {
     $root.on('change', '#memoria_audit_note', function () { getSettings().driftNote = $(this).prop('checked'); saveSettingsDebounced(); updateInjection({ quiet: true }); renderAuditPanel(); });
     $root.on('click', '#memoria_audit_drift_now', async function () {
         if ($(this).hasClass('disabled') || auditBusy) return;
+        const work = workToast(`최근 답 ${checkEveryOf(getSettings())}개를 기록과 견주는 중이에요…`);
         try {
             const r = await queueDrift({ manual: true });
-            if (r) { const n = r.findings.filter(f => f.ok).length; toastr[n ? 'warning' : 'success'](n ? `어긋난 곳 ${n}개를 찾았어요` : `검사한 ${r.checked}개 모두 기록과 맞아요`, 'Memoria'); }
-        } catch (e) { toastr.error(`검사하지 못했어요: ${e?.message || e}`, 'Memoria'); }
+            if (r) { const n = r.findings.filter(f => f.ok).length; work.done(n ? 'warning' : 'success', n ? `어긋난 곳 ${n}개를 찾았어요 — 검사 탭에서 확인해 주세요` : `검사한 ${r.checked}개 모두 기록과 맞아요`); }
+            else work.done();
+        } catch (e) { work.done('error', `검사하지 못했어요: ${e?.message || e}`); }
         renderAuditPanel();
     });
     $root.on('click', '.memoria-au-fine', function () { dismissDrift(String($(this).data('id')), true); renderAuditPanel(); });
@@ -1469,18 +1501,20 @@ function bindAuditPanel() {
     $root.on('change', '#memoria_audit_grade_every', function () { const n = Math.round(Number($(this).val())); if (n >= 1 && n <= 20) { getSettings().gradeEvery = n; saveSettingsDebounced(); } });
     $root.on('click', '#memoria_audit_grade', async function () {
         if ($(this).hasClass('disabled') || auditBusy) return;
+        const work = workToast('요약이 원문과 맞는지 확인하는 중이에요…');
         try {
             const r = await gradeSummaries({ force: Number($(this).data('force')) === 1 });
-            toastr[r ? (r.items.length ? 'warning' : 'success') : 'info'](!r ? '채점할 요약이 없어요' : r.items.length ? `확인할 곳 ${r.items.length}개를 찾았어요` : '걸린 곳이 없어요', 'Memoria');
-        } catch (e) { toastr.error(`채점하지 못했어요: ${e?.message || e}`, 'Memoria'); }
+            work.done(r ? (r.items.length ? 'warning' : 'success') : 'info', !r ? '확인할 요약이 없어요' : r.items.length ? `걸린 곳 ${r.items.length}개를 찾았어요 — 검사 탭에서 볼 수 있어요` : '걸린 곳이 없어요');
+        } catch (e) { work.done('error', `확인하지 못했어요: ${e?.message || e}`); }
         renderAuditPanel();
     });
     $root.on('click', '#memoria_audit_repair', async function () {
         if ($(this).hasClass('disabled') || auditBusy) return;
+        const work = workToast('걸린 요약을 고쳐 쓰는 중이에요…');
         try {
             const r = await repairSummaries();
-            toastr[r?.fixed.length ? 'success' : 'info'](!r ? '고칠 요약이 없어요' : `요약 ${r.fixed.length}개를 고쳤어요 · ${r.kept.length}개는 그대로 뒀어요`, 'Memoria');
-        } catch (e) { toastr.error(`요약을 고치지 못했어요: ${e?.message || e}`, 'Memoria'); }
+            work.done(r?.fixed.length ? 'success' : 'info', !r ? '고칠 요약이 없어요' : `요약 ${r.fixed.length}개를 고쳤어요 · ${r.kept.length}개는 그대로 뒀어요`);
+        } catch (e) { work.done('error', `요약을 고치지 못했어요: ${e?.message || e}`); }
         renderAuditPanel();
     });
     $root.on('click', '.memoria-au-restore', function () {
@@ -1492,6 +1526,20 @@ function bindAuditPanel() {
 /* ============================================================
  * 사서 일지 · 답변 속도 (대기 상한과 양보)
  * ============================================================ */
+
+/**
+ * 오래 걸리는 일의 알림 — 누르자마자 "…하는 중" 알림을 띄워 끝날 때까지 남겨 두고, 끝나면 결과 알림으로 바꾼다.
+ * 위로 올라가 진행 글을 찾아보지 않아도 지금 돌고 있는지 알 수 있게. 반환: { update(글), done(종류, 글) }
+ */
+function workToast(text) {
+    let el = null;
+    try { el = toastr.info(text, 'Memoria', { timeOut: 0, extendedTimeOut: 0, tapToDismiss: false, closeButton: false, toastClass: 'toast memoria-work-toast' }); } catch { el = null; }
+    const close = () => { try { if (el && typeof toastr.clear === 'function') toastr.clear(el, { force: true }); } catch { /* 이미 닫혔다 */ } el = null; };
+    return {
+        update(next) { try { el?.find?.('.toast-message')?.text(next); } catch { /* 알림이 없다 */ } },
+        done(kind, msg, opts) { close(); if (msg) { try { toastr[kind || 'info'](msg, 'Memoria', opts); } catch { /* 알림을 못 띄워도 일은 끝났다 */ } } },
+    };
+}
 
 // 저절로 일어난 일은 알림을 띄우지 않고 여기에 남긴다 — 도구 탭의 "사서 일지"에서 본다
 const activityLog = createActivityLog(120);
@@ -5686,7 +5734,7 @@ function consolidationCandidates(store) {
 }
 
 /** 서고 정리 실행. 반환: {merged, dropped, reweighted} 또는 null(실패/대상 없음) */
-async function runConsolidation(store, { review = false } = {}) {
+async function runConsolidation(store, { review = false, onDraft = null } = {}) {
     const liveStore = store;
     const chatId = getCurrentChatId();
     const baseline = archiveSnapshot(store);
@@ -5762,6 +5810,7 @@ async function runConsolidation(store, { review = false } = {}) {
     if (removeIds.size) store.memories = store.memories.filter(m => !removeIds.has(m.id));
     const changes = archiveChanges(liveStore, store);
     if (!changes.length) return stats;
+    onDraft?.(); // 정리안이 나왔다 — "만드는 중" 알림을 닫고 검토 창을 띄운다
     if (review && !await reviewArchiveChanges(changes, '서고 정리 검토')) return null;
     const unchanged = () => getCurrentChatId() === chatId && getStore() === liveStore && archiveSnapshot(liveStore) === baseline;
     if (!unchanged()) throw new Error('검토 중 채팅이나 서고가 바뀌었습니다. 최신 기록으로 다시 정리해 주세요.');
@@ -10893,17 +10942,17 @@ function bindUI() {
         const $icon = $(this);
         if ($icon.hasClass('memoria--busy')) return;
         $icon.addClass('memoria--busy fa-beat-fade');
-        toastr.info('사서가 기억·세계·요약을 보고 장부를 새로 쓰는 중…', 'Memoria');
+        const work = workToast('사서가 기억·세계·요약을 보고 장부를 새로 쓰는 중이에요…');
         try {
             packetDraft = await rewritePacketWithLibrarian();
             $('#memoria_packet_preview').blur();
             refreshPacketPreview();
             const tokens = await getTokenCountAsync(packetDraft);
-            const over = tokens > getSettings().tokenBudget ? ` 주입 예산(${getSettings().tokenBudget})보다 커서 적용하면 예산을 넘습니다.` : '';
-            toastr.success(`초안을 미리보기에 넣었습니다 (≈ ${tokens} 토큰).${over} 확인 후 ✏ 또는 📌로 적용하세요.`, 'Memoria', { timeOut: 9000 });
+            const over = tokens > getSettings().tokenBudget ? ` 주입 예산(${getSettings().tokenBudget})보다 커서 적용하면 예산을 넘어요.` : '';
+            work.done('success', `초안을 미리보기에 넣었어요 (≈ ${tokens} 토큰).${over} 확인 후 ✏ 또는 📌로 적용하세요.`, { timeOut: 9000 });
         } catch (e) {
             console.error(`[${MODULE_NAME}] 장부 새로 쓰기 실패:`, e);
-            toastr.error(`장부를 새로 쓰지 못했습니다. ${e.message || ''}`, 'Memoria');
+            work.done('error', `장부를 새로 쓰지 못했어요. ${e.message || ''}`);
         } finally {
             $icon.removeClass('memoria--busy fa-beat-fade');
         }
@@ -10930,11 +10979,14 @@ function bindUI() {
         if (!q) return toastr.warning('질문을 입력하세요.', 'Memoria');
         $btn.addClass('disabled');
         $('#memoria_ask_answer').show().text('서고를 뒤지는 중…');
+        const work = workToast('서고를 뒤지는 중이에요…');
         try {
             const answer = await askLibrarian(q);
             $('#memoria_ask_answer').text(answer);
+            work.done('success', '답을 찾았어요. 질문 칸 아래에서 볼 수 있어요.');
         } catch (e) {
             $('#memoria_ask_answer').text(`답변 실패: ${e.message}`);
+            work.done('error', `답하지 못했어요: ${e.message}`);
         } finally {
             $btn.removeClass('disabled');
         }
@@ -10965,8 +11017,10 @@ function bindUI() {
         $input.val('');
         appendEditorLine('user', escapeHtml(text));
         const $thinking = appendEditorLine('assistant', '<i>서고를 확인하는 중…</i>');
+        const work = workToast('사서가 고칠 곳을 찾는 중이에요…');
         try {
             const { reply, ops } = await proposeEditorTurn(text);
+            work.done('success', ops.length ? `고칠 곳 ${ops.length}개를 찾았어요. 확인하고 적용해 주세요.` : '사서가 답했어요.');
             if (!ops.length) {
                 $thinking.html(`<b>사서:</b> ${escapeHtml(reply)}`);
             } else {
@@ -11003,6 +11057,7 @@ function bindUI() {
             }
         } catch (e) {
             $thinking.html(`<b>사서:</b> 처리 실패 — ${escapeHtml(e.message)}`);
+            work.done('error', `정정 요청을 처리하지 못했어요: ${e.message}`);
         } finally {
             $btn.removeClass('disabled');
         }
@@ -11423,18 +11478,22 @@ function bindUI() {
         if (gapFilling.has(key)) return;
         gapFilling.add(key);
         renderStoryView();
+        renderAuditPanel();
+        const work = workToast(`t${range.fromTurn}–t${range.toTurn} 빈 요약을 채우는 중이에요…`);
         let filled = 0;
         try {
             filled = await fillSummaryGaps(store, { limit: 50, includeManual: true, range });
+        } catch (e) {
+            console.error(`[${MODULE_NAME}] 빈 요약 채우기 실패:`, e);
         } finally {
             gapFilling.delete(key);
         }
-        if (getStore() !== store) return;
+        if (getStore() !== store) { work.done(); return; }
         if (filled) { persistStore(); updateInjection(); await applyAutoHide(); }
         renderSummariesPanel();
         renderAuditPanel();
-        if (filled) toastr.success(`t${range.fromTurn}–t${range.toTurn} 요약을 채웠습니다.`, 'Memoria');
-        else toastr.error('요약을 만들지 못했습니다. (모델 응답 오류) 잠시 뒤 다시 눌러 주세요.', 'Memoria');
+        if (filled) work.done('success', `t${range.fromTurn}–t${range.toTurn} 요약을 채웠어요.`);
+        else work.done('error', '요약을 만들지 못했어요. (모델 응답 오류) 잠시 뒤 다시 눌러 주세요.');
     });
     $('#memoria_settings').on('click', '.memoria-summary-delete', async function () {
         const id = $(this).closest('.memoria__summary-card').data('id');
@@ -11474,18 +11533,19 @@ function bindUI() {
         }
         const $icon = $(this);
         $icon.addClass('fa-spin');
+        const work = workToast(`t${s.fromTurn}–t${s.toTurn} 요약을 다시 만드는 중이에요…`);
         try {
             const made = await weaveSpan(store, s.fromTurn, s.toTurn);
             if (!made) throw new Error('빈 응답');
-            if (getStore() !== store) return;
+            if (getStore() !== store) { work.done(); return; }
             s.text = made.text;
             s.avec = null;
             if (made.unverified.length) s.unverified = made.unverified; else delete s.unverified;
             persistStore(); renderSummariesPanel(); updateInjection();
-            toastr.success('요약을 다시 생성했습니다.', 'Memoria');
+            work.done('success', '요약을 다시 만들었어요.');
         } catch (e) {
             console.error(`[${MODULE_NAME}] 요약 재생성 실패:`, e);
-            toastr.error('요약 재생성에 실패했습니다. (모델 응답 오류)', 'Memoria');
+            work.done('error', '요약을 다시 만들지 못했어요. (모델 응답 오류)');
         } finally {
             $icon.removeClass('fa-spin');
         }
@@ -11516,13 +11576,14 @@ function bindUI() {
     $('#memoria_summarize_now').on('click', async function () {
         const store = getStore();
         if (store.turnCounter <= summaryCoveredTurn(store)) return toastr.info('요약할 새 턴이 없습니다.', 'Memoria');
-        toastr.info('요약을 생성합니다…', 'Memoria');
+        const work = workToast('요약을 만드는 중이에요… (끝나면 알려 드려요)');
         // 예전에는 요약 주기를 잠깐 1로 바꿨지만 내부 하한(3턴)에 걸려, 밀린 턴이 3개 미만이면
         // 아무것도 만들지 않고 "생성되었습니다"만 떴다. 이제 주기를 다 못 채운 자투리까지 요약한다.
-        const made = await maybeSummarizeChunk(store, { flushAll: true });
+        let made = 0;
+        try { made = await maybeSummarizeChunk(store, { flushAll: true }); } catch (e) { work.done('error', `요약을 만들지 못했어요: ${e?.message || e}`); return; }
         persistStore(); renderSummariesPanel(); updateInjection();
-        if (made) toastr.success(`요약 ${made}개를 만들었습니다.`, 'Memoria');
-        else toastr.info('새로 요약할 턴 기록이 없습니다. (기록이 비어 있는 구간은 건너뜁니다)', 'Memoria');
+        if (made) work.done('success', `요약 ${made}개를 만들었어요.`);
+        else work.done('info', '새로 요약할 턴 기록이 없어요. (기록이 비어 있는 구간은 건너뛰어요)');
     });
 
     $('#memoria_summary_rebuild').on('click', async function () {
@@ -11549,13 +11610,14 @@ function bindUI() {
         const $prog = $('#memoria_summary_rebuild_progress');
         $btn.find('span').text('중단');
         $prog.text('준비 중…');
+        const work = workToast('요약을 처음부터 다시 만드는 중이에요…');
         try {
-            const made = await rebuildAllSummaries((done, total) => $prog.text(`요약 ${done} / ${total}`));
-            if (made == null) toastr.info('중단했습니다. 원래 요약으로 되돌렸습니다.', 'Memoria');
-            else toastr.success(`요약을 다시 만들었습니다 — 청크 ${made}개, 연대기 ${getStore().arcSummaries.filter(a => !a.carried).length}개`, 'Memoria');
+            const made = await rebuildAllSummaries((done, total) => { $prog.text(`요약 ${done} / ${total}`); work.update(`요약을 다시 만드는 중이에요… ${done} / ${total}`); });
+            if (made == null) work.done('info', '중단했어요. 원래 요약으로 되돌렸어요.');
+            else work.done('success', `요약을 다시 만들었어요 — 청크 ${made}개, 연대기 ${getStore().arcSummaries.filter(a => !a.carried).length}개`);
         } catch (e) {
             console.error(`[${MODULE_NAME}] 요약 다시 만들기 실패:`, e);
-            toastr.error(`요약 다시 만들기에 실패해 원래 요약으로 되돌렸습니다. ${e.message || ''}`, 'Memoria', { timeOut: 12000 });
+            work.done('error', `요약 다시 만들기에 실패해 원래 요약으로 되돌렸어요. ${e.message || ''}`, { timeOut: 12000 });
         } finally {
             $btn.find('span').text('');
             $prog.text('');
@@ -11915,14 +11977,15 @@ function bindUI() {
         if (!todo.length) return toastr.info('이미 모두 훑었어요 — 새 기록은 기록할 때 함께 받아요.', 'Memoria');
         const $btn = $(this).addClass('is-busy');
         const $label = $btn.find('span'), was = $label.text();
+        const work = workToast('지난 요약에서 사이 이름·변화를 찾는 중이에요…');
         try {
-            const r = await scanTiesFromSummaries(store, { onProgress: (n, total) => $label.text(`찾는 중 ${n}/${total}`) });
-            if (getStore() !== store) return;
+            const r = await scanTiesFromSummaries(store, { onProgress: (n, total) => { $label.text(`찾는 중 ${n}/${total}`); work.update(`지난 요약에서 사이 이름·변화를 찾는 중이에요… ${n} / ${total}`); } });
+            if (getStore() !== store) { work.done(); return; }
             persistStore(); renderBondsPanel(); renderSummariesPanel(); updateInjection({ quiet: true });
             logActivity('summary', `지난 요약에서 사이 이름 ${r.named}개 · 변화 ${r.shifts}개를 찾았어요 (호출 ${r.calls}번)`);
-            toastr.success(`사이 이름 ${r.named}개 · 변화 ${r.shifts}개를 찾았어요${r.left ? ` — 아직 ${r.left}개 구간이 남아 한 번 더 누르면 이어서 찾아요` : ''}`, 'Memoria');
+            work.done('success', `사이 이름 ${r.named}개 · 변화 ${r.shifts}개를 찾았어요${r.left ? ` — 아직 ${r.left}개 구간이 남아 한 번 더 누르면 이어서 찾아요` : ''}`);
         } catch (e) {
-            toastr.error(`찾지 못했어요: ${e?.message || e}`, 'Memoria');
+            work.done('error', `찾지 못했어요: ${e?.message || e}`);
         } finally {
             $btn.removeClass('is-busy');
             $label.text(was);
@@ -11999,6 +12062,7 @@ function bindUI() {
         const $btn = $(this);
         const $prog = $('#memoria_embed_progress');
         $btn.addClass('disabled');
+        const work = workToast(`기억 ${targets.length}개의 임베딩을 다시 계산하는 중이에요…`);
         try {
             let done = 0, skipped = 0;
             for (let i = 0; i < targets.length; i += 48) {
@@ -12026,8 +12090,10 @@ function bindUI() {
                 if (done % 192 === 0) persistStore();
             }
             persistStore();
-            if (skipped > 0) toastr.warning(`임베딩 재계산 완료: ${done}개 성공, ${skipped}개 실패 (건너뜀). 실패분은 다시 시도해 주세요.`, 'Memoria');
-            else toastr.success(`기억 ${done}개의 임베딩을 재계산했습니다.`, 'Memoria');
+            if (skipped > 0) work.done('warning', `임베딩 재계산 완료: ${done}개 성공, ${skipped}개 실패 (건너뜀). 실패분은 다시 시도해 주세요.`);
+            else work.done('success', `기억 ${done}개의 임베딩을 다시 계산했어요.`);
+        } catch (e) {
+            work.done('error', `임베딩을 다시 계산하지 못했어요: ${e?.message || e}`);
         } finally {
             $btn.removeClass('disabled');
             setTimeout(() => $prog.text(''), 4000);
@@ -12047,15 +12113,17 @@ function bindUI() {
         const $prog = $('#memoria_consolidate_progress');
         $btn.addClass('disabled');
         $prog.text('정리안을 만드는 중…');
+        const work = workToast('서고 정리안을 만드는 중이에요… (다 되면 확인 창이 떠요)');
         try {
-            const stats = await runConsolidation(store, { review: true });
-            if (!stats) { toastr.info('변경을 적용하지 않았습니다.', 'Memoria'); return; }
+            const stats = await runConsolidation(store, { review: true, onDraft: () => work.done() });
+            work.done();
+            if (!stats) { toastr.info('변경을 적용하지 않았어요.', 'Memoria'); return; }
             store.lastConsolidateTurn = store.turnCounter;
             persistStore(); renderMemoriesPanel(); renderCheckpoints(); updateStatusUI(); updateInjection();
             toastr.success(`서고 정리 완료 — 병합 ${stats.merged} · 정리 ${stats.dropped} · 중요도 재조정 ${stats.reweighted}`, 'Memoria');
         } catch (e) {
             console.error(`[${MODULE_NAME}] 서고 정리 실패:`, e);
-            toastr.error(`서고 정리에 실패했습니다. ${e.message || ''}`, 'Memoria', { timeOut: 12000 });
+            work.done('error', `서고 정리에 실패했어요. ${e.message || ''}`, { timeOut: 12000 });
         } finally {
             $btn.removeClass('disabled');
             $prog.text('');
@@ -12954,13 +13022,13 @@ function bindExtraUI() {
     $('#memoria_veil_plans').on('click', veilPlans);
     $('#memoria_pledge_audit').on('click', async function () {
         const store = getStore();
-        toastr.info('묵은 서약을 훑는 중…', 'Memoria');
+        const work = workToast('묵은 서약을 훑는 중이에요…');
         try {
             const n = await auditPledges(store);
             store.pledgeAudit = store.turnCounter;
             persistStore(); renderStatePanel(); updateInjection({ quiet: true });
-            toastr.success(n < 0 ? '훑을 묵은 서약이나 요약이 아직 없습니다.' : n ? `끝난 듯한 서약 ${n}개를 장부에서 뺐습니다. 목록에서 ✔로 닫을 수 있어요.` : '끝난 서약을 찾지 못했습니다.', 'Memoria');
-        } catch (e) { toastr.error(`훑지 못했습니다: ${e?.message || e}`, 'Memoria'); }
+            work.done(n > 0 ? 'success' : 'info', n < 0 ? '훑을 묵은 서약이나 요약이 아직 없어요.' : n ? `끝난 듯한 서약 ${n}개를 장부에서 뺐어요. 목록에서 ✔로 닫을 수 있어요.` : '끝난 서약을 찾지 못했어요.');
+        } catch (e) { work.done('error', `훑지 못했어요: ${e?.message || e}`); }
     });
     $('#memoria_recall_test').on('click', openRecallTest);
     $('#memoria_reader_open').on('click', openReader);

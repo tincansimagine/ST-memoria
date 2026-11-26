@@ -134,3 +134,17 @@ test('a verified slip reaches the ledger as a short note, and the summary panel 
     const quiet = await rt.buildPacketWithinBudget('바람');
     assert.doesNotMatch(quiet.text, /Keep Consistent/);
 });
+
+test('the working toast stays until the job ends, then turns into the result', async () => {
+    const rt = await runtime();
+    const shown = [];
+    let cleared = 0;
+    rt.context.toastr = { info: (m, t, o) => { shown.push(['info', m, o?.timeOut]); return { find: () => ({ text: (x) => shown.push(['update', x]) }) }; }, success: (m) => shown.push(['success', m]), error: (m) => shown.push(['error', m]), warning: (m) => shown.push(['warning', m]), clear: () => { cleared++; } };
+    const work = rt.run('workToast')('요약을 만드는 중이에요…');
+    work.update('2 / 5');
+    work.done('success', '요약 3개를 만들었어요.');
+    assert.deepEqual(shown, [['info', '요약을 만드는 중이에요…', 0], ['update', '2 / 5'], ['success', '요약 3개를 만들었어요.']]);
+    assert.equal(cleared, 1);
+    rt.context.toastr = { info() { throw new Error('no toasts'); }, success() {} };
+    assert.doesNotThrow(() => rt.run('workToast')('x').done('success', 'y'), 'a host without toasts does not break the job');
+});

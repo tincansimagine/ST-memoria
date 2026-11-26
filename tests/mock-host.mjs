@@ -70,6 +70,20 @@ export const chat_metadata = { memoria: { version: 1, lexiconRev: 5, turnCounter
         { id: 'chapter2', fromTurn: 9, toTurn: 16, text: 'WHEN: 2일째 낮 ~ 3일째 새벽 · 기차역, 정원, 해안\nPLOT:\n- 여행자가 새벽 기차표를 끊었지만 타지 않았다.\n- 아리아가 정원 우물에서 낡은 나침반을 건져 건넸다. "길 잃지 말라고요."\n- 해안에서 일출을 보며 여행자가 은빛 반지를 건넸다.\nSHIFTS: 아리아 → 여행자: 떠나보내기 싫은 사람 · 나침반은 여행자에게\nOPEN: 보라에게 전할 편지 · 닫힌 북문 너머' }],
     arcSummaries: [], milestones: [{ id: 'ms1', title: '등대의 약속', summary: '돌아오겠다고 약속했다', participants: [name2, name1], grade: 'major', turnIndex: 2 }, { id: 'ms2', title: '은빛 반지', summary: '해안에서 반지를 건넸다', participants: [name2, name1], grade: 'major', turnIndex: 15 }], items: [], dossier: [] } };
 
+// ?audit=1 — 검사 탭 화면 확인용: 겹친 요약 · 지난 검사 보고서 · 채점 결과를 깐다
+if (new URLSearchParams(location.search).get('audit') === '1') {
+    const m = chat_metadata.memoria;
+    m.chunkSummaries[1].fromTurn = 7;
+    m.audit = {
+        driftAt: 30,
+        drift: { at: Date.now(), from: 26, to: 34, lastH: 0, checkedIds: [26, 30, 34], checked: 3, every: 5, tokIn: 3200, tokOut: 180, findings: [
+            { id: 'f1', no: 30, h: 0, who: name2, kind: 'fact', ok: true, text: '반지를 왼손에 끼었다고 했지만 기록에는 오른손에 끼었다고 되어 있어요.', quote: '왼손 약지에 반지를 끼우며', evidence: '오른손에 반지를 끼었다', src: { kind: 'summary', name: '2일째 낮', from: 17, to: 32 } },
+            { id: 'f2', no: 34, h: 0, who: name2, kind: 'address', ok: false, text: '여행자를 반말로 불렀어요.', quote: '너 왜 이제 와', evidence: '', src: null },
+        ] },
+        grade: { at: Date.now(), sums: ['chapter2'], tokIn: 4100, tokOut: 300, items: [{ sum: 'chapter2', kind: 'wrong', text: '요약에는 여행자가 기차를 탔다고 되어 있지만 원문에서는 타지 않았어요.', refs: [20, 22] }] },
+    };
+}
+
 const fixtureStorage = new Map();
 if (largeLibrary) fixtureStorage.set('memoria.libraryIndex.v1', JSON.stringify(largeLibrarySnapshot()));
 export function getContext() {
