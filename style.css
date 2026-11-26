@@ -1734,3 +1734,7 @@ body[data-memoria-paper="dark"] :is(#memoria_settings.memoria, .memoria-library,
 #memoria_settings .memoria__bond-card .memoria__mem-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; }
 #memoria_settings .memoria__bond-card .memoria__mem-meta > * { min-width: 0; }
 #memoria_settings .memoria__char-line { min-width: 0; overflow-wrap: anywhere; }
+
+/* 전환점 고정 — 오래돼도 장부에서 밀려나지 않게 */
+.memoria-milestone-pin { opacity: .45; cursor: pointer; }
+.memoria-milestone-pin.is-on { opacity: 1; color: var(--mm-accent); }

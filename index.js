@@ -40,7 +40,7 @@ import { ARGUMENT_TYPE, SlashCommandArgument } from "../../../slash-commands/Sla
 import { MacrosParser } from "../../../../scripts/macros.js";
 import { NARRATOR_PERSPECTIVE, isSharedPerspective, hasChatPerspective, resolvePerspective, findAssociations, sameKnowledgeScope, archiveSnapshot, validateArchive, addCheckpoint, archiveChanges, packetSections } from './archive-engine.mjs';
 import { showArchiveLibrary } from './library-ui.mjs';
-import { withDeadline, parsePhraseList, stripPhrases, hasPhrase, findRepeatedPhrases, pickBundleValues, resolveBundleName, switchBundle, saveBundle, deleteBundle, renameBundle, exportBundle, parseBundleFile, diffStableEntries, shouldRefreeze, createActivityLog, findRivalExtensions, splitClosedLine, sleepStaleThreads, pickPledges, stripOpenLines, THREAD_KINDS, recallCooldown, pushRecallHistory, isEndedValue, ungroundedFigures, roughTokens, noteUsage, usageTotals, groundedIn, soundsHedged, noteThreadSightings, threadTouched, rareQueryWords, findConflicts, looksRefused, looksBlocked, strayHidden, pickTranscript, transcriptTerms, crossScriptPairs, crossScriptSame, pickPledgesToCheck, ensembleLabel, firstOf, listOf, joinValue, clampScore, splitPair, jsonRepairVariants, normalizeRecordLabels, BOND_KINDS, bondKindOf, summaryGaps, spanWindows, TIC_TYPES, readTicPicks } from './craft-engine.mjs';
+import { withDeadline, parsePhraseList, stripPhrases, hasPhrase, findRepeatedPhrases, pickBundleValues, resolveBundleName, switchBundle, saveBundle, deleteBundle, renameBundle, exportBundle, parseBundleFile, diffStableEntries, shouldRefreeze, createActivityLog, findRivalExtensions, splitClosedLine, sleepStaleThreads, pickPledges, stripOpenLines, THREAD_KINDS, recallCooldown, pushRecallHistory, isEndedValue, ungroundedFigures, roughTokens, noteUsage, usageTotals, groundedIn, soundsHedged, noteThreadSightings, threadTouched, rareQueryWords, findConflicts, looksRefused, looksBlocked, strayHidden, pickTranscript, transcriptTerms, crossScriptPairs, crossScriptSame, pickPledgesToCheck, ensembleLabel, firstOf, listOf, joinValue, clampScore, splitPair, jsonRepairVariants, normalizeRecordLabels, BOND_KINDS, bondKindOf, summaryGaps, spanWindows, TIC_TYPES, readTicPicks, keptMilestones, sameTrait, mergeTraits, startsWithFieldLabel, looksLikeAlias, looksLikeAge, storyOnly, endsMidSentence, mergeLoss } from './craft-engine.mjs';
 import { isOocText, looksOocReply, attributeQuote, addressTermsIn, tallyAddress, pickAddressLines, personNowLine } from './stage-engine.mjs';
 import { parseStoryDate, storyDatesOf, isIsoDate, trackerText, trackerLineOf, pickBeats, beatLines, veilLeaks } from './calendar-engine.mjs';
 import { peopleList, matchPerson, personPage, nameSuggestions, planMerge, pairKey, WIPE_KINDS, wipeCounts, NOW_ORDER } from './people-engine.mjs';
@@ -128,7 +128,7 @@ THE SIX SHELVES
    - "core" — the person underneath, written ONCE: three to six short clauses on temperament, what they value, their flaw, how they treat the other lead, and what they would never do. Draw it from the reference material about the character when it is given, plus what the story has plainly shown. No plot. Supply it only for a new card or one the cast list marks [no core yet]; for everyone else use null — a core already on file is never rewritten.
    - "voice" — HOW they speak, as a compact pattern: politeness level and typical sentence endings, first-person word, pet phrases, verbal tics. A pattern only, never sample lines.
    - "line" — ONE line this character actually spoke in THIS exchange, copied character for character in its original language, under about 120 characters. Pick the line that sounds most like them — manner, not plot exposition. Null when they did not speak or nothing was characteristic. Never for the player's character.
-   - "traits" — standing temperament only. A mood, one outburst, or a reaction to this particular scene is not a trait.
+   - "traits" — standing temperament only. A mood, one outburst, or a reaction to this particular scene is not a trait. Give only traits the card does not already carry: never a reworded, inflected or intensified form of one it has ("fiery hot-temper" when it has "hot-tempered", "resigned" when it has "resignation").
    - "growth" — only when this exchange shows a LASTING change in how they act toward someone or how they speak: one clause stating the concrete change and its cause ("since the rooftop confession, no longer deflects Mina's questions with jokes"). Null otherwise; most exchanges change no one.
    - "relationships" — fixed ties to other named characters that do not move with the mood of a scene: kinship, rank, history ([{"target":"Aria","relation":"childhood friend"}]). How they currently FEEL about each other belongs on shelf 6.
 6. bonds — where one person stands toward another, one direction per entry ("from" → "to"). File a bond ONLY when this exchange first establishes it or actually moves it; warmth, teasing, or bickering that sits inside the stage already on file moves nothing and files nothing. "stage" names where it stands in a few plain words, sized to what was shown and no larger ("wary allies", "reluctant trust", "openly courting", "estranged, still protective"). "basis" is the concrete on-screen act or line that shows it. "calls" is what "from" calls "to" and at what speech level, when the text shows it (name, nickname, title, honorific; formal or casual), else null. "unsaid" is something "from" is visibly holding back from "to" — only when the text shows the holding back — else null. A bond moves one step at a time: never leap from strangers to devotion because one scene was tender. The two directions are separate people's hearts; file each side only when that side was shown.
@@ -2702,9 +2702,10 @@ function sanitizeExtraction(raw, userText, assistantText, { memoryCap = 12 } = {
         out.characters.push({
             name,
             provisional: c?.provisional === true,
-            aka: listOf(firstOf(c, 'aka', 'aliases', 'alias')).map(a => cleanStr(a, 60)).filter(Boolean).slice(0, 4),
+            // "특성: 다정함" · "직업: 대리"처럼 다른 칸의 이름표가 붙어 온 값은 칸이 밀린 것이다 — 이름 · 나이로 받지 않는다
+            aka: listOf(firstOf(c, 'aka', 'aliases', 'alias')).map(a => cleanStr(a, 60)).filter(a => !!a && looksLikeAlias(a)).slice(0, 4),
             role: naLike(c?.role),
-            age: naLike(c?.age),
+            age: looksLikeAge(naLike(c?.age)) ? naLike(c?.age) : null,
             occupation: naLike(c?.occupation),
             appearance: naLike(c?.appearance) ? cleanStr(c.appearance, 200) : null,
             voice: naLike(c?.voice) ? cleanStr(c.voice, 200) : null,
@@ -2713,8 +2714,9 @@ function sanitizeExtraction(raw, userText, assistantText, { memoryCap = 12 } = {
             // 실제로 한 대사 한 줄 — 원문에 그대로 있는 문장만 (지어낸 대사는 버린다)
             line: validLine(c?.line, userText, assistantText),
             // 이야기 속에서 생긴, 원인이 분명하고 오래갈 변화
-            growth: naLike(c?.growth) ? cleanStr(c.growth, 200) : null,
-            traits: listOf(c?.traits).map(t => cleanStr(t, 40)).filter(Boolean).slice(0, 8),
+            growth: naLike(c?.growth) && !startsWithFieldLabel(c.growth) ? cleanStr(c.growth, 200) : null,
+            // 겹치는 특성(다혈질 · 불같은 다혈질)은 한 칸으로
+            traits: mergeTraits([], listOf(c?.traits).map(t => cleanStr(t, 40)).filter(Boolean), 8),
             relationships: listOf(c?.relationships).filter(r => r && typeof r === 'object')
                 .map(r => ({ target: cleanStr(r?.target, 60), relation: cleanStr(r?.relation, 80) }))
                 .filter(r => r.target && r.relation)
@@ -3217,7 +3219,7 @@ function upsertCharacter(store, c, turnIndex) {
         // 실제로 내용이 바뀌는지 먼저 확인 — 재확인(변화 없음)이면 이전 값 이력을 건드리지 않는다
         const scalarChanged = ['role', 'age', 'occupation', 'appearance', 'voice']
             .some(f => c[f] && c[f] !== existing[f]);
-        const incomingTraits = (c.traits || []).filter(t => !(existing.traits || []).includes(t));
+        const incomingTraits = (c.traits || []).filter(t => !(existing.traits || []).some(x => sameTrait(x, t)));
         if (scalarChanged || incomingTraits.length) {
             // 이 턴이 삭제되면 되돌릴 수 있게, 바뀌기 직전 프로필을 쌓아 둔다 (몇 턴을 되감아도 그때의 프로필로)
             const snapshot = {
@@ -3237,7 +3239,7 @@ function upsertCharacter(store, c, turnIndex) {
             if (c[field]) existing[field] = c[field];
         }
         if (c.traits?.length) {
-            existing.traits = [...new Set([...(existing.traits || []), ...c.traits])].slice(0, 10);
+            existing.traits = mergeTraits(existing.traits, c.traits, 10);
         }
     }
     if (!existing.locked) {
@@ -3396,7 +3398,7 @@ function mergeCharacterCards(store, keep, absorb) {
     for (const field of ['role', 'age', 'occupation', 'appearance', 'voice']) {
         if (!keep[field] && absorb[field]) keep[field] = absorb[field];
     }
-    keep.traits = [...new Set([...(keep.traits || []), ...(absorb.traits || [])])].slice(0, 10);
+    keep.traits = mergeTraits(keep.traits, absorb.traits || [], 10);
     if (!keep.core && absorb.core) { keep.core = absorb.core; keep.coreTurn = absorb.coreTurn ?? null; }
     for (const l of (absorb.lines || [])) addCharacterLine(keep, l.text, l.turn || 0);
     keep.growth = [...(keep.growth || []), ...(absorb.growth || [])]
@@ -3539,15 +3541,17 @@ async function commitTurns(mesIds, { silent = true, force = false, retry = 1 } =
         if (isSideMessage(mes)) continue; // 막간은 이야기가 아니다
         if (isPartialReply(mes)) continue; // 반쪽짜리 답 — 완성본이 오면 그때 적는다
         const userMes = findPrecedingUserMessage(id);
-        // 사서에게는 화면에 보이는 이야기만 보여준다 — 다른 확장의 숨은 패킷·상태창 잔해 차단
-        const text = visibleProse(mes.mes);
+        // 사서에게는 화면에 보이는 이야기만 보여준다 — 다른 확장의 숨은 패킷·상태창 잔해 차단.
+        // 메시지 중간의 이야기 밖 메모((OOC: …) · ((…)))와 내 메시지의 진행 지시 줄("전개: …")도 보이지 않는다 — 지시는 일어난 일이 아니고, 그대로 이루어졌다면 답변에 적혀 있다
+        const seen = (raw, user = false) => { const t = visibleProse(raw); return getSettings().skipOoc !== false ? storyOnly(t, user) : t; };
+        const text = seen(mes.mes);
         if (!text.trim()) continue;
         const hash = mesHashOf(mes);
         const existing = store.turns.find(t => t.mesId === id);
         if (existing && existing.mesHash === hash && !existing.failed) continue; // 이미 같은 내용으로 기록됨
         // 이야기 밖 대화(OOC)로 본 내 말은 사서에게 보내지 않는다 — 기억이 되지 않게
         const userSide = userMes && isSideMessage(userMes);
-        units.push({ mesId: id, mes, userMes: userSide ? null : userMes, userText: userSide ? '' : visibleProse(userMes?.mes), text, hash, existing,
+        units.push({ mesId: id, mes, userMes: userSide ? null : userMes, userText: userSide ? '' : seen(userMes?.mes, true), text, hash, existing,
             userLabel: userMes?.name || name1 || 'User', charLabel: mes.name || name2 || 'Assistant' });
     }
     if (!units.length) return false;
@@ -3570,6 +3574,9 @@ async function commitTurns(mesIds, { silent = true, force = false, retry = 1 } =
     const assistantText = units.map(u => u.text).join('\n');
     const newHash = lastUnit.hash;
     const { userLabel, charLabel } = lastUnit;
+    // 끊긴 답변: 마지막 답변이 문장 중간에서 끝났으면 끊긴 자리를 표시해 끝 문장이 사실로 적히지 않게 한다 (뒤를 지어 채우지 않게)
+    const cutLast = endsMidSentence(lastUnit.text);
+    const CUT_MARK = ' [the reply was cut off here]';
 
     // 최근 턴 참고 자료 (기록 품질용, 기록 대상 아님)
     const recent = store.turns
@@ -3666,12 +3673,13 @@ async function commitTurns(mesIds, { silent = true, force = false, retry = 1 } =
         castLine, hostLine,
         bondLines.length ? `Bonds on file (current stage — refile one only if this exchange moved it):\n${bondLines.join('\n')}\n` : '',
         recent ? `Already shelved (do not refile) — recent turn digests:\n${recent}\n` : '',
+        cutLast ? 'One reply in this exchange stops abruptly at the mark "[the reply was cut off here]" — it was interrupted before it finished. File only what the text fully shows up to that point: never complete the broken last sentence, never guess how the moment ended, and never file as done something the cut-off ending only began.\n' : '',
         ...(batch
             ? [`The run of ${units.length} consecutive exchanges to shelve, oldest first:`,
-                ...units.map((u, i) => `<exchange n="${i + 1}">\n<user name="${u.userLabel}">\n${u.userText.slice(0, 3000)}\n</user>\n<assistant name="${u.charLabel}">\n${u.text.slice(0, 6000)}\n</assistant>\n</exchange>`)]
+                ...units.map((u, i) => `<exchange n="${i + 1}">\n<user name="${u.userLabel}">\n${u.userText.slice(0, 3000)}\n</user>\n<assistant name="${u.charLabel}">\n${u.text.slice(0, 6000)}${cutLast && u === lastUnit ? CUT_MARK : ''}\n</assistant>\n</exchange>`)]
             : ['The exchange to shelve:',
                 `<user name="${userLabel}">\n${userText.slice(0, 4000)}\n</user>`,
-                `<assistant name="${charLabel}">\n${assistantText.slice(0, 6000)}\n</assistant>`]),
+                `<assistant name="${charLabel}">\n${assistantText.slice(0, 6000)}${cutLast ? CUT_MARK : ''}\n</assistant>`]),
         // 긴 원문을 읽고 나면 출력 언어 지시가 흐려진다 — 맨 끝에서 한 번 더 짚는다 (자동일 때는 생략)
         languageTail().trimStart(),
     ].filter(Boolean).join('\n');
@@ -3880,6 +3888,8 @@ async function commitTurns(mesIds, { silent = true, force = false, retry = 1 } =
     for (const n of speakersNow) if (n && !people.some(p => entityKey(p.name) === entityKey(n))) people.push({ name: n, forms: [] });
     const knownPerson = (n) => { if (!n) return ''; const c = canonEntityName(store, n); return people.some(p => entityKey(p.name) === entityKey(c)) ? c : ''; };
     const soloChat = !selected_group;
+    // 소설 모드에서는 글쓴이가 서술자다 — 글에 누가 말했는지 적히지 않은 대사를 카드 주인의 말로 치지 않는다 (사서가 적은 이름을 쓴다)
+    const narrated = effectivePerspective(store) === NARRATOR_PERSPECTIVE;
     // 인용한 말을 한 사람·들은 사람: 원문에서 규칙으로 가린 것이 먼저, 규칙이 못 가리면 사서가 적은 이름(서고에 있는 사람일 때만)
     const whoSaid = (quote, by0, to0) => {
         if (!quote) return { by: '', to: '' };
@@ -3887,7 +3897,7 @@ async function commitTurns(mesIds, { silent = true, force = false, retry = 1 } =
         for (const u of units) {
             for (const [text, author, partner] of [[u.text, u.charLabel, u.userLabel], [u.userText, u.userLabel, u.charLabel]]) {
                 if (!text) continue;
-                r = attributeQuote(text, quote, { author: canonEntityName(store, author), people, partner: soloChat ? canonEntityName(store, partner) : '' });
+                r = attributeQuote(text, quote, { author: narrated ? '' : canonEntityName(store, author), people, partner: soloChat && !narrated ? canonEntityName(store, partner) : '' });
                 if (r.found) break;
             }
             if (r.found) break;
@@ -4389,6 +4399,7 @@ async function maybeFoldEras(store) {
     if (refusedReply(text)) { logActivity('error', '연대기 요약 대신 거절문이 와서 받지 않았어요'); text = ''; }
     if (!text || getStore() !== store) return false; // 실패하면 그대로 둔다 (이어붙인 날것으로 바꾸지 않는다)
     delete store.eraFoldHeld;
+    checkpointBeforeChange(store, '옛 이야기 접기 전'); // 접기 전 줄거리는 복구 지점으로 남는다 (도구 탭에서 되돌릴 수 있다)
     const ids = new Set(folding.map(a => a.id));
     store.arcSummaries = [
         ...store.arcSummaries.filter(a => !ids.has(a.id)),
@@ -4628,18 +4639,40 @@ async function rebuildAllSummaries(onProgress) {
     return outcome?.made ?? null;
 }
 
-/** 청크 여러 개를 하나의 아크 요약으로 압축해 밀어넣는 공통 로직 */
-async function pushArcFromChunks(store, merging) {
-    const settings = getSettings();
+/**
+ * 요약 여럿(묶음 · 연대기)을 하나의 연대기 글로 줄인다. 실패하면 ''.
+ * 합치기 검수 (모델을 따로 부르지 않는다): 넣은 것에 비해 너무 짧거나 가장 앞 기록의 내용이 사라졌으면 무엇이 빠졌는지 짚어 한 번 다시 쓰게 하고,
+ * 그래도 그러면 합치지 않는다 — 부른 쪽이 옛 글을 그대로 둔다 (합칠 때마다 처음이 깎이면 몇 번 뒤에는 이야기의 시작이 남지 않는다)
+ */
+async function arcMergeText(parts, { max = 2400 } = {}) {
+    const sys = `${getSettings().prompts.arc}\n\n${languageDirective()}`;
+    const material = parts.map(c => `[t${c.fromTurn}–t${c.toTurn}]\n${c.text}`).join('\n\n');
+    const span = `t${parts[0]?.fromTurn ?? '?'}–t${parts[parts.length - 1]?.toTurn ?? '?'}`;
+    const ask = async (note = '') => cleanMultiline(sanitizeRecordOutput(await callAuxLLM(sys, material + note + languageTail(), { task: 'summary', maxTokens: auxTokens(4000) })), max);
     let text = '';
+    try { text = await ask(); } catch (e) { console.debug(`[${MODULE_NAME}] 연대기 병합 LLM 실패`, e); return ''; }
+    // 거절·사과문은 연대기로 받지 않는다 (부른 쪽이 묶음을 이어 붙이거나 그대로 둔다)
+    if (refusedReply(text)) { logActivity('error', '연대기 요약 대신 거절문이 와서 받지 않았어요'); return ''; }
+    const src = parts.map(p => p.text);
+    const loss = mergeLoss(src, text, max);
+    if (!loss) return text;
+    let again = '';
     try {
-        text = cleanMultiline(sanitizeRecordOutput(await callAuxLLM(`${settings.prompts.arc}\n\n${languageDirective()}`, merging.map(c => `[t${c.fromTurn}–t${c.toTurn}]\n${c.text}`).join('\n\n') + languageTail(), { task: 'summary', maxTokens: auxTokens(4000) })), 2400);
-    } catch (e) {
-        console.debug(`[${MODULE_NAME}] 연대기 병합 LLM 실패`, e);
-    }
-    // 거절·사과문은 연대기로 받지 않는다 (아래에서 묶음을 이어 붙이거나 그대로 둔다)
-    if (refusedReply(text)) { logActivity('error', '연대기 요약 대신 거절문이 와서 받지 않았어요'); text = ''; }
-    if (!text) text = cleanStr(merging.map(c => c.text).join(' '), 2400);
+        again = await ask(`\n\n(Your previous record ${loss === 'short' ? 'was far too short for this much material' : 'dropped the earliest records — the beginning of the story is missing'}. Write it again in the same structure, covering every record above from the first to the last.)`);
+    } catch (e) { console.debug(`[${MODULE_NAME}] 연대기 병합 다시 쓰기 실패`, e); }
+    if (again && !refusedReply(again) && !mergeLoss(src, again, max)) { logActivity('summary', `${span} 요약을 합친 글이 앞부분을 잃어 한 번 다시 쓰게 했어요`); return again; }
+    logActivity('error', `${span} 요약을 합친 글이 ${loss === 'short' ? '너무 짧아' : '앞부분을 잃어'} 받지 않았어요 — 옛 글을 그대로 둬요`);
+    return '';
+}
+
+/** 청크 여러 개를 하나의 아크 요약으로 압축해 밀어넣는 공통 로직.
+ *  keepOnFail: 합치지 못했으면(실패 · 검수에 걸림) 묶음을 그대로 두고 false 를 돌려준다 (기본은 묶음의 앞머리를 고르게 남겨서라도 연대기를 만든다) */
+async function pushArcFromChunks(store, merging, { keepOnFail = false } = {}) {
+    if (!merging.length) return false;
+    let text = await arcMergeText(merging);
+    if (!text && keepOnFail) return false;
+    // 합치지 못했는데 꼭 줄여야 할 때: 묶음마다 앞머리를 고르게 남긴다 (통째로 이어 붙여 자르면 뒤쪽 묶음이 사라진다 — 원래 글은 sourceChunks 에 남는다)
+    if (!text) text = merging.map(c => cleanMultiline(c.text, Math.max(200, Math.floor(2400 / merging.length) - 1))).join('\n');
 
     store.arcSummaries.push({
         id: uuidv4(),
@@ -4650,6 +4683,7 @@ async function pushArcFromChunks(store, merging) {
         // 안 걸린 청크는 독립 청크로 되살리고, 걸린 청크만 버릴 수 있게 해준다
         sourceChunks: merging.map(c => ({ fromTurn: c.fromTurn, toTurn: c.toTurn, text: c.text })),
     });
+    return true;
 }
 
 /** 서고 정리 주기에 청크들을 사건 단위로 재그룹핑해 아크로 병합한다 — 개수 기준이 아니라
@@ -4704,8 +4738,9 @@ async function regroupChunksIntoArcs(store) {
     const remaining = [];
     for (const group of resolvedGroups) {
         if (group.length < 2) { remaining.push(group[0]); continue; }
-        await pushArcFromChunks(store, group);
-        mergedGroups++;
+        // 합친 글이 검수에 걸리면 묶음을 그대로 둔다
+        if (await pushArcFromChunks(store, group, { keepOnFail: true })) mergedGroups++;
+        else remaining.push(...group);
     }
     store.chunkSummaries = remaining;
     return mergedGroups;
@@ -4718,16 +4753,9 @@ async function regroupChunksIntoArcs(store) {
 
 /** 아크 여러 개를 하나로 재압축한다 (sourceChunks는 이어붙여 보존 — 삭제 시 부분 복구용) */
 async function mergeArcsIntoOne(store, arcs) {
-    const settings = getSettings();
-    let text = '';
-    try {
-        text = cleanMultiline(sanitizeRecordOutput(await callAuxLLM(`${settings.prompts.arc}\n\n${languageDirective()}`, arcs.map(a => `[t${a.fromTurn}–t${a.toTurn}]\n${a.text}`).join('\n\n') + languageTail(), { task: 'summary', maxTokens: auxTokens(4000) })), 2400);
-    } catch (e) {
-        console.debug(`[${MODULE_NAME}] 아크 재병합 LLM 실패`, e);
-    }
-    // 거절·사과문은 연대기로 받지 않는다 (아래에서 묶음을 이어 붙이거나 그대로 둔다)
-    if (refusedReply(text)) { logActivity('error', '연대기 요약 대신 거절문이 와서 받지 않았어요'); text = ''; }
-    if (!text) text = cleanStr(arcs.map(a => a.text).join(' '), 2400);
+    // 합치지 못했으면(실패 · 검수에 걸림) 옛 연대기를 그대로 둔다 — 이어 붙여 자르면 뒤쪽 이야기를 잃는다
+    const text = await arcMergeText(arcs);
+    if (!text) return null;
     return {
         id: uuidv4(),
         fromTurn: arcs[0].fromTurn,
@@ -4796,8 +4824,8 @@ async function maybeConsolidateArcs(store) {
     const finalArcs = [];
     for (const group of resolvedGroups) {
         if (group.length < 2) { finalArcs.push(group[0]); continue; }
-        finalArcs.push(await mergeArcsIntoOne(store, group));
-        mergedCount++;
+        const one = await mergeArcsIntoOne(store, group);
+        if (one) { finalArcs.push(one); mergedCount++; } else finalArcs.push(...group);
     }
 
     const reviewPoolSet = new Set(reviewPool);
@@ -5423,10 +5451,12 @@ function chapterVec(c) {
     return v;
 }
 
-/** 최근 주입 창(마지막 3개) 밖의 청크 요약 중 지금 질의와 가장 맞는 하나 (문턱 미달 시 null) */
-async function pickRecalledChapter(store, query, sceneText) {
+/** 최근 주입 창(마지막 3개) 밖의 청크 요약 중 지금 질의와 가장 맞는 하나 (문턱 미달 시 null).
+ *  shown: 이미 "지금까지의 이야기"에 실리는 묶음의 id — 다시 떠올리지 않는다. 실리지 않은 것 가운데 맨 뒤 하나는 아직 원문으로 보이는 구간의 것이라 뺀다 */
+async function pickRecalledChapter(store, query, sceneText, shown = null) {
     const mute = (store.recallMute || []).map(w => String(w).toLowerCase()).filter(w => w.length >= 2);
-    const old = store.chunkSummaries.slice(0, -3).filter(c => !mute.some(w => String(c.text || '').toLowerCase().includes(w)));
+    const pool = shown ? store.chunkSummaries.filter(c => !shown.has(c.id)).slice(0, -1) : store.chunkSummaries.slice(0, -3);
+    const old = pool.filter(c => !mute.some(w => String(c.text || '').toLowerCase().includes(w)));
     const q = String(query || '').trim();
     if (!old.length || q.length < 4) return null;
     const qv = embedText(q);
@@ -6025,7 +6055,10 @@ async function buildPacketSections(query, supervisorPlan) {
         const picked = [...usable.filter(l => l.pinned), ...usable.filter(l => !l.pinned).reverse()].slice(0, voiceCount);
         return picked.length ? { name: c.name, lines: picked.map(l => l.text) } : null;
     }).filter(Boolean) : [];
-    const milestones = [...store.milestones].sort((a, b) => (a.turnIndex || 0) - (b.turnIndex || 0)).slice(-8);
+    // 전환점: 최근 8개. 직접 고정한 것은 오래돼도 밀려나지 않는다
+    const byTurn = (a, b) => (a.turnIndex || 0) - (b.turnIndex || 0);
+    const rootMiles = keptMilestones(store.milestones);
+    const milestones = [...rootMiles, ...store.milestones.filter(e => !rootMiles.includes(e)).sort(byTurn).slice(-Math.max(4, 8 - rootMiles.length))].sort(byTurn);
     // 물건도 늘 싣지 않는다: 최근에 움직였거나, 지금 장면 인물이 들고 있거나, 최근 본문에 나온 것만
     const itemEnded = (it) => /lost|broken|destroyed|gone|discarded|consumed|잃|부서|파괴|버림|버려|소모|사라/i.test(String(it.status || ''));
     const items = store.items.filter(i => !i.disabled).filter((it) => {
@@ -6058,7 +6091,7 @@ async function buildPacketSections(query, supervisorPlan) {
     ];
     // 챕터 회상: 주입 창(최근 3개)에서 밀려난 옛 챕터도 지금 질의와 강하게 맞으면 한 자리 소환 —
     // 기억 조각은 파편이지만 챕터 레코드는 그 시절의 연결된 맥락을 준다
-    const recalledChapter = settings.chapterRecall === true ? await pickRecalledChapter(store, query, lastAssistantText) : null;
+    const recalledChapter = settings.chapterRecall === true ? await pickRecalledChapter(store, query, lastAssistantText, new Set(localSummaries.map(x => x.id))) : null;
     if (recalledChapter) summaries.unshift({ ...recalledChapter, level: 'chunk', recalled: true });
 
     // 서사 시계 지도 (기억 줄의 "얼마나 옛일" 표기용)
@@ -6141,7 +6174,18 @@ async function buildPacketSections(query, supervisorPlan) {
         }
     }
     // 원문 회상: 옛일을 되짚는 말일 때만, 지금은 원문으로 실리지 않는 옛 대화에서 그 대목을 한 곳 찾는다
-    const transcript = settings.recallQuotes !== false ? transcriptRecall(store, [query], { onScreenFrom }) : [];
+    // 내 입력 없이 이어 받는 중(계속 · 소설 모드)의 질의는 마지막 답변의 끝부분이라, 서술 속의 "어젯밤" · "그때"에 걸려 무관한 옛 원문이 통째로 실렸다 —
+    // 마지막 말이 내 것일 때만 찾는다
+    const askedByUser = (() => {
+        const rewriting = chatGenerating && ['regenerate', 'swipe'].includes(lastGenerationType);
+        for (let i = chat.length - (rewriting && chat[chat.length - 1] && !chat[chat.length - 1].is_user ? 2 : 1); i >= 0; i--) {
+            const m = chat[i];
+            if (!m || (m.is_system && !m.extra?.memoria_hidden) || isSideMessage(m) || !String(m.mes || '').trim()) continue;
+            return !!m.is_user;
+        }
+        return false;
+    })();
+    const transcript = settings.recallQuotes !== false && askedByUser ? transcriptRecall(store, [query], { onScreenFrom }) : [];
     // 오랜만에 다시 나온 사람: 인물 카드가 오래 움직이지 않았는데 지금 장면(최근 대화·이번 입력)에 이름이 나온 사람.
     // 이런 사람은 상한에 밀려 카드가 빠지거나 짧은 줄로만 실려서, 모델이 처음 보는 사람처럼 굴거나 관계·호칭을 지어낸다.
     // 누구인지, 장면 속 사람들과 어떤 사이인지, 마지막으로 무슨 일이 있었는지를 매 턴 바뀌는 구간에 따로 싣는다 (모델 호출 없음)
@@ -6211,7 +6255,7 @@ function formatCharacterLine(c) {
     const head = [c.role, c.age, c.occupation].filter(Boolean).join(', ');
     // 장면 밖 인물은 짧게: 누구인지와 핵심 한 줄만. 말투·변화·관계 전부는 그 인물이 장면에 설 때 싣는다.
     if (c.brief) {
-        const gist = c.core ? cleanStr(c.core, 90) : (c.traits || []).slice(0, 3).join(', ');
+        const gist = c.core ? cleanStr(c.core, 90) : mergeTraits([], c.traits || [], 3).join(', ');
         const akaBrief = c.aliases?.length ? ` (aka ${c.aliases.slice(0, 2).join(', ')})` : '';
         return `- ${c.name}${akaBrief}${head ? ` (${head})` : ''}${gist ? ` — ${gist}` : ''}`;
     }
@@ -6227,7 +6271,7 @@ function formatCharacterLine(c) {
         ? `core (how they were when the story began — where "changed in this story" differs, that is how they are now): ${c.core}`
         : `core (constant — the story does not rewrite this): ${c.core}`);
     if (c.voice) bits.push(`voice: ${c.voice}`);
-    if (c.traits?.length) bits.push(c.traits.join(', '));
+    if (c.traits?.length) bits.push(mergeTraits([], c.traits, 10).join(', ')); // 직접 적거나 잠근 카드에 겹친 칸이 있어도 장부에는 한 번만
     if (c.growth?.length) bits.push(`changed in this story (how they are now — this outranks the core): ${c.growth.slice(-3).map(g => g.text).join('; ')}`);
     if (c.relationships?.length) bits.push(c.relationships.map(r => `${r.target}: ${r.relation}`).join('; '));
     const aka = c.aliases?.length ? ` (aka ${c.aliases.join(', ')})` : '';
@@ -6314,7 +6358,10 @@ function renderPacket(parts, { withExcerpts = true, excerptLimit = Infinity, rec
         stable.push('## Notable Items');
         for (const it of items) entry('Items', it.id || it.name, `- ${it.name}${it.holder ? ` (held by ${it.holder})` : ''}${it.meaning ? `: ${it.meaning}` : ''}${it.status ? ` [${it.status}]` : ''}`);
     }
-    const miles = takeLast(parts.milestones || [], extraLimit);
+    // 자리가 모자라 줄일 때도 직접 고정한 전환점은 남긴다
+    const allMiles = parts.milestones || [];
+    const keptRoots = extraLimit === Infinity ? [] : allMiles.filter(m => m.pinned).slice(0, Math.max(0, extraLimit));
+    const miles = extraLimit === Infinity ? allMiles : [...keptRoots, ...takeLast(allMiles.filter(m => !keptRoots.includes(m)), extraLimit - keptRoots.length)].sort((a, b) => (a.turnIndex || 0) - (b.turnIndex || 0));
     if (miles.length) {
         stable.push('## Turning Points (chronological, oldest first)');
         for (const m of miles) {
@@ -6693,7 +6740,20 @@ async function composeSplitPacket(parts, opts, level) {
         const collect = [];
         const r = renderPacket(parts, { ...useOpts, stableMode: true, split: true, collect });
         if (!collect.length) return null; // 얼릴 것이 아직 없다 — 한 덩어리로 주입
-        const diff = diffStableEntries(stableFreeze?.entries, collect);
+        // 상한에 밀려 이번 목록에서 빠진 인물 · 관계선 줄은 지워진 게 아니다 — 그 때문에 장부를 새로 뜨지 않는다 (그 턴의 프롬프트 캐시가 깨지지 않는다).
+        // 관계선은 그사이 단계가 달라졌으면 지금 줄을 돌려준다
+        const banned = parts.banned || [];
+        const store = getStore();
+        const stands = (e) => {
+            const id = String(e.id || '').slice(String(e.sec || '').length + 1);
+            if (e.sec === 'Cast') return (store.characters || []).some(c => !c.disabled && (c.id === id || c.name === id));
+            if (e.sec === 'Bonds') {
+                const b = (store.bonds || []).find(x => x.id === id && !x.disabled && bondNow(x));
+                return b ? (banned.length ? stripPhrases(formatBondLine(b), banned) : formatBondLine(b)) : false;
+            }
+            return false;
+        };
+        const diff = diffStableEntries(stableFreeze?.entries, collect, stands);
         const why = reuse
             ? shouldRefreeze(stableFreeze, { chatId, key, level, turn: parts.turnNow || 0, diff, maxTurns: Math.max(0, Number(settings.stableRefreshTurns) || 0) })
             : 'new';
@@ -7135,6 +7195,61 @@ function repairStatusStamps(store) {
     return fixed;
 }
 
+/**
+ * 소설 모드에서 인용한 말에 붙은 "누가 한 말"을 다시 가린다 (채팅마다 한 번).
+ * 예전에는 글에 말한 사람이 적히지 않은 대사를 전부 메시지를 쓴 카드 주인의 말로 적었다 — 상대가 한 말까지 카드 주인의 말로 실렸다.
+ * 그 메시지(묶어 기록했으면 함께 든 메시지까지)를 다시 읽어 글에 적힌 화자가 있으면 그 사람으로 고치고, 없으면 이름을 뗀다 (틀린 이름보다 없는 편이 낫다).
+ * 반환: 고친 수
+ */
+function repairNarratedSpeakers(store) {
+    if ((store.speakerRev || 0) >= 1 || effectivePerspective(store) !== NARRATOR_PERSPECTIVE) return 0;
+    if (store.turns.length && !chat.length) return 0; // 채팅이 아직 안 열렸다 — 다음에 본다
+    const people = store.characters.filter(c => !c.disabled).map(c => ({ name: c.name, forms: c.aliases || [] }));
+    const turnAt = new Map(store.turns.map(t => [t.turnIndex, t]));
+    let fixed = 0;
+    for (const m of store.memories) {
+        if (!m.by || !m.excerpt || m.manual || m.turnIndex == null) continue;
+        const t = turnAt.get(m.turnIndex);
+        const ids = [...new Set([m.mesId, t?.mesId].filter(x => Number.isInteger(x)))];
+        let r = null;
+        for (const id of ids) {
+            const src = chat[id];
+            if (!src || typeof src.mes !== 'string') continue;
+            try { r = attributeQuote(visibleProse(src.mes), m.excerpt, { author: '', people, partner: '' }); } catch { r = null; }
+            if (r?.found) break;
+        }
+        if (!r?.found) continue;
+        const by = r.by ? canonEntityName(store, r.by) : '';
+        const to = by && r.to && entityKey(r.to) !== entityKey(by) ? canonEntityName(store, r.to) : '';
+        if (by === m.by && (to || '') === (m.to || '')) continue;
+        if (by) m.by = by; else delete m.by;
+        if (to) m.to = to; else delete m.to;
+        fixed++;
+    }
+    store.speakerRev = 1;
+    return fixed;
+}
+
+/** 이미 저장된 인물 카드에서 밀려 적힌 값(다른 이름 · 나이 · 달라진 점)과 겹친 특성을 걷어 낸다 — 잠근 카드와 직접 적은 카드는 건드리지 않는다. 반환: 고친 카드 수 */
+function cleanCastFields(store) {
+    let n = 0;
+    for (const c of store.characters || []) {
+        if (c.locked || c.manual) continue;
+        const names = (c.aliases || []).filter(looksLikeAlias);
+        const growth = (c.growth || []).filter(g => !startsWithFieldLabel(g?.text));
+        const age = c.age && !looksLikeAge(c.age) ? undefined : c.age;
+        const traits = mergeTraits([], c.traits || [], 99);
+        const sameTraits = traits.length === (c.traits || []).length && traits.every((x, i) => x === c.traits[i]); // 겹친 특성 (다혈질 · 불같은 다혈질)
+        if (names.length === (c.aliases || []).length && growth.length === (c.growth || []).length && age === c.age && sameTraits) continue;
+        c.aliases = names;
+        c.growth = growth;
+        if (age === undefined) delete c.age;
+        if (!sameTraits) c.traits = traits;
+        n++;
+    }
+    return n;
+}
+
 function reconcileWithChat() {
     const store = getStore();
     let changed = false;
@@ -7261,6 +7376,18 @@ function reconcileWithChat() {
     if (restamped) {
         logActivity('update', `상태창이 아닌 줄(문자·소품 표식)에서 읽혀 있던 시간·장소를 ${restamped}턴에서 지웠어요`);
         changed = true;
+    }
+    // 채팅마다 한 번: 소설 모드에서 잘못 붙은 "누가 한 말" 다시 가리기 · 인물 카드에 밀려 적힌 칸과 겹친 특성 걷어 내기
+    const respoken = repairNarratedSpeakers(store);
+    if (respoken) {
+        logActivity('update', `소설 모드에서 말한 사람이 잘못 붙은 대사 ${respoken}개를 글에 적힌 화자로 고쳤어요`);
+        changed = true;
+    }
+    if ((store.castRev || 0) < 2) {
+        const cleaned = cleanCastFields(store);
+        store.castRev = 2;
+        changed = true;
+        if (cleaned) logActivity('update', `인물 카드 ${cleaned}장에서 겹친 특성 · 밀려 적힌 칸을 정리했어요`);
     }
     const foldedOnLoad = foldEntityAliases(store);
     if (foldedOnLoad.states || foldedOnLoad.memories) {
@@ -8790,7 +8917,8 @@ function renderMilestonesPanel() {
     for (const e of [...store.milestones].sort((a, b) => (a.turnIndex || 0) - (b.turnIndex || 0))) {
         list.append($(`
             <div class="memoria__row" data-id="${e.id}">
-                <span class="memoria__row-text"><span class="memoria__badge ${e.grade === 'major' ? 'memoria__badge--arc' : ''}">${e.grade === 'major' ? '전환점' : '사건'}</span> <b>${escapeHtml(e.title)}</b>${e.summary ? ` — ${escapeHtml(e.summary)}` : ''} <small>(t${e.turnIndex || '?'}${(e.participants || []).length ? ` · ${e.participants.map(escapeHtml).join(', ')}` : ''})</small></span>
+                <span class="memoria__row-text"><span class="memoria__badge ${e.grade === 'major' ? 'memoria__badge--arc' : ''}">${e.grade === 'major' ? '전환점' : '사건'}</span> <b>${escapeHtml(e.title)}</b>${e.pinned ? ' <span class="memoria__badge">늘 실림</span>' : ''}${e.summary ? ` — ${escapeHtml(e.summary)}` : ''} <small>(t${e.turnIndex || '?'}${(e.participants || []).length ? ` · ${e.participants.map(escapeHtml).join(', ')}` : ''})</small></span>
+                <i class="fa-solid fa-thumbtack memoria-milestone-pin${e.pinned ? ' is-on' : ''}" title="${e.pinned ? '고정 풀기' : '고정 — 오래돼도 장부에서 밀려나지 않게 (여섯까지)'}"></i>
                 <i class="fa-solid fa-trash memoria-milestone-delete" title="삭제"></i>
             </div>
         `));
@@ -10176,6 +10304,14 @@ function bindUI() {
         }, store.turnCounter);
         persistStore(); renderStatePanel(); updateInjection();
         toastr.success('서약을 추가했습니다.', 'Memoria');
+    });
+    $('#memoria_settings').on('click', '.memoria-milestone-pin', function () {
+        const id = $(this).closest('.memoria__row').data('id');
+        const store = getStore();
+        const e = store.milestones.find(x => x.id === id);
+        if (!e) return;
+        if (e.pinned) delete e.pinned; else e.pinned = true;
+        persistStore(); renderMilestonesPanel(); updateInjection();
     });
     $('#memoria_settings').on('click', '.memoria-milestone-delete', async function () {
         const id = $(this).closest('.memoria__row').data('id');

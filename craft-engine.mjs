@@ -349,19 +349,28 @@ export function parseBundleFile(text, defaults) {
 /**
  * 얼려 둔 안정 구간과 지금의 안정 구간을 항목 단위로 비교한다.
  * entries: [{ id, sec, line }]
- * 반환: { changed: 바뀌었거나 새로 생긴 항목들, removed: 사라진 항목 수 }
+ * stillStands(e): 이번 목록에서는 빠졌지만 서고에 그대로 있는 줄인가 — true(얼려 둔 줄 그대로 맞다) · 글(그 줄이 지금은 이렇게 달라졌다) · 그 밖(정말 사라졌다).
+ *   인물이 열 명 · 관계선이 여덟 줄을 넘는 대화에서 누가 장면에 들어오면 다른 줄이 상한에 밀려 이번 목록에서 빠진다.
+ *   지워진 게 아니라 자리가 없었을 뿐이므로 얼려 둔 장부의 그 줄은 그대로 맞다 (그 때문에 장부를 새로 뜨지 않는다)
+ * 반환: { changed: 바뀌었거나 새로 생긴 항목들, removed: 사라진 항목 수, held: 빠졌지만 그대로 둔 줄 수 }
  */
-export function diffStableEntries(frozen, current) {
-    const before = new Map((frozen || []).map(e => [e.id, e.line]));
+export function diffStableEntries(frozen, current, stillStands = null) {
+    const before = new Map((frozen || []).map(e => [e.id, e]));
     const now = new Set();
     const changed = [];
     for (const e of current || []) {
         now.add(e.id);
-        if (before.get(e.id) !== e.line) changed.push(e);
+        if (before.get(e.id)?.line !== e.line) changed.push(e);
     }
-    let removed = 0;
-    for (const id of before.keys()) if (!now.has(id)) removed++;
-    return { changed, removed };
+    let removed = 0, held = 0;
+    for (const [id, e] of before) {
+        if (now.has(id)) continue;
+        const v = stillStands ? stillStands(e) : false;
+        if (typeof v === 'string') { if (v !== e.line) changed.push({ ...e, line: v }); held++; }
+        else if (v) held++;
+        else removed++;
+    }
+    return { changed, removed, held };
 }
 
 /**
@@ -426,6 +435,11 @@ export function findRivalExtensions(names, disabled = []) {
 /* ------------------------------------------------------------
  * 떡밥(미해결 서약) 관리 — 끝난 일이 "미해결"로 남아 계속 실리지 않게
  * ------------------------------------------------------------ */
+
+/** 오래돼도 장부에서 밀려나지 않게 지킬 전환점: 이야기 탭에서 직접 고정한 것 (여섯까지). 반환: 턴 순서대로 */
+export function keptMilestones(list) {
+    return (list || []).filter(e => !!e?.pinned).sort((a, b) => (a.turnIndex || 0) - (b.turnIndex || 0)).slice(0, 6);
+}
 
 export const THREAD_KINDS = Object.freeze(['keep_unresolved', 'loose_end', 'foreshadow', 'feeling']);
 
@@ -1084,4 +1098,98 @@ export function spanWindows(indexes, size) {
     for (let i = 0; i < list.length; i += n) out.push(list.slice(i, i + n));
     if (out.length > 1 && out[out.length - 1].length < n / 2) out[out.length - 2].push(...out.pop());
     return out;
+}
+
+/* ------------------------------------------------------------
+ * 인물 카드 — 겹치는 특성 · 밀려 적힌 칸
+ * ------------------------------------------------------------ */
+
+/* 같은 뜻의 특성 — "유약함"·"유약한", "체념"·"체념적", "다혈질"·"불같은 다혈질"처럼 끝만 다르거나 한쪽이 다른 쪽을 꾸민 것은 한 칸이다
+   (매 턴 장부에 실리므로 겹친 칸은 토큰만 먹는다). "관심"과 "무관심"처럼 낱말 중간에 걸린 것은 같은 것으로 보지 않는다 — 낱말 단위로만 견준다 */
+const TRAIT_END = /(?:스러움|스러운|스럽다|스럽게|적인|하다|하고|있음|함|한|적|임)$/;
+const traitWords = (t) => String(t ?? '').toLowerCase().split(/[^\p{L}\p{N}]+/u).filter(Boolean)
+    .map(w => /[가-힣]$/.test(w) ? (w.length >= 3 ? w.replace(TRAIT_END, '') : w) : w.length > 4 ? w.replace(/(?:ness|s)$/, '') : w);
+
+/** 두 특성이 같은 칸인가: 낱말 줄기가 같거나, 짧은 쪽의 낱말이 긴 쪽에 그대로 이어서 들어 있다 (짧은 쪽이 두 글자 이상일 때만) */
+export function sameTrait(a, b) {
+    const x = traitWords(a), y = traitWords(b);
+    if (!x.length || !y.length) return false;
+    if (x.join(' ') === y.join(' ')) return true;
+    const [sh, lo, shRaw] = x.length <= y.length ? [x, y, a] : [y, x, b];
+    if (sh.length === lo.length || sh.join('').length < 2) return false;
+    // "강함" · "단호함" 같은 서술어 한 낱말은 남의 말을 꾸미는 쪽이라 긴 말 속에 들어 있어도 같은 칸이 아니다 ("강함" ≠ "자존심 강함")
+    if (sh.length === 1 && /(?:함|한|있음|없음|임|하다)$/.test(String(shRaw ?? '').trim())) return false;
+    for (let i = 0; i + sh.length <= lo.length; i++) if (sh.every((w, j) => lo[i + j] === w)) return true;
+    return false;
+}
+
+/** 특성 목록을 합친다: 겹치는 것은 한 칸으로 (꾸민 말이 붙은 쪽이 더 많은 것을 말하므로 그쪽을 남긴다 · 자리는 먼저 있던 곳). 앞에서부터 max 개 */
+export function mergeTraits(base, add = [], max = 10) {
+    const out = [];
+    for (const t of [...(base || []), ...(add || [])]) {
+        const v = String(t ?? '').trim();
+        if (!v) continue;
+        const i = out.findIndex(o => sameTrait(o, v));
+        if (i < 0) out.push(v);
+        else if (traitWords(v).length > traitWords(out[i]).length) out[i] = v;
+    }
+    return out.slice(0, max);
+}
+
+/* 사서가 인물 칸을 밀려 적을 때가 있다 (다른 이름 칸에 "특성: …", 나이 칸에 "직업: …", 달라진 점에 "남긴 말: …") — 그런 값은 받지 않는다 */
+export const startsWithFieldLabel = (v) => /^\s*[^\s:：]{1,6}(?:\s[^\s:：]{1,4})?\s*[:：]/.test(String(v ?? ''));
+export const looksLikeAlias = (v) => { const t = String(v ?? '').trim(); return !!t && t.length <= 30 && !/[:：]/.test(t); };
+export const looksLikeAge = (v) => { const t = String(v ?? '').trim(); return !!t && t.length <= 24 && !/[:：]/.test(t); };
+
+/* ------------------------------------------------------------
+ * 기록에 들어가면 안 되는 것 · 요약 합치기 검수
+ * ------------------------------------------------------------ */
+
+/** 메시지 중간의 이야기 밖 메모: (OOC: …) · [OOC: …] · 【OOC …】 · ((…)) · <ooc>…</ooc> */
+const OOC_SPANS = [/[(（\[［【]\s*ooc\b[^)）\]］】]{0,800}[)）\]］】]/gi, /\(\([^()]{0,800}\)\)/g, /<ooc\b[^>]*>[\s\S]{0,2000}?<\/ooc>/gi];
+/** 전개 지시의 머리말 — "전개: …", "지시: …", "Direction: …" */
+const DIRECT_HEAD = '(?:다음\\s*전개|전개\\s*(?:지시|방향|요청)?|진행\\s*(?:지시|방향|요청)|지시\\s*(?:사항)?|연출\\s*(?:지시|요청)?|요청\\s*사항|scene\\s*direction|story\\s*direction|direction|directive|instructions?|plot|system\\s*note|剧情|指示|展開)';
+const DIRECT_LINE = new RegExp(`^[ \\t]*[*_>#\\-]*[ \\t]*[\\[(（【]?[ \\t]*${DIRECT_HEAD}[ \\t]*[:：][^\\n]*$`, 'gimu');
+const DIRECT_SPAN = new RegExp(`[\\[(（【][ \\t]*${DIRECT_HEAD}[ \\t]*[:：][^\\])）】\\n]{0,800}[\\])）】]`, 'giu');
+
+/**
+ * 사서에게 보일 글에서 이야기가 아닌 대목을 걷어 낸다. 메시지 중간의 이야기 밖 메모는 누구의 글에서든, "전개: …" 같은 진행 지시는 내 메시지에서만 뺀다 —
+ * 지시는 일어난 일이 아니라 바람이고, 그대로 이루어졌다면 답변에 적혀 있다. 걷어 낼 것이 없으면 받은 글 그대로
+ */
+export function storyOnly(text, user = false) {
+    const src = String(text ?? '');
+    let t = src;
+    if (/ooc|\(\(/i.test(t)) for (const rx of OOC_SPANS) t = t.replace(rx, ' ');
+    if (user && /[:：]/.test(t)) t = t.replace(DIRECT_SPAN, ' ').replace(DIRECT_LINE, '');
+    return t === src ? src : t.replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').replace(/[ \t]{2,}/g, ' ').trim();
+}
+
+/**
+ * 글이 문장 중간에서 끊겼는가 — 끝 글자가 글자 · 숫자 · 쉼표 · 여는 괄호처럼 "더 이어질" 것이고, 끝줄이 문장답게 길 때만 그렇게 본다.
+ * 짧은 글, 목록 · 표 · "이름: 값" 꼴로 끝나는 글(상태창 · 꼬리표)은 끊긴 것으로 보지 않는다
+ */
+export function endsMidSentence(text) {
+    const t = String(text ?? '').replace(/[\s*_~`]+$/, '');
+    if (t.length < 80) return false;
+    const line = t.slice(t.lastIndexOf('\n') + 1).trim();
+    if (line.length < 16 || /^(?:[-*#>|•·]|\d+[.)]|[\[(（【<])/.test(line) || /^\S{1,14}\s*[:：]/.test(line) || /\|/.test(line)) return false;
+    const last = [...t].pop() || '';
+    return /[\p{L}\p{N},，、;；:：(（\[「『“‘—–\-]/u.test(last);
+}
+
+const mergeGrams = (s) => { const f = String(s).toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ''), g = new Set(); for (let i = 0; i < f.length - 1; i++) g.add(f.slice(i, i + 2)); return g; };
+const coverOf = (part, whole) => { if (part.size < 8) return 1; let hit = 0; for (const g of part) if (whole.has(g)) hit++; return hit / part.size; };
+
+/**
+ * 합친 요약이 넣은 것을 잃었는가. 'short' = 넣은 양에 비해 너무 짧다 · 'head' = 가장 앞 기록의 내용이 거의 남지 않았다(뒤쪽 이야기만 남았다) · '' = 괜찮다.
+ * parts: 합치기 전 글들(오래된 것부터), max: 합친 글의 길이 상한. 넣은 것이 적으면 따지지 않는다
+ */
+export function mergeLoss(parts, merged, max = 2400) {
+    const src = (parts || []).map(p => String(p || '')).filter(p => p.trim()), out = String(merged || ''), total = src.reduce((a, p) => a + p.length, 0);
+    if (src.length < 2 || total < 800 || !out.trim()) return '';
+    if (out.length < Math.min(max, total * 0.3) * 0.4) return 'short';
+    const whole = mergeGrams(out), all = coverOf(mergeGrams(src.join(' ')), whole);
+    if (all < 0.12) return ''; // 요약 언어가 달라 글자로 견줄 수 없다
+    const head = coverOf(mergeGrams(src[0]), whole), tail = coverOf(mergeGrams(src[src.length - 1]), whole);
+    return head < 0.2 && head < tail * 0.45 ? 'head' : '';
 }

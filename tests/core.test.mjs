@@ -562,3 +562,36 @@ test('auto-hide keeps the latest replies in view and hides older ones in blocks,
     assert.ok(chat.slice(0, 20).every(m => m.is_system));
     assert.equal(chat[50].is_system, true, 'one the user hid stays hidden');
 });
+
+test('stored cards lose folded traits and shifted fields once, locked cards stay as written', async () => {
+    const rt = await runtime();
+    const store = rt.getStore();
+    store.characters = [
+        { id: 'c1', name: '도겸', traits: ['다혈질', '불같은 다혈질', '체념', '체념적'], aliases: ['겸이', '직업: 대리'], age: '특성: 다정함', growth: [{ text: '남긴 말: "형"', turn: 3 }, { text: '옥상 고백 뒤로 시온에게 농담으로 넘기지 않는다', turn: 5 }] },
+        { id: 'c2', name: '유원', traits: ['다혈질', '불같은 다혈질'], locked: true },
+    ];
+    assert.equal(rt.run('cleanCastFields(getStore())'), 1);
+    const [a, b] = store.characters;
+    assert.deepEqual([...a.traits], ['불같은 다혈질', '체념']);
+    assert.deepEqual([...a.aliases], ['겸이']);
+    assert.equal(a.age, undefined);
+    assert.equal(a.growth.length, 1);
+    assert.equal(b.traits.length, 2, 'a locked card is not rewritten');
+    assert.match(rt.run('formatCharacterLine(getStore().characters[1])'), /— 불같은 다혈질$/, 'the ledger still shows the locked card once per trait');
+});
+
+test('a pinned turning point survives when the ledger has to shrink', async () => {
+    const rt = await runtime();
+    const parts = {
+        rules: [], characters: [], bonds: [], items: [], summaries: [], locks: [], banned: [], states: [], publicRecall: [], protectedRecall: [],
+        milestones: [
+            { id: 'm1', title: '정체가 드러났다', turnIndex: 2, pinned: true },
+            { id: 'm2', title: '두 번째 일', turnIndex: 20 },
+            { id: 'm3', title: '세 번째 일', turnIndex: 30 },
+        ],
+    };
+    const text = rt.renderPacket(parts, { extraLimit: 2 });
+    assert.match(text, /정체가 드러났다/);
+    assert.match(text, /세 번째 일/);
+    assert.doesNotMatch(text, /두 번째 일/);
+});

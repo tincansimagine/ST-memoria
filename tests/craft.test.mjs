@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { withDeadline, parsePhraseList, stripPhrases, hasPhrase, findRepeatedPhrases, bundleKeys, pickBundleValues,
+import { keptMilestones, sameTrait, mergeTraits, startsWithFieldLabel, looksLikeAlias, looksLikeAge, storyOnly, endsMidSentence, mergeLoss, withDeadline, parsePhraseList, stripPhrases, hasPhrase, findRepeatedPhrases, bundleKeys, pickBundleValues,
     resolveBundleName, switchBundle, saveBundle, deleteBundle, renameBundle, exportBundle, parseBundleFile,
     diffStableEntries, shouldRefreeze, createActivityLog, findRivalExtensions } from '../craft-engine.mjs';
 
@@ -131,7 +131,64 @@ test('stable diff reports changed and added lines, and counts removals', () => {
     const diff = diffStableEntries(frozen, [{ id: 'a', sec: 'Canon', line: '- a = 2' }, { id: 'c', sec: 'Cast', line: '- C' }]);
     assert.deepEqual(diff.changed.map(e => e.id), ['a', 'c']);
     assert.equal(diff.removed, 1);
-    assert.deepEqual(diffStableEntries(frozen, frozen), { changed: [], removed: 0 });
+    assert.deepEqual(diffStableEntries(frozen, frozen), { changed: [], removed: 0, held: 0 });
+});
+
+test('a line pushed out by the cap is held, not counted as removed', () => {
+    const frozen = [{ id: 'Cast:a', sec: 'Cast', line: '- A' }, { id: 'Bonds:b', sec: 'Bonds', line: '- A → B: wary' }, { id: 'Cast:gone', sec: 'Cast', line: '- G' }];
+    const stands = (e) => e.id === 'Cast:a' ? true : e.id === 'Bonds:b' ? '- A → B: lovers' : false;
+    const diff = diffStableEntries(frozen, [], stands);
+    assert.equal(diff.removed, 1, 'only the card that is really gone counts');
+    assert.equal(diff.held, 2);
+    assert.deepEqual(diff.changed.map(e => e.line), ['- A → B: lovers'], 'a held bond whose stage moved comes back as an update');
+});
+
+test('kept milestones are the pinned ones, oldest first, at most six', () => {
+    const list = [{ id: 1, turnIndex: 9, pinned: true }, { id: 2, turnIndex: 2 }, { id: 3, turnIndex: 1, pinned: true }];
+    assert.deepEqual(keptMilestones(list).map(e => e.id), [3, 1]);
+    assert.equal(keptMilestones(Array.from({ length: 9 }, (_, i) => ({ id: i, turnIndex: i, pinned: true }))).length, 6);
+});
+
+test('overlapping traits fold into one cell, keeping the decorated form', () => {
+    assert.deepEqual(mergeTraits(['다혈질', '체념', '유약함'], ['불같은 다혈질', '체념적', '유약한']), ['불같은 다혈질', '체념', '유약함']);
+    assert.equal(sameTrait('관심', '무관심'), false, 'a word inside another word is not the same trait');
+    assert.equal(sameTrait('강함', '자존심 강함'), false, 'a lone predicate does not fold into the phrase it modifies');
+    assert.equal(sameTrait('hot-tempered', 'Hot-Tempered'), true);
+    assert.equal(mergeTraits([], ['a', 'b', 'c'], 2).length, 2);
+});
+
+test('shifted cast fields are recognised', () => {
+    assert.equal(startsWithFieldLabel('특성: 다정함'), true);
+    assert.equal(startsWithFieldLabel('since the rooftop, no longer jokes'), false);
+    assert.equal(looksLikeAlias('직업: 대리'), false);
+    assert.equal(looksLikeAlias('유원이'), true);
+    assert.equal(looksLikeAge('27'), true);
+    assert.equal(looksLikeAge('직업: 대리'), false);
+});
+
+test('out-of-story notes and directions are not shown to the librarian', () => {
+    assert.equal(storyOnly('그는 웃었다. (OOC: 다음엔 비 오게) 끝.'), '그는 웃었다. 끝.');
+    assert.equal(storyOnly('그는 웃었다. ((잠깐 쉬어요)) 끝.'), '그는 웃었다. 끝.');
+    assert.equal(storyOnly('안녕\n전개: 도겸이 고백한다', true), '안녕');
+    assert.equal(storyOnly('안녕\n전개: 도겸이 고백한다'), '안녕\n전개: 도겸이 고백한다', 'directions are dropped only from the user side');
+    assert.equal(storyOnly('그대로 둔다'), '그대로 둔다');
+});
+
+test('a reply that stops mid-sentence is noticed', () => {
+    const body = '그는 창밖을 보았다. '.repeat(8);
+    assert.equal(endsMidSentence(`${body}\n그는 천천히 문을 열고 안으로 들어가며 말했`), true);
+    assert.equal(endsMidSentence(`${body}\n그는 천천히 문을 열고 안으로 들어갔다.`), false);
+    assert.equal(endsMidSentence(`${body}\n시간: 저녁 7시 | 장소: 카페`), false, 'a status line is not a cut sentence');
+    assert.equal(endsMidSentence('짧다'), false);
+});
+
+test('a merged summary that lost its beginning or most of its body is caught', () => {
+    const a = '항구 시장에 비가 내렸고 미나는 놋쇠 나침반을 흥정하다 소매치기에게 지갑을 잃었다 '.repeat(14);
+    const b = '몇 주 뒤 준호가 옥상 정원에서 고백했고 둘은 등불 아래 입맞추며 겨울 여행을 약속했다 '.repeat(14);
+    assert.equal(mergeLoss([a, b], `${a.slice(0, 150)} ${b.slice(0, 150)}`), '');
+    assert.equal(mergeLoss([a, b], b.slice(0, 300)), 'head');
+    assert.equal(mergeLoss([a, b], '짧음'), 'short');
+    assert.equal(mergeLoss(['짧은 글'], '짧음'), '', 'too little material to judge');
 });
 
 test('refreeze only when the frozen block can no longer stand in', () => {
