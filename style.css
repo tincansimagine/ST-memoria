@@ -1780,3 +1780,18 @@ body[data-memoria-paper="dark"] :is(#memoria_settings.memoria, .memoria-library,
 }
 /* 사이 이름 — 관계 카드 머리에 */
 .mmv-tie-name { margin-left: 8px; padding: 1px 8px; border-radius: 999px; border: 1px solid var(--mmv-line); font-size: .82em; font-weight: 600; color: var(--mmv-ink); white-space: nowrap; }
+/* 서약의 끝난 까닭 — 누르면 바뀐다 */
+.memoria-lock-outcome { cursor: pointer; }
+.memoria-outcome--none { opacity: .6; border-style: dashed; }
+.memoria-outcome--broken { color: var(--mm-danger); border-color: color-mix(in srgb, var(--mm-danger) 55%, transparent); }
+/* 회상 · 꿈 · 들은 말 표시 */
+.memoria-mem-when { cursor: pointer; }
+.memoria__badge.memoria-mem-when { border-style: dashed; }
+/* 이 답에 실린 기억 */
+.memoria-shown h4 { margin: 12px 0 6px; }
+.memoria-shown__row { display: flex; align-items: flex-start; gap: 8px; padding: 7px 0; border-top: 1px solid color-mix(in srgb, currentColor 12%, transparent); }
+.memoria-shown__row.is-miss { opacity: .75; }
+.memoria-shown__main { flex: 1; min-width: 0; overflow-wrap: anywhere; word-break: keep-all; }
+.memoria-shown__main small { display: block; opacity: .7; margin-top: 2px; }
+.memoria-shown-pin { cursor: pointer; opacity: .45; padding: 4px; }
+.memoria-shown-pin.is-on { opacity: 1; color: var(--mm-accent); }

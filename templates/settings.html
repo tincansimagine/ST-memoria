@@ -645,6 +645,10 @@
                             <input type="number" id="memoria_embed_floor" min="0" max="0.9" step="0.05">
                             <p class="memoria__hint">OpenAI 계열은 0.35~0.5, bge·e5 계열처럼 점수가 낮게 깔리는 모델은 0.2~0.3이 적당합니다. 회상이 안 되면 낮추고, 엉뚱한 기억이 딸려오면 올리세요. (기본 0.35)</p>
                         </div>
+                        <label class="memoria__toggle-row" for="memoria_embed_center">
+                            <input type="checkbox" id="memoria_embed_center">
+                            <span><strong>흔한 결 거르기</strong><small>같은 이야기라 모든 기억이 서로 조금씩 닮아요. 서고 전체의 평균을 빼고 다시 견줘서, 아무 입력에나 걸리는 기억을 덜 믿어요 (기억이 12개 이상일 때 · 회상 다듬기가 켜져 있을 때).</small></span>
+                        </label>
                         <div class="memoria__button-row">
                             <div class="menu_button" id="memoria_embed_test" title="연결 테스트"><i class="fa-solid fa-plug-circle-check"></i><span>테스트</span></div>
                             <div class="menu_button" id="memoria_embed_reindex" title="기존 기억 전체에 API 임베딩을 다시 계산합니다. 새 기억은 자동으로 계산됩니다."><i class="fa-solid fa-arrows-rotate"></i><span>재계산</span></div>
@@ -770,7 +774,19 @@
                     </label>
                     <label class="memoria__toggle-row" for="memoria_guard_secrets">
                         <input type="checkbox" id="memoria_guard_secrets">
-                        <span><strong>누가 아는지 지키기</strong><small>비밀을 아는 사람·짐작만 하는 사람·그 자리에 없던 사람을 가려 적고 장부에 이름으로 짚습니다.</small></span>
+                        <span><strong>누가 아는지 지키기</strong><small>비밀을 아는 사람·짐작만 하는 사람·그 자리에 없던 사람을 가려 적고 장부에 이름으로 짚습니다. 본문에 나온 "모르는 사람"과 일부러 "숨기는 상대"도 따로 적습니다.</small></span>
+                    </label>
+                    <label class="memoria__toggle-row" for="memoria_time_roles">
+                        <input type="checkbox" id="memoria_time_roles">
+                        <span><strong>회상 · 꿈 · 들은 이야기 가려 적기</strong><small>회상 장면이나 꿈은 '그때 일'로 기록하고, 지금 위치·상태·관계를 바꾸지 않아요. 옛 장면을 지금처럼 착각해 이야기가 뒤로 돌아가는 일을 막아요. 추가 호출 없음.</small></span>
+                    </label>
+                    <label class="memoria__toggle-row" for="memoria_evidence">
+                        <input type="checkbox" id="memoria_evidence">
+                        <span><strong>중요한 기록은 원문 근거 확인</strong><small>상태 변화·비밀·무거운 기억에 원문에서 옮긴 짧은 글귀를 함께 받아, 원문에 없으면 그 기록을 버려요. 사서가 지어낸 사실이 들어오는 것을 막아요. 기록 답이 조금 길어져요.</small></span>
+                    </label>
+                    <label class="memoria__toggle-row" for="memoria_recall_tune">
+                        <input type="checkbox" id="memoria_recall_tune">
+                        <span><strong>회상 다듬기</strong><small>"응", "그래서?" 같은 짧은 입력엔 직전 장면을 함께 보고, 지금 형편·지난 일·자세한 사실 중 무엇을 묻는지에 따라 최근 기억·낱말 일치에 주는 비중을 조금씩 바꿔요. 호출 없음.</small></span>
                     </label>
                     <label class="memoria__toggle-row" for="memoria_skip_ooc">
                         <input type="checkbox" id="memoria_skip_ooc">

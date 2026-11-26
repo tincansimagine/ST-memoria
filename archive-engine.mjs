@@ -134,6 +134,8 @@ export function validateArchive(value) {
     }
     if (copy.audit != null && (typeof copy.audit !== 'object' || Array.isArray(copy.audit))) delete copy.audit;
     if (copy.cardCast != null && copy.cardCast !== 'one' && copy.cardCast !== 'many') delete copy.cardCast;
+    if (copy.recCache != null && !(Array.isArray(copy.recCache) && copy.recCache.every(c => c && typeof c.k === 'string' && typeof c.raw === 'string'))) delete copy.recCache;
+    if (copy.shownLog != null && !(Array.isArray(copy.shownLog) && copy.shownLog.every(e => e && typeof e.k === 'string' && Array.isArray(e.rows)))) delete copy.shownLog;
     return copy;
 }
 
@@ -142,7 +144,8 @@ export function validateArchive(value) {
 const VECTOR_FIELDS = ['vec', 'cvec', 'avec', 'acvec'];
 
 export function checkpointSnapshot(store) {
-    const { checkpoints, ...data } = store;
+    // 스와이프 재사용용 사서 답 · 답마다 실린 기억은 되돌릴 거리가 아니다 — 복구 지점을 키우지 않게 뺀다
+    const { checkpoints, recCache, shownLog, ...data } = store;
     return JSON.stringify(data, (key, value) => (VECTOR_FIELDS.includes(key) ? undefined : value));
 }
 

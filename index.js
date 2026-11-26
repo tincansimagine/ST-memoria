@@ -46,7 +46,7 @@ import { parseStoryDate, storyDatesOf, isIsoDate, trackerText, trackerLineOf, pi
 import { peopleList, matchPerson, personPage, nameSuggestions, planMerge, pairKey, WIPE_KINDS, wipeCounts, NOW_ORDER, strayPeople, mentions } from './people-engine.mjs';
 import { readerSystem, readerUser, readerKey, needsReading, packBatches, replyBudget, readReply, trimItems, READER_LANGS } from './reader-engine.mjs';
 import { checkModeOf, checkEveryOf, gradeEveryOf, NOTE_REPLIES, auditHash, sumSecs, whenOf, evidenceRows, readFindings, liveFindings, repliesSince, driftNoteLines, sumChecks, applySumFix, excerptsFor, readGrade, readRepair, repairBad } from './audit-engine.mjs';
-import { KNOW_DIRECTIVE, LEARN_DIRECTIVE, BEATS_DIRECTIVE, FEELING_DIRECTIVE, THREAD_KIND_NOTE, VOICE_LINES, PLAN_HEAD, VEIL_PROMPT } from './directives.mjs';
+import { KNOW_DIRECTIVE, LEARN_DIRECTIVE, BEATS_DIRECTIVE, FEELING_DIRECTIVE, WHEN_DIRECTIVE, EVIDENCE_DIRECTIVE, THREAD_KIND_NOTE, VOICE_LINES, PLAN_HEAD, VEIL_PROMPT } from './directives.mjs';
 import { findStatusBars, statusOneLine, isPauseDirective, isPauseMessage, buildTimelineRows, filterTimelineRows, timelineMarkdown, timelineCsv, layoutTimelineGraph, verifyIssues, applyVerdicts } from './scene-engine.mjs';
 import { heroHtml, pulseSvg, flowHtml, railHtml, tableHtml, bondMapSvg, bondCardsHtml, statusListHtml, bondLegendHtml, bondPeopleHtml, buildChanges, changesHtml } from './story-view.mjs';
 
@@ -385,6 +385,10 @@ const DEFAULT_SETTINGS = Object.freeze({
     statusInject: true,       // 가장 최근 상태창을 AI에게 알려 시간·날짜·장소를 잇는다
     qrMode: 'side',           // QR·슬래시 명령 메시지: 'side' 코멘트와 막간만 빼기 | 'all' 전부 빼기 | 'keep' 빼지 않기
     replyCheck: false,        // 연속성 검사 — 새 답변이 기록·최근 대화와 어긋나면 ⚠ (답변마다 호출 1회)
+    timeRoles: true,          // 회상 · 꿈 · 전해 들은 이야기는 "그때 일"로 적고 지금 위치 · 상태 · 관계를 바꾸지 않는다 (지시 몇 줄 · 호출은 늘지 않는다)
+    evidence: true,           // 상태 변화 · 비밀 · 무거운 기억은 원문에서 옮긴 근거 글귀가 원문에 실제로 있어야 받는다
+    recallTune: true,         // 회상 다듬기 — 짧은 입력엔 직전 장면을 함께 보고, 지금 · 지난 일 · 자세한 사실 질문에 따라 비중을 조금씩 바꾼다
+    embedCenter: true,        // (임베딩 API 사용 시) 서고 평균을 빼고 다시 견줘 아무 입력에나 걸리는 흔한 결을 덜 믿는다
     tieNotes: true,           // 사이 이름 · 갈래와 변화 기록(관계 · 감정 · 상황 · 성장)을 턴 기록과 함께 받는다 — 사서 지시에 몇 줄이 붙을 뿐 호출은 늘지 않는다
     feelingLines: 3,          // 장면에 있는 사람들끼리의 가장 최근 마음을 「지금」 쪽에 이 줄 수까지 싣는다 (0 = 끔 · 모델 호출 없음)
     checkMode: '',            // 어긋난 곳 검사 방식 — '' 옛 설정(replyCheck) 그대로 | 'off' | 'each' 답변마다 | 'batch' 답 N개마다 한 번 (그때만 호출 1회)
@@ -3097,6 +3101,22 @@ const nameHints = new Set();
 
 const DUE_DIRECTIVE = '\n\nDEADLINES: when a pledge you file has a deadline or a promised time stated in the text ("by Friday", "in three days", "tomorrow night"), add "due" to it: the story time from the end of this exchange until then, as one compact duration (6h, 1d, 3d, 2w). The same goes for a "moved" pledge whose deadline this exchange set or changed. No stated time, no "due".';
 
+const MEMORY_WHEN = { past: '회상', dream: '꿈', told: '들은 말' };
+/** 그때의 일인가 — past(회상) · dream(꿈 · 환상) · told(전해 들은 이야기). 지금 일이면 null */
+function normWhen(v) {
+    const s = String(v ?? '').trim().toLowerCase();
+    return s === 'past' || s === 'flashback' || s === 'memory' ? 'past' : s === 'dream' || s === 'vision' || s === 'hallucination' ? 'dream' : s === 'told' || s === 'reported' || s === 'hearsay' || s === 'rumor' ? 'told' : null;
+}
+/** 서약이 어떻게 끝났나 — kept(지킴) · broken(어김) · dropped(없던 일) · replaced(다른 약속으로 바뀜) */
+function normOutcome(v) {
+    const s = String(v ?? '').trim().toLowerCase();
+    return ['kept', 'fulfilled', 'done', 'completed', 'paid_off'].includes(s) ? 'kept'
+        : ['broken', 'failed', 'betrayed', 'leaked'].includes(s) ? 'broken'
+            : ['dropped', 'cancelled', 'canceled', 'withdrawn', 'moot'].includes(s) ? 'dropped'
+                : ['replaced', 'superseded'].includes(s) ? 'replaced' : null;
+}
+const PLEDGE_OUTCOMES = { kept: '지킴', broken: '어김', dropped: '없던 일', replaced: '바뀜' };
+
 function sanitizeExtraction(raw, userText, assistantText, { memoryCap = 12 } = {}) {
     const out = {
         turnSummary: clipStr(firstOf(raw, 'digest', 'turn_summary', 'summary', 'synopsis', 'recap'), 700),
@@ -3128,6 +3148,13 @@ function sanitizeExtraction(raw, userText, assistantText, { memoryCap = 12 } = {
             guessers: listOf(firstOf(m, 'guess_by', 'guessBy', 'suspected_by')).map(e => cleanStr(e, 60)).filter(Boolean).slice(0, 4),
             dim: (Array.isArray(m?.forgets) ? m.forgets : []).map(f => ({ who: cleanStr(f?.who, 60), level: f?.level === 'none' ? 'none' : 'partial', kept: naStr(f?.kept, 160) })).filter(f => f.who).slice(0, 4),
             by: naStr(m?.by, 60), to: naStr(m?.to, 60),
+            // 그때의 일 — 회상 · 꿈 · 전해 들은 이야기 (없으면 지금 일)
+            when: normWhen(m?.when),
+            // 본문에 모른다고 나온 사람 · 가진 사람이 일부러 숨기는 상대 (기록할 때의 근거로만)
+            unaware: listOf(m?.unaware).map(e => cleanStr(e, 60)).filter(Boolean).slice(0, 6),
+            keepFrom: listOf(firstOf(m, 'keep_from', 'keepFrom', 'hidden_from')).map(e => cleanStr(e, 60)).filter(Boolean).slice(0, 6),
+            // 근거 글귀 — 원문에 그대로 있어야 한다
+            said: cleanStr(m?.said, 160),
         });
     }
     // 이번에 옛 비밀을 알게 된 사람 ([k1] 꼬리표) · 장면 카드 (이번 교환을 순서대로)
@@ -3143,13 +3170,16 @@ function sanitizeExtraction(raw, userText, assistantText, { memoryCap = 12 } = {
     // "p1" 또는 {"tag":"p1","how":"어떻게 풀렸는지"} — 복선은 어떻게 회수됐는지가 기록의 절반이다.
     out.settledHow = {};
     out.settledSaid = {};
+    out.settledOutcome = {};
     out.settledPledges = listOf(firstOf(raw, 'settled', 'resolved', 'closed'))
         .map(t => {
             const tag = String((t && typeof t === 'object' ? t.tag : t) || '').trim().toLowerCase();
             const how = t && typeof t === 'object' ? cleanStr(t.how, 200) : '';
             const said = t && typeof t === 'object' ? cleanStr(t.said, 120) : '';
+            const end = t && typeof t === 'object' ? normOutcome(t.outcome) : null; // 지킴 · 어김 · 없던 일 · 바뀜
             if (tag && how) out.settledHow[tag] = how;
             if (tag && said) out.settledSaid[tag] = said;
+            if (tag && end) out.settledOutcome[tag] = end;
             return tag;
         }).filter(Boolean).slice(0, 8);
     // 진전: 아직 열려 있지만 이번 교환에서 움직인 떡밥 — "지금은 어디까지 왔는지" 한 구절
@@ -3185,10 +3215,13 @@ function sanitizeExtraction(raw, userText, assistantText, { memoryCap = 12 } = {
         const slot = canonSlot(toSnake(firstOf(s, 'slot', 'key', 'field', 'attribute')));
         const value = cleanStr(joinValue(firstOf(s, 'value', 'state', 'val')), 200);
         if (!entity || !slot || !value) continue;
+        // 회상 · 꿈 · 전해 들은 이야기는 지금 상태를 바꾸지 않는다
+        if (normWhen(s?.when)) { out.offPresent = (out.offPresent || 0) + 1; continue; }
         out.entityStates.push({
             entity, slot, value,
             claim: s?.claim === 'belief' ? 'belief' : 'objective',
             owner: cleanStr(s?.owner, 60) || null,
+            said: cleanStr(s?.said, 160),
         });
     }
 
@@ -3249,6 +3282,7 @@ function sanitizeExtraction(raw, userText, assistantText, { memoryCap = 12 } = {
         const to = cleanStr(firstOf(b, 'to', 'b', 'target', 'toward', 'object') ?? pair?.to, 60);
         const stage = cleanStr(firstOf(b, 'stage', 'label', 'status', 'relation', 'value'), 120);
         if (!from || !to || !stage || entityKey(from) === entityKey(to)) continue;
+        if (normWhen(b?.when)) { out.offPresent = (out.offPresent || 0) + 1; continue; } // 회상 속 사이는 지금 사이가 아니다
         const kind = bondKindOf('', firstOf(b, 'kind', 'tone', 'type'));
         out.bonds.push({
             from, to, stage,
@@ -3412,10 +3446,12 @@ function removeDerivedForTurn(store, turnIndex) {
         if (l.status === 'resolved' && l.resolvedTurn === turnIndex) {
             l.status = 'active';
             l.resolvedTurn = null;
+            delete l.outcome; // 다시 열린 서약은 지켰는지 어겼는지도 함께 물린다
         }
         if (l.suggestResolved && l.suggestTurn === turnIndex) {
             l.suggestResolved = false;
             l.suggestTurn = null;
+            l.suggestOutcome = null;
         }
     }
     // 인물 도감 존재 여부(카드를 통째로 지울지)는 여기서 안 본다 — "생성턴==이 턴"만 보면
@@ -3949,6 +3985,18 @@ function stripHostFrom(extracted, host) {
     for (const m of extracted.memories || []) { if (Array.isArray(m.entities)) m.entities = m.entities.filter(e => !is(e)); if (is(m.owner)) m.owner = null; if (Array.isArray(m.knowers)) m.knowers = m.knowers.filter(e => !is(e)); }
 }
 
+/* ── 스와이프로 돌아온 답의 기록 다시 쓰기 ── */
+
+/** 간직하는 사서 답의 수 · 한 답의 글자 상한 (서고는 채팅 파일에 함께 저장된다 — 작게 둔다) */
+const REC_KEEP = 4, REC_KEEP_CHARS = 20000;
+/** 기록을 맡은 연결이 무엇인가 — 바뀌면 간직한 답을 다시 쓰지 않는다 */
+function recordModelSig() {
+    const s = getSettings();
+    let profile = '';
+    try { profile = profileForTask('record'); } catch { profile = ''; }
+    return [s.apiMode || '', s.customApi?.model || '', s.customApi?.url || '', profile].join('|');
+}
+
 /* ── 사이 이름 · 변화 기록 ── */
 
 const TIES_DIRECTIVE = `
@@ -4307,7 +4355,7 @@ async function commitTurns(mesIds, { silent = true, force = false, retry = 1 } =
         return `[${tag}] (${normLockKind(l.kind)}) ${l.summary}${l.latest?.text ? ` — now: ${l.latest.text}` : ''}`;
     });
     const pledgeDirective = pledgeLines.length
-        ? '\n\nPLEDGE CHECK: the file below lists open pledges with tags like [p1]. If this exchange clearly settles one ON-SCREEN (the secret is revealed, the promise is kept, the thread is closed), include a top-level array "settled" naming the tag, how it was settled in one clause, and "said": a short phrase (a few words) copied character for character from the exchange that shows it, e.g. "settled":[{"tag":"p1","how":"Mina read the letter aloud at dinner","said":"she unfolded the letter and began to read"}]. Only what actually happened — never predict, never guess; something about to happen, half done, or only planned is not settled. If a pledge is still open but this exchange clearly moved it (part of it is done, the search narrowed, the plan changed), include "moved":[{"tag":"p2","now":"one clause: where it stands now"}] instead. Most exchanges settle and move nothing.'
+        ? '\n\nPLEDGE CHECK: the file below lists open pledges with tags like [p1]. If this exchange clearly settles one ON-SCREEN (the secret is revealed, the promise is kept, the thread is closed), include a top-level array "settled" naming the tag, how it was settled in one clause, "outcome" — "kept" (carried out, paid off, revealed as intended), "broken" (someone failed it or went back on it: a broken promise, a secret let out by someone meant to keep it), "dropped" (called off or no longer needed) or "replaced" (a new arrangement took its place) — and "said": a short phrase (a few words) copied character for character from the exchange that shows it, e.g. "settled":[{"tag":"p1","how":"Mina read the letter aloud at dinner","outcome":"kept","said":"she unfolded the letter and began to read"}]. Only what actually happened — never predict, never guess; something about to happen, half done, or only planned is not settled. If a pledge is still open but this exchange clearly moved it (part of it is done, the search narrowed, the plan changed), include "moved":[{"tag":"p2","now":"one clause: where it stands now"}] instead. Most exchanges settle and move nothing.'
         : '';
 
     // 지나간 기억 점검 — 이번 교환과 같은 사람·물건을 다루는 옛 기억을 꼬리표와 함께 보여 주고,
@@ -4353,7 +4401,8 @@ async function commitTurns(mesIds, { silent = true, force = false, retry = 1 } =
     // 기한: 서사 시계가 켜져 있어야 셀 수 있다 — 꺼져 있으면 묻지 않는다
     const askDue = settings.dueDates !== false && settings.storyClock;
     const tieOn = settings.tieNotes !== false; // 사이 이름 · 변화 기록을 함께 받는다
-    const extraDirective = `${guard ? KNOW_DIRECTIVE : ''}${privLines.length ? LEARN_DIRECTIVE : ''}${(Number(settings.sceneCards) || 0) > 0 ? BEATS_DIRECTIVE : ''}${FEELING_DIRECTIVE}${tieOn ? TIES_DIRECTIVE : ''}`;
+    const timeRoles = settings.timeRoles !== false, evidenceOn = settings.evidence !== false; // 회상 · 꿈 표시 · 중요 기록의 근거 글귀
+    const extraDirective = `${guard ? KNOW_DIRECTIVE : ''}${privLines.length ? LEARN_DIRECTIVE : ''}${(Number(settings.sceneCards) || 0) > 0 ? BEATS_DIRECTIVE : ''}${FEELING_DIRECTIVE}${timeRoles ? WHEN_DIRECTIVE : ''}${evidenceOn ? EVIDENCE_DIRECTIVE : ''}${tieOn ? TIES_DIRECTIVE : ''}`;
     // 여러 인물을 한 카드가 맡는 대화: 카드 이름은 말머리일 뿐이다 — 그 이름으로 인물 카드·상태·기억을 열지 않는다
     const hostCard = hostCardOf(store);
     const hostLine = hostCard ? `The replies labelled "${hostCard}" come from one card that voices several characters. "${hostCard}" is only that label, not a person in the story: give every line and action to the character the text names, and never file a cast card, status, bond, shift or memory entity under "${hostCard}".\n` : '';
@@ -4418,19 +4467,38 @@ async function commitTurns(mesIds, { silent = true, force = false, retry = 1 } =
     let nowNote = '';       // 사서가 직접 쓴 "지금이 언제인지" 한 줄
     let replied = false; // 모델이 답은 했는가 (연결 오류와 "읽을 수 없는 답"을 구분한다)
     let ties = null;     // 같은 답에 함께 받은 사이 이름 · 변화 기록
+    let fresh = null;    // 이번에 모델이 준 답 (스와이프로 돌아왔을 때 다시 쓰려고 간직한다)
+    const sysPrompt = `${settings.prompts.archivist}${clockDirective}${archivistTrackingDirective()}${askDue ? DUE_DIRECTIVE : ''}${pledgeDirective}${shelfDirective}${extraDirective}${batchDirective}\n\n${languageDirective()}`;
+    // 같은 답을 다시 만났을 때(스와이프로 앞선 답으로 돌아옴) — 그 답을 읽은 사서의 답을 그대로 다시 쓴다. 모델을 부르지 않는다.
+    // 열쇠는 이 답들의 자리와 사서가 읽은 글(이번 교환 · 지시문 · 사서 연결)뿐이다. 꼬리표([p1] · [m1] · [k1])는 그때 가리킨 기록으로 되살린다 — 이번에 고른 순서가 달라도 엇갈리지 않게
+    const recKey = `${units.map(u => u.mesId).join(',')}:${getStringHash([recordModelSig(), sysPrompt, ...units.map(u => `${u.userLabel}\u0001${u.userText}\u0001${u.charLabel}\u0001${u.text}`), cutLast ? 'cut' : ''].join('\u0000'))}`;
+    const recShelf = Array.isArray(store.recCache) ? store.recCache : [];
+    const recHit = force ? null : recShelf.find(c => c && c.k === recKey) || null;
+    if (recHit) {
+        pledgeTagMap.clear(); shelfTagMap.clear(); privTagMap.clear();
+        for (const [tag, id] of Object.entries(recHit.tags || {})) {
+            if (tag[0] === 'p') { const l = store.locks.find(x => x.id === id); if (l) pledgeTagMap.set(tag, l); }
+            else { const m = store.memories.find(x => x.id === id); if (m) (tag[0] === 'k' ? privTagMap : shelfTagMap).set(tag, m); }
+        }
+    }
     try {
         llmBusy = true;
         updateStatusUI('기록 중…');
-        const sysPrompt = `${settings.prompts.archivist}${clockDirective}${archivistTrackingDirective()}${askDue ? DUE_DIRECTIVE : ''}${pledgeDirective}${shelfDirective}${extraDirective}${batchDirective}\n\n${languageDirective()}`;
         // 파싱 실패·API 오류(색인/시계 재계산 직후 혼잡 포함) 대비: 간격을 두고 최대 3회 시도
         for (let attempt = 0; attempt < 3 && !extracted; attempt++) {
             if (attempt > 0) await new Promise(r => setTimeout(r, attempt * 2500)); // 순간 혼잡·레이트리밋을 흘려보낸다
             const nudge = attempt === 0 ? '' : clockAsked ? '\n\nCLOCK MISSING: your previous reply left out the story clock. Answer again in full, this time with the day the story has reached' + (batch ? ' on every "digests" entry ("day")' : ' ("clock":{"day":N})') + ' and the "now" line.' : '\n\nFORMAT WARNING: the previous reply could not be parsed. Respond with EXACTLY ONE minified JSON object — no code fences, no commentary, nothing before "{" or after "}".' + FORMAT_MISTAKES;
             try {
-                const response = await callAuxLLM(sysPrompt + nudge, userPrompt);
-                replied = true;
-                const parsed = parseJsonLoose(response);
-                cutShort = parseJsonLoose.repaired;
+                let parsed = null;
+                if (recHit && attempt === 0) { try { parsed = JSON.parse(recHit.raw); } catch { parsed = null; } }
+                if (parsed) { replied = true; cutShort = false; logActivity('record', `#${mesId}는 전에 읽어 둔 기록이 있어서 그대로 다시 썼어요 (스와이프로 돌아옴 · 호출 없음)`); }
+                else {
+                    const response = await callAuxLLM(sysPrompt + nudge, userPrompt);
+                    replied = true;
+                    parsed = parseJsonLoose(response);
+                    cutShort = parseJsonLoose.repaired;
+                    if (parsed) fresh = parsed;
+                }
                 if (parsed) {
                     extracted = sanitizeExtraction(parsed, userText, assistantText, { memoryCap });
                     ties = tieOn ? readTies(parsed) : null;
@@ -4468,6 +4536,13 @@ async function commitTurns(mesIds, { silent = true, force = false, retry = 1 } =
         if (!extracted && !(batch && replied)) logActivity('error', `${batch ? `#${units[0].mesId}~#${mesId}` : `#${mesId}`} 턴 기록 실패 — 모델 응답을 읽지 못했어요 (도구 → 색인으로 재시도)`);
     } finally {
         llmBusy = false;
+    }
+    // 사서의 답을 이 답 몫으로 간직한다 (스와이프로 같은 답에 돌아오면 다시 쓴다) — 꼬리표가 가리킨 기록은 적용하기 전에 적어 둔다
+    if (extracted && (fresh || recHit)) {
+        let raw = '';
+        try { raw = fresh ? JSON.stringify(fresh) : ''; } catch { raw = ''; }
+        const keep = fresh ? (raw && raw.length <= REC_KEEP_CHARS ? { k: recKey, raw, tags: Object.fromEntries([...pledgeTagMap, ...shelfTagMap, ...privTagMap].map(([t, x]) => [t, x.id])), at: Date.now() } : null) : recHit;
+        if (keep) store.recCache = [keep, ...recShelf.filter(c => c && c.k !== recKey)].slice(0, REC_KEEP);
     }
 
     // 묶음을 읽을 수 없는 답만 돌아왔다면(거절·잘림·형식 깨짐) 대개 그 안의 한 장면 탓이다.
@@ -4531,6 +4606,19 @@ async function commitTurns(mesIds, { silent = true, force = false, retry = 1 } =
         updateStatusUI();
         return false;
     }
+
+    // 근거 글귀 확인: "지금 사실"을 바꾸는 줄(상태)과 비밀 · 무거운 기억에 사서가 옮겨 적은 글귀가 원문에 없으면 그 줄을 버린다 — 지어낸 근거로 사실이 바뀌지 않게.
+    // 글귀를 아예 적지 않은 줄은 확인하지 못한 채 받는다 (지시를 따르지 않는 모델에서 기록이 통째로 비지 않게)
+    if (evidenceOn) {
+        const runAll = `${userText}\n${assistantText}`;
+        const made = (said) => !!said && !groundedIn(said, runAll);
+        const before = extracted.entityStates.length + extracted.memories.length;
+        extracted.entityStates = extracted.entityStates.filter(st => String(st.entity).toLowerCase() === 'scene' || !made(st.said));
+        extracted.memories = extracted.memories.filter(m => !((m.visibility === 'secret' || m.importance >= 0.8) && made(m.said)));
+        const dropped = before - extracted.entityStates.length - extracted.memories.length;
+        if (dropped) logActivity('record', `원문에 없는 근거 글귀를 단 기록 ${dropped}개는 받지 않았어요 (지어낸 근거로 지금 사실이 바뀌지 않게)`);
+    }
+    if (extracted.offPresent) logActivity('record', `회상 · 꿈 · 전해 들은 이야기에서 나온 상태 · 관계 ${extracted.offPresent}줄은 지금 것으로 받지 않았어요`);
 
     // 턴마다: 요약 한 줄, 무게, 흐른 시간, 그리고 원문 증거 기억(항상 저장 — LLM 없이도 회상 가능하게).
     // 요약 자리에는 다이제스트(없으면 첫 문장)만 넣고, 원문 발췌는 인용 칸에만 둔다.
@@ -4657,6 +4745,16 @@ async function commitTurns(mesIds, { silent = true, force = false, retry = 1 } =
         const said = m._episode ? { by: '', to: '' } : whoSaid(m.excerpt, m.by, m.to);
         if (said.by) row.by = said.by;
         if (said.to) row.to = said.to;
+        if (m.when && timeRoles) row.when = m.when; // 회상 · 꿈 · 전해 들은 이야기 — 장부에 "그때 일"로 실린다
+        // 본문에 모른다고 나온 사람 · 일부러 숨기는 상대 — 기록할 때의 근거로만 (장면에 누가 있는지 짐작하지 않는다). 서고에 있거나 이번 원문에 나온 사람만, 아는 사람과 겹치지 않게
+        if (row.visibility !== 'public' && guard && (m.unaware?.length || m.keepFrom?.length)) {
+            const knowing = new Set([row.owner, ...(row.knowers || [])].filter(Boolean).map(entityKey));
+            const real = (n) => !!n && !knowing.has(entityKey(n)) && (store.characters.some(c => entityKey(c.name) === entityKey(n)) || wasHere(n));
+            const names = (xs) => [...new Set((xs || []).map(e => canonEntityName(store, e)).filter(real))].slice(0, 6);
+            const un = names(m.unaware), kf = names(m.keepFrom);
+            if (un.length) row.unaware = un;
+            if (kf.length) row.keepFrom = kf;
+        }
         if (row.visibility !== 'public' && guard) {
             const known = new Set([row.owner, ...(row.knowers || [])].filter(Boolean).map(entityKey));
             const g = [...new Set((m.guessers || []).map(e => canonEntityName(store, e)).filter(n => n && wasHere(n) && !known.has(entityKey(n))))];
@@ -4731,16 +4829,19 @@ async function commitTurns(mesIds, { silent = true, force = false, retry = 1 } =
         const lock = pledgeTagMap.get(tag);
         if (!lock || lock.status !== 'active') continue;
         const how = extracted.settledHow?.[tag] || '';
+        const end = extracted.settledOutcome?.[tag] || null;
         const grounded = groundedIn(extracted.settledSaid?.[tag], exchangeText) && !soundsHedged(how);
         if (lock.manual || !grounded) {
             lock.suggestResolved = true;
             lock.suggestTurn = turn.turnIndex;
             if (how) lock.suggestHow = how;
+            if (end) lock.suggestOutcome = end;
             if (!lock.manual) unsure++;
         } else {
             lock.status = 'resolved';
             lock.resolvedTurn = turn.turnIndex;
             lock.resolution = how || null; // 어떻게 풀렸는지 (복선 회수의 기록)
+            if (end) lock.outcome = end; else delete lock.outcome; // 지켰는지 어겼는지
         }
     }
     if (unsure) logActivity('record', `풀린 듯한 서약 ${unsure}개는 근거가 모자라 닫지 않았어요 (세계 탭에서 ✔로 확정할 수 있어요)`);
@@ -5924,6 +6025,39 @@ function raisedDirectly(m, queryLower, names = []) {
 /** "우리 처음 만났을 때", "remember when" 같은 과거 회상형 질의 감지 */
 const PAST_QUERY_RE = /(처음|예전|옛날|그때|그 때|지난번|언제였|언제 였|기억나|기억 나|기억해|기억하|첫날|첫 만남|만났을 때|했었|였었|하던 때|remember when|back then|first met|first time|used to|at first|way back|昔|最初|あの時|あのとき|覚えて)/i;
 
+/** 지금 형편을 묻는 말 — 최근 기억에 조금 더 무게를 둔다 (지난 일을 묻는 말이 먼저다) */
+const NOW_QUERY_RE = /(지금|현재|요즘|오늘|방금|아직도|어디야|어디 있|뭐 ?하고 있|뭐 ?해\?|right now|currently|at the moment|these days|nowadays|today|现在|目前|最近|いま|今は|今どこ)/i;
+/** 자세한 사실을 묻는 말 — 이름 · 수 · 한 말 같은 낱말 일치와 원문 인용에 무게를 둔다 */
+const DETAIL_QUERY_RE = /(정확히|자세히|구체적|몇 ?(?:개|명|살|번|시|일|년|월|층|호|마리|권|잔)|얼마(?:나|였|야|지)|이름이 뭐|이름이 뭐였|뭐라고 ?(?:했|말했|그랬)|무슨 말을|누가 ?(?:그랬|했|줬)|어디서 ?(?:샀|났|봤|만났|받)|exactly|precisely|in detail|how many|how much|how old|what was (?:the|her|his|their) name|what did .{1,24} say|which one|具体|到底|几个|多少|叫什么|正確に|詳しく|何人|いくつ|何て言)/i;
+/** 서고 임베딩의 평균 — 모든 기억에 고루 닮은 결(같은 이야기 · 같은 인물이라 생기는 공통 성분)을 빼고 견주려고 (기억 수 · 모델이 바뀌면 다시 잰다) */
+const embedCenters = new WeakMap();
+const EMBED_CENTER_MIN = 12;
+function embedCenter(store, mems) {
+    const rows = [];
+    for (const m of mems) { const v = m.avec ? decodeVec(m.avec) : null; if (v) rows.push([m, v]); }
+    if (rows.length < EMBED_CENTER_MIN) return null;
+    const dim = rows[0][1].length, use = rows.filter(([, v]) => v.length === dim);
+    if (use.length < EMBED_CENTER_MIN) return null;
+    const sig = `${use.length}:${dim}:${use[0][0].id}:${use[use.length - 1][0].id}`, had = embedCenters.get(store);
+    if (had && had.sig === sig) return had;
+    const mu = new Float32Array(dim);
+    for (const [, v] of use) for (let i = 0; i < dim; i++) mu[i] += v[i];
+    for (let i = 0; i < dim; i++) mu[i] /= use.length;
+    const mm = cosine(mu, mu), per = new Map(use.map(([m, v]) => [m.id, { vm: cosine(v, mu), vv: cosine(v, v) }]));
+    const c = { sig, mu, mm, per };
+    embedCenters.set(store, c);
+    return c;
+}
+/** 평균을 뺀 두 벡터의 코사인 (질의 쪽 내적은 미리 잰 값을 받는다) */
+function centeredCos(C, q, m, v) {
+    const p = C.per.get(m.id);
+    if (!p || !v) return null;
+    const den = Math.sqrt(Math.max(1e-9, q.qq - 2 * q.qm + C.mm) * Math.max(1e-9, p.vv - 2 * p.vm + C.mm));
+    return (cosine(q.q, v) - q.qm - p.vm + C.mm) / den;
+}
+/** 평균을 빼고 보면 거의 닮지 않은 짝(흔한 결로만 닮음)은 의미 유사도를 덜 믿는다: 0 이하 → 0.4배, 0.1 이상 → 그대로 */
+const genericGate = (cc) => (cc == null ? 1 : cc <= 0 ? 0.4 : cc >= 0.1 ? 1 : 0.4 + 6 * cc);
+
 async function retrieveMemories(queryText, recentUserTexts, sceneText = '') {
     const settings = getSettings();
     const store = getStore();
@@ -5952,6 +6086,16 @@ async function retrieveMemories(queryText, recentUserTexts, sceneText = '') {
 
     // 과거 회상형 질의면 최신성 페널티(화석화)를 걸지 않는다 — 오래된 기억도 동등하게 경쟁
     const pastQuery = PAST_QUERY_RE.test(queryLower);
+    // 회상 다듬기: 질문 종류(지난 일 · 자세한 사실 · 지금 형편)마다 문맥 · 낱말 · 중요도 · 최신성의 비중을 조금씩 옮기고,
+    // 짧은 입력("응", "그래서?", 행동 한 줄)에는 직전 장면의 끝을 낱말 축에 함께 넣고 장면 문맥을 거의 입력만큼 믿는다
+    const tune = settings.recallTune !== false;
+    const intent = !tune || !queryLower.trim() ? '' : pastQuery ? 'history' : DETAIL_QUERY_RE.test(queryLower) ? 'detail' : NOW_QUERY_RE.test(queryLower) ? 'current' : '';
+    const W = intent === 'current' ? { c: 0.58, lex: 0.16, imp: 0.10, rec: 0.16 } : intent === 'detail' ? { c: 0.54, lex: 0.28, imp: 0.10, rec: 0.08 } : { c: 0.62, lex: 0.18, imp: 0.12, rec: 0.08 };
+    const bare = queryLower.replace(/[\s\p{P}\p{S}]+/gu, '');
+    const shortQ = tune && !!String(sceneText || '').trim() && (bare.length < 12 || queryTokens.size < 3);
+    const tail = shortQ ? String(sceneText).slice(-500) : '';
+    const tailTokens = shortQ ? new Set((tail.toLowerCase().match(/[\p{L}\p{N}]+/gu) || [])) : null, tailGrams = shortQ ? toCharGrams(tail) : null;
+    const sW = shortQ ? 0.95 : 0.85;
 
     // 서사 시계: 이야기 속에서 흐른 시간도 노화 축으로 (시간 스킵이 잦은 롤플레잉 대응)
     const storyAges = settings.storyClock ? buildStoryAgeMap(store) : null;
@@ -5974,6 +6118,10 @@ async function retrieveMemories(queryText, recentUserTexts, sceneText = '') {
     const apiQueryVec = apiQueryVecs?.[0] || null;
     const apiAuxVecs = apiQueryVecs ? apiQueryVecs.slice(1, 1 + auxTexts.length) : [];
     const apiSceneVec = (apiQueryVecs && sceneQuery) ? (apiQueryVecs[1 + auxTexts.length] || null) : null;
+    // 흔한 결 거르기: 서고 임베딩의 평균을 빼고 다시 견준다 — 같은 이야기라 모든 기억이 조금씩 닮는 탓에 아무 입력에나 걸리는 기억을 덜 믿는다
+    const center = tune && settings.embedCenter !== false && (apiQueryVec || apiSceneVec) ? embedCenter(store, active) : null;
+    const preQ = (q) => (q && center && q.length === center.mu.length ? { q, qm: cosine(q, center.mu), qq: cosine(q, q) } : null);
+    const cQ = preQ(apiQueryVec), cS = preQ(apiSceneVec);
 
     // 로컬 임베딩 모드면 실리태번 내장 벡터 색인에서 유사 기억 순위를 받아온다 (장면 축 포함)
     const localRanks = settings.embedApi.mode === 'local'
@@ -6022,9 +6170,9 @@ async function retrieveMemories(queryText, recentUserTexts, sceneText = '') {
         }
 
         const vec = decodeVec(m.vec);
-        let cos = cosine(queryVec, vec);
+        let cos = cosine(queryVec, vec), gate = 1;
         for (const av of auxVecs) cos = Math.max(cos, cosine(av, vec) * 0.92);
-        if (sceneVec) cos = Math.max(cos, cosine(sceneVec, vec) * 0.85);
+        if (sceneVec) cos = Math.max(cos, cosine(sceneVec, vec) * sW);
         // 큐 벡터: 인용·단서는 장면의 언어 그대로라 유저 입력과 결이 맞는다 — 요약 벡터와 별개 축으로 매칭
         if (m.cvec === undefined || m.cvec === null) {
             const ct = memoryCueText(m); // 구버전 기억 지연 백필 (다음 저장 때 함께 기록됨)
@@ -6033,7 +6181,7 @@ async function retrieveMemories(queryText, recentUserTexts, sceneText = '') {
         if (m.cvec) {
             const cv = decodeVec(m.cvec);
             let cueCos = cosine(queryVec, cv);
-            if (sceneVec) cueCos = Math.max(cueCos, cosine(sceneVec, cv) * 0.85);
+            if (sceneVec) cueCos = Math.max(cueCos, cosine(sceneVec, cv) * sW);
             cos = Math.max(cos, cueCos * 0.97);
         }
         // API 임베딩이 양쪽 다 있으면 의미 유사도를 보정 스케일로 반영 —
@@ -6042,11 +6190,17 @@ async function retrieveMemories(queryText, recentUserTexts, sceneText = '') {
             const av = decodeVec(m.avec);
             let apiCos = apiQueryVec ? calibrateApiCos(cosine(apiQueryVec, av), apiFloor) : 0;
             for (const aq of apiAuxVecs) { if (aq) apiCos = Math.max(apiCos, calibrateApiCos(cosine(aq, av), apiFloor) * 0.92); }
-            if (apiSceneVec) apiCos = Math.max(apiCos, calibrateApiCos(cosine(apiSceneVec, av), apiFloor) * 0.85);
+            if (apiSceneVec) apiCos = Math.max(apiCos, calibrateApiCos(cosine(apiSceneVec, av), apiFloor) * sW);
             if (m.acvec) {
                 const acv = decodeVec(m.acvec);
                 if (apiQueryVec) apiCos = Math.max(apiCos, calibrateApiCos(cosine(apiQueryVec, acv), apiFloor) * 0.97);
-                if (apiSceneVec) apiCos = Math.max(apiCos, calibrateApiCos(cosine(apiSceneVec, acv), apiFloor) * 0.85 * 0.97);
+                if (apiSceneVec) apiCos = Math.max(apiCos, calibrateApiCos(cosine(apiSceneVec, acv), apiFloor) * sW * 0.97);
+            }
+            // 흔한 결 거르기: 평균을 빼고 보면 거의 닮지 않은 짝은 의미 유사도를 덜 믿는다
+            if (center && apiCos > 0) {
+                const cc = [cQ && centeredCos(center, cQ, m, av), cS && centeredCos(center, cS, m, av)].filter(x => typeof x === 'number');
+                gate = cc.length ? genericGate(Math.max(...cc)) : 1;
+                apiCos *= gate;
             }
             cos = Math.max(cos, apiCos);
         }
@@ -6058,7 +6212,8 @@ async function retrieveMemories(queryText, recentUserTexts, sceneText = '') {
         // 어휘 축: 단어 일치와 글자 조각 일치 중 더 강하게 닿는 쪽 —
         // 한국어는 조사·어미 변형 때문에 단어 축만으로는 절반이 샌다
         const idxText = memoryIndexText(m);
-        const lex = Math.max(lexicalOverlap(queryTokens, idxText), charGramOverlap(queryGrams, idxText) * 0.9);
+        const lex = Math.max(lexicalOverlap(queryTokens, idxText), charGramOverlap(queryGrams, idxText) * 0.9,
+            tailTokens ? Math.max(lexicalOverlap(tailTokens, idxText), charGramOverlap(tailGrams, idxText) * 0.9) * 0.8 : 0);
         const matchedEntities = (m.entities || []).filter(e => queryLower.includes(String(e).toLowerCase()));
         const entityHit = matchedEntities.length > 0;
         // 단서 가림: 이미 맞은 개체 이름에 통째로 포함되는 단서는 같은 매치의 중복 가산이므로 제외
@@ -6098,11 +6253,14 @@ async function retrieveMemories(queryText, recentUserTexts, sceneText = '') {
         const cool = coolHistory.length && !rareStrong
             ? recallCooldown(coolHistory, m.id, { before: coolBefore, direct: direct || pastQuery, echoed: (m.echoes || 0) > 0 && !(m.coldRun > 0) })
             : 1;
-        const score = (0.62 * Math.max(0, cos) + 0.18 * lex + 0.12 * m.importance + 0.08 * recency
-            + (entityHit ? 0.08 : 0) + (hintHit ? 0.07 : 0) + (presenceHit ? 0.05 : 0) + rareBoost) * cool * (m.retired ? 0.7 : 1);
+        // 그때의 일(회상 · 꿈 · 들은 말)은 지금 형편을 물을 때 덜 앞세운다. 꿈은 따로 꺼내지 않으면 조금 뒤로. 자세한 사실을 물으면 원문 인용이 있는 기억을 조금 앞세운다
+        const era = m.when ? (intent === 'current' ? 0.85 : m.when === 'dream' && intent !== 'history' && !direct ? 0.92 : 1) : 1;
+        const quoteBonus = intent === 'detail' && m.excerpt ? 0.03 : 0;
+        const score = (W.c * Math.max(0, cos) + W.lex * lex + W.imp * m.importance + W.rec * recency
+            + (entityHit ? 0.08 : 0) + (hintHit ? 0.07 : 0) + (presenceHit ? 0.05 : 0) + rareBoost + quoteBonus) * cool * era * (m.retired ? 0.7 : 1);
         if (score < settings.minScore) continue;
         candidates.push({ m, score, vec });
-        trace.set(m.id, { reason: [rareHits.length && `드문 낱말: ${rareHits.map(r => r.word).join(', ')}`, cool < 0.8 && '연달아 실려 순서를 미룸', m.retired && '지나간 기억', entityHit && '인물 일치', hintHit && '검색 힌트', presenceHit && '현재 장면의 인물', lex >= 0.035 && '어휘 일치', cos >= settings.minCosine && '문맥 유사도'].filter(Boolean).join(' · ') || '관련성 점수', score, mode: 'direct' });
+        trace.set(m.id, { reason: [rareHits.length && `드문 낱말: ${rareHits.map(r => r.word).join(', ')}`, cool < 0.8 && '연달아 실려 순서를 미룸', m.retired && '지나간 기억', gate < 0.8 && '어디에나 닮은 흔한 결이라 덜 믿음', era < 1 && '그때의 일이라 조금 뒤로', entityHit && '인물 일치', hintHit && '검색 힌트', presenceHit && '현재 장면의 인물', lex >= 0.035 && '어휘 일치', cos >= settings.minCosine && '문맥 유사도'].filter(Boolean).join(' · ') || '관련성 점수', score, mode: 'direct' });
     }
 
     candidates.sort((a, b) => b.score - a.score);
@@ -6154,7 +6312,7 @@ async function retrieveMemories(queryText, recentUserTexts, sceneText = '') {
         turnCount[picked.m.turnIndex] = (turnCount[picked.m.turnIndex] || 0) + 1;
     }
 
-    return { selected: selected.map(s => s.m), hiddenProtected, pinned, triggered, trace };
+    return { selected: selected.map(s => s.m), hiddenProtected, pinned, triggered, trace, intent, shortQ, centered: !!center };
 }
 
 /* ============================================================
@@ -6253,9 +6411,75 @@ let recallAudit = null; // { ids: string[], at: number }
  * 여러 번 실렸는데 계속 무시됨 → 미세 감쇠 (자리만 차지하는 회상)
  * 변화폭은 아주 작게, 상·하한을 두어 한두 턴의 우연이 서고를 흔들지 못하게 한다.
  */
+/** 답마다 적어 두는 "실린 기억" — 실린 것 · 아깝게 빠진 것 몇 개, 최근 답 몇 개 몫만 */
+const SHOWN_ROWS = 24, SHOWN_MISS = 8, SHOWN_KEEP = 20;
+/** 이 답(스와이프마다 따로)을 만들 때 실린 기억 · 아깝게 빠진 기억을 적어 둔다 — 메시지의 👁 단추가 보여 준다 (모델 호출 없음) */
+function noteShown(store, mes, mesId, diag, tokens) {
+    if (!diag || !mes || mesId < 0) return false;
+    const rows = diag.rows || [];
+    const inc = rows.filter(r => r.included).slice(0, SHOWN_ROWS);
+    const miss = rows.filter(r => !r.included).sort((x, y) => (y.score || 0) - (x.score || 0)).slice(0, SHOWN_MISS);
+    const k = `${mesId}:${Number(mes.swipe_id ?? 0)}`;
+    const entry = {
+        k, at: Date.now(), tokens: tokens || 0,
+        ...(diag.intent ? { intent: diag.intent } : {}), ...(diag.shortQ ? { short: true } : {}), ...(diag.centered ? { centered: true } : {}),
+        sections: (diag.sections || []).slice(0, 16).map(x => ({ name: String(x.name), tokens: x.tokens || 0 })),
+        rows: [...inc, ...miss].map(r => ({ id: r.id, kind: r.kind || '', summary: cleanStr(r.summary, 80), inc: !!r.included,
+            ...(r.reason ? { why: cleanStr(r.reason, 120) } : {}), ...(r.excluded ? { out: cleanStr(r.excluded, 60) } : {}),
+            ...(r.score != null ? { score: Math.round(r.score * 100) / 100 } : {}) })),
+    };
+    store.shownLog = [entry, ...(Array.isArray(store.shownLog) ? store.shownLog : []).filter(e => e && e.k !== k)].slice(0, SHOWN_KEEP);
+    return true;
+}
+function shownFor(store, mesId) {
+    const mes = chat[mesId];
+    if (!mes) return null;
+    return (Array.isArray(store.shownLog) ? store.shownLog : []).find(e => e && e.k === `${mesId}:${Number(mes.swipe_id ?? 0)}`) || null;
+}
+const INTENT_LABEL = { current: '지금 형편을 묻는 말로 봤어요', history: '지난 일을 묻는 말로 봤어요', detail: '자세한 사실을 묻는 말로 봤어요' };
+async function showShownMemories(mesId) {
+    const store = getStore(), e = shownFor(store, mesId);
+    const mes = chat[mesId];
+    if (!mes || mes.is_user) return;
+    if (!e) return toastr.info('이 답을 만들 때의 기록이 없어요. 장기기억이 켜진 채로 받은 답부터, 스와이프마다 따로 남아요.', 'Memoria');
+    const byId = new Map(store.memories.map(m => [m.id, m]));
+    const total = e.sections.reduce((n, x) => n + x.tokens, 0) || 1;
+    const row = (r) => {
+        const m = byId.get(r.id);
+        return `<div class="memoria-shown__row${r.inc ? '' : ' is-miss'}" data-id="${esc(r.id)}">
+            <span class="memoria__badge">${r.inc ? '실림' : '빠짐'}</span>
+            <div class="memoria-shown__main"><div>${esc(KIND_LABELS[r.kind] || r.kind || '')} ${esc(m?.summary || r.summary)}</div>
+            <small>${esc([m ? (m.mesId >= 0 ? `#${m.mesId}` : '수동') : '지금은 없는 기억', r.why || '관련성 점수', r.out ? `→ ${r.out}` : ''].filter(Boolean).join(' · '))}</small></div>
+            ${m ? `<i class="fa-solid fa-thumbtack memoria-shown-pin${m.pinned ? ' is-on' : ''}" title="${m.pinned ? '고정 풀기' : '고정 — 다음 답부터 늘 싣기'}"></i>` : ''}
+        </div>`;
+    };
+    const inc = e.rows.filter(r => r.inc), miss = e.rows.filter(r => !r.inc);
+    const chips = [e.intent ? INTENT_LABEL[e.intent] : '', e.short ? '입력이 짧아 직전 장면을 함께 봤어요' : '', e.centered ? '흔한 결을 걸렀어요' : ''].filter(Boolean);
+    const labels = { Canon: '캐논', Cast: '인물', Bonds: '관계선', 'Notable Items': '물건', 'Turning Points': '전환점', 'Story So Far': '요약', Pledges: '서약', Broken: '어긴 약속', 'Recalled Moments': '회상', 'Hidden Knowledge': '비공개', 'Scene Now': '현재 장면', 'Status Board': '상태' };
+    const $dlg = $(`<div class="memoria-pop memoria-shown">
+        <h3>#${mesId} 답을 만들 때 실린 기억</h3>
+        <p class="memoria-pop__meta">장부 ${e.tokens.toLocaleString()}토큰 · 실린 기억 ${inc.length}개 · 아깝게 빠진 기억 ${miss.length}개</p>
+        ${chips.length ? `<div class="memoria__mem-meta">${chips.map(c => `<span class="memoria__chip">${esc(c)}</span>`).join('')}</div>` : ''}
+        ${e.sections.length ? `<div class="memoria__mem-meta">${e.sections.map(x => `<span class="memoria__chip">${esc(labels[x.name] || x.name)} ${Math.round(x.tokens / total * 100)}%</span>`).join('')}</div>` : ''}
+        <h4>실린 기억</h4>${inc.length ? inc.map(row).join('') : '<p class="memoria-pop__meta">이번 답에는 따로 떠올린 기억이 없었어요 (상태 · 약속 같은 장부만 실렸어요).</p>'}
+        ${miss.length ? `<h4>아깝게 빠진 기억</h4><p class="memoria-pop__meta">후보였지만 토큰 예산이나 겹침 때문에 빠졌어요. 고정하면 다음 답부터 늘 실려요.</p>${miss.map(row).join('')}` : ''}
+    </div>`);
+    $dlg.on('click', '.memoria-shown-pin', function () {
+        const m = byId.get(String($(this).closest('.memoria-shown__row').data('id')));
+        if (!m) return;
+        m.pinned = !m.pinned;
+        $(this).toggleClass('is-on', m.pinned).attr('title', m.pinned ? '고정 풀기' : '고정 — 다음 답부터 늘 싣기');
+        persistStore(); renderMemoriesPanel(); updateInjection({ quiet: true });
+        toastr.success(m.pinned ? '고정했어요. 다음 답부터 늘 실려요.' : '고정을 풀었어요.', 'Memoria');
+    });
+    await showPopup($dlg, { type: popupCtx().POPUP_TYPE.TEXT, okButton: '닫기', wide: true, allowVerticalScrolling: true });
+}
+
 function auditRecallEcho(mes, mesId = chat.indexOf(mes)) {
     const audit = recallAudit;
     recallAudit = null; // 1회 소모
+    // 이 답(스와이프마다)을 만들 때 실린 기억을 적어 둔다 — 메시지의 👁 단추가 보여 준다
+    if (audit && Date.now() - audit.at <= 30 * 60 * 1000 && noteShown(getStore(), mes, mesId, lastPacketDiagnostics, lastPacketTokens)) persistStore();
     // 이 답변에 실렸던 회상을 이력에 적는다 — 다음 턴들의 "쉬어가기" 판단에 쓴다 (빈 묶음도 한 턴으로 센다)
     if (audit && mesId >= 0) noteRecallHistory(getCurrentChatId(), mesId, audit.ids);
     if (!audit || !audit.ids.length) return;
@@ -6346,9 +6570,15 @@ function formatMemoryLine(m, withExcerpt, storyAges = null, turnNow = 0, banned 
     const visNorm = normVisibility(m.visibility);
     // 비밀은 "누가 아는가"까지 적어야 지켜진다 — 소유자만 적으면 함께 아는 인물까지 모르는 척하게 된다
     const others = (m.knowers || []).filter(k => entityKey(k) !== entityKey(m.owner || ''));
+    // 모르는 사람: 기록할 때 본문 근거로 적어 둔 사람(unaware) — 나중에 알게 됐으면 아는 사람 쪽에 있으므로 뺀다.
+    // 일부러 숨기는 상대(keepFrom)는 따로 짚는다 — "모른다"와 "알려선 안 된다"는 다르다
+    const knowsNow = new Set([m.owner, ...(m.knowers || [])].filter(Boolean).map(entityKey));
+    const blind = [...new Set([...(unawareNotes.get(m.id) || []), ...(m.unaware || [])])].filter(n => !knowsNow.has(entityKey(n)));
+    const hideFrom = (m.keepFrom || []).filter(n => !knowsNow.has(entityKey(n)));
     const known = (others.length ? ` · also known to ${others.join(', ')}` : '')
         + (m.guessers?.length ? ` · only suspected by ${m.guessers.join(', ')}` : '')
-        + (unawareNotes.has(m.id) ? ` · not known to ${unawareNotes.get(m.id).join(', ')}` : '');
+        + (blind.length ? ` · not known to ${blind.join(', ')}` : '')
+        + (hideFrom.length ? ` · being kept from ${hideFrom.join(', ')}` : '');
     // 그 자리에 없던 사람 · 온전히 기억하지 못하는 사람 — 그 사람이 본 것처럼, 기억하는 것처럼 쓰지 않게
     const away = absentNotes.get(m.id) || [];
     const gaps = (away.length ? ` [not witnessed by ${away.join(', ')}]` : '')
@@ -6378,7 +6608,9 @@ function formatMemoryLine(m, withExcerpt, storyAges = null, turnNow = 0, banned 
     const when = m.turnIndex <= 0 ? 'noted' : turnsAgo <= 0 ? 'this exchange' : turnsAgo === 1 ? 'last exchange' : `${turnsAgo} exchanges back`;
     // 최신성만으론 가치를 못 가린다 — 오래돼도 무거운 기억엔 core 표기로 가중치를 준다
     const core = (m.importance ?? 0) >= 0.8 || m.pinned ? ' · core' : '';
-    return `- (${m.kind}${core}, ${when}${ago})${vis} ${m.summary}${excerpt}${gaps}${dated}`;
+    // 그때의 일: 회상 장면 · 꿈 · 전해 들은 이야기 — 지금 상태가 아니다
+    const era = m.when === 'past' ? ' · flashback, not the present' : m.when === 'dream' ? ' · a dream, not what happened' : m.when === 'told' ? ' · as told by someone, not seen' : '';
+    return `- (${m.kind}${core}${era}, ${when}${ago})${vis} ${m.summary}${excerpt}${gaps}${dated}`;
 }
 
 const SCENE_LOC_SLOTS = ['location', 'place'];
@@ -6650,7 +6882,7 @@ async function buildPacketSections(query, supervisorPlan) {
 
     // 오래된 사용자 입력을 보조 질의로 계속 반복하지 않는다. 새 사용자 입력은 주 질의에 반영된다.
     const recallContext = narratorMode ? [] : recentUserTexts.slice(1);
-    const { selected, hiddenProtected, pinned, triggered, trace = new Map() } = await retrieveMemories(query, recallContext, lastAssistantText);
+    const { selected, hiddenProtected, pinned, triggered, trace = new Map(), intent: recallIntent = "", shortQ: recallShort = false, centered: recallCentered = false } = await retrieveMemories(query, recallContext, lastAssistantText);
     const recallCandidates = [...pinned, ...triggered, ...selected];
 
     const publicRecall = [];
@@ -6951,7 +7183,10 @@ async function buildPacketSections(query, supervisorPlan) {
     const driftNotes = driftNoteLines(store.audit, chat, mesHashOf, settings.driftNote !== false);
     // 지금의 마음: 장면에 함께 있는 사람들끼리 가장 최근에 적힌 마음 몇 줄 — 얼려 둔 관계선보다 새것이라 매 턴 바뀌는 구간에 싣는다 (모델 호출 없음)
     const feelings = feelingRowsOf(store, new Set([...sceneNames, meName ? entityKey(meName) : ''].filter(Boolean)), Math.max(0, Math.min(6, Math.round(Number(settings.feelingLines ?? 3) || 0))));
-    return { feelings, driftNotes, recordLag, returning, bonds, plans, nowIds, address, deadlines, cards, minds, transcript, trackerLine, voice: String(settings.recallVoice || 'natural'), voices, banned, styleGuard: settings.styleGuard !== false, recallQuotes: settings.recallQuotes !== false, banTell: settings.banTell === true,
+    // 최근에 어긴 약속 · 새어 나간 비밀 — 그 일을 당한 사람은 잊지 않는다 (120턴 안, 셋까지)
+    const broken = store.locks.filter(l => l.status === 'resolved' && l.outcome === 'broken' && store.turnCounter - (l.resolvedTurn ?? -999) <= 120)
+        .sort((a, b) => (b.resolvedTurn ?? 0) - (a.resolvedTurn ?? 0)).slice(0, 3);
+    return { recallIntent, recallShort, recallCentered, broken, feelings, driftNotes, recordLag, returning, bonds, plans, nowIds, address, deadlines, cards, minds, transcript, trackerLine, voice: String(settings.recallVoice || 'natural'), voices, banned, styleGuard: settings.styleGuard !== false, recallQuotes: settings.recallQuotes !== false, banTell: settings.banTell === true,
         publicRecall: publicRecallDeduped, protectedRecall, hiddenProtected, locks, rules, scene, states, characters, milestones, items, summaries, supervisorPlan, narratorMode, turnNow: store.turnCounter, storyAges, storyTotalDays, nowNote, sources: await pickDossierExcerpts(query, recallContext), recallCandidates, trace };
 }
 
@@ -7130,6 +7365,11 @@ function renderPacket(parts, { withExcerpts = true, excerptLimit = Infinity, rec
             const feel = normLockKind(l.kind) === 'feeling' && (l.cause || l.needs) ? ` (${[l.cause ? `from: ${l.cause}` : '', l.needs ? `would ease if: ${l.needs}` : ''].filter(Boolean).join('; ')})` : '';
             entry('Pledges', l.id || l.summary, `- [${normLockKind(l.kind)}] ${l.summary}${feel}${l.latest?.text ? ` — now: ${l.latest.text}` : ''}`);
         }
+    }
+    // 어긴 약속 · 새어 나간 비밀: 풀린 서약은 장부에서 빠지지만, 어긴 것은 그 일을 당한 사람의 마음에 남는다 — 다시 무대에 올리라는 뜻이 아니라 대하는 태도에 배어 있게
+    if (parts.broken?.length) {
+        stable.push('## Broken (promises someone failed or went back on, secrets let out against their keeper — already over, but the people it was owed to have not forgotten: let it color how they treat the one who broke it, without restaging it)');
+        for (const l of parts.broken) entry('Broken', l.id, `- [${normLockKind(l.kind)}] ${l.summary}${l.resolution ? ` — ${l.resolution}` : ''}`);
     }
     if (parts.plans?.length) {
         stable.push(PLAN_HEAD);
@@ -7378,6 +7618,7 @@ async function buildPacketWithinBudget(query, supervisorPlan) {
         && !parts.rules.length && !parts.states.length && !parts.characters.length && !parts.scene?.any
         && !parts.milestones.length && !parts.items.length && !parts.summaries.length
         && !(parts.sources || []).length && !parts.supervisorPlan
+        && !(parts.broken || []).length && !(parts.feelings || []).length && !(parts.driftNotes || []).length
         && !parts.nowNote && !((parts.storyTotalDays || 0) >= 1);
     const splitMode = settings.splitInjection === true;
     const finish = (text, tokens, trim, opts = {}, fallback = false) => {
@@ -7389,7 +7630,8 @@ async function buildPacketWithinBudget(query, supervisorPlan) {
         const eligibleIds = new Set([...parts.publicRecall, ...parts.protectedRecall].map(m => m.id));
         return { text, tokens, trim, ids: [...ids], diagnostics: {
             sections: packetSections(text), hidden: parts.hiddenProtected, fallback, narratorMode: parts.narratorMode,
-            rows: (parts.recallCandidates || []).map(m => ({ id: m.id, summary: m.summary, turn: m.turnIndex,
+            intent: parts.recallIntent || '', shortQ: !!parts.recallShort, centered: !!parts.recallCentered,
+            rows: (parts.recallCandidates || []).map(m => ({ id: m.id, kind: m.kind, summary: m.summary, turn: m.turnIndex,
                 ...parts.trace.get(m.id), included: ids.has(m.id),
                 excluded: ids.has(m.id) ? '' : eligibleIds.has(m.id) ? '토큰 예산' : '최근 원문 또는 전환점과 중복',
             })),
@@ -9087,7 +9329,7 @@ function renderRecallDiagnostics() {
     if (diag.fallback) view.append($('<p class="memoria__diagnostic-warning"></p>').text('예산이 최소 장부보다 작습니다. 담을 수 있는 서약만 보냈으며 일부 제약도 빠질 수 있습니다. 주입 예산을 늘려 주세요.'));
     if (diag.narratorMode) view.append($('<p class="memoria__hint"></p>').text('소설·풀사칭 · 여러 인물의 기억을 서술자가 참고합니다. 각 인물이 모르는 비밀까지 공유하지 않도록 지시합니다.'));
     view.append($('<p class="memoria__hint"></p>').text(`실제 주입 ${diag.rows.filter(r => r.included).length}개 · 중복/예산 제외 ${diag.rows.filter(r => !r.included).length}개 · 시점 밖 비공개 ${diag.hidden}개`));
-    const labels = { Canon: '캐논', Cast: '인물', 'Notable Items': '물건', 'Turning Points': '전환점', 'Story So Far': '요약', Pledges: '서약', 'Recalled Moments': '회상', 'Hidden Knowledge': '비공개', 'Source Excerpts': '자료실', 'Scene Now': '현재 장면', 'Status Board': '상태', Direction: '연출' };
+    const labels = { Canon: '캐논', Cast: '인물', 'Notable Items': '물건', 'Turning Points': '전환점', 'Story So Far': '요약', Pledges: '서약', Broken: '어긴 약속', 'How They Feel Right Now': '지금의 마음', 'Keep Consistent with the Record': '바로잡기 메모', 'Recalled Moments': '회상', 'Hidden Knowledge': '비공개', 'Source Excerpts': '자료실', 'Scene Now': '현재 장면', 'Status Board': '상태', Direction: '연출' };
     const total = diag.sections.reduce((n, s) => n + s.chars, 0) || 1;
     const sections = $('<div class="memoria__packet-shares" aria-label="장부 구성 비중 (글자 수 기준)"></div>').appendTo(view);
     for (const s of diag.sections) sections.append($('<span class="memoria__chip"></span>').text(`${labels[s.name] || s.name} ${Math.round(s.chars / total * 100)}%`));
@@ -9231,6 +9473,7 @@ function renderMemoriesPanel() {
             <div class="memoria__mem-card${m.disabled || m.retired ? ' is-disabled' : ''}${m.pinned ? ' is-pinned' : ''}" data-id="${m.id}">
                 <div class="memoria__mem-head">
                     <span class="memoria__badge memoria__badge--${m.kind}">${KIND_LABELS[m.kind] || m.kind}</span>
+                    ${m.when ? `<span class="memoria__badge memoria-mem-when" role="button" tabindex="0" title="${{ past: '회상 장면이나 옛일을 이야기한 것', dream: '꿈 · 환상 — 실제로 일어난 일이 아니에요', told: '누가 전해 준 이야기 — 장면에서 직접 본 일이 아니에요' }[m.when] || ''} — 지금 상태를 바꾸지 않아요. 누르면 바뀌어요">${MEMORY_WHEN[m.when] || m.when}</span>` : ''}
                     <span class="memoria__mem-turn" title="채팅 메시지 번호">${(m.mesId ?? -1) >= 0 ? `#${m.mesId}` : '수동'}</span>
                     <i class="fa-solid ${visIcon} memoria__mem-vis" title="${visNorm}${m.owner ? ` (소유: ${escapeHtml(m.owner)})` : ''}"></i>
                     <span class="memoria__mem-imp" title="중요도"><i class="memoria__meter" aria-hidden="true"><i style="width:${Math.round(clamp01(m.importance, 0.5) * 100)}%"></i></i>${fmtPct(m.importance)}</span>
@@ -9239,6 +9482,7 @@ function renderMemoriesPanel() {
                         <button type="button" class="memoria-source memoria__source-button" data-id="${escapeHtml(m.id)}" title="대화 원문 확인" aria-label="대화 원문 확인"><i class="fa-solid fa-book-open"></i></button>
                         ${m.retired ? '' : '<i class="fa-solid fa-hourglass-end memoria-mem-retire" title="지나간 일로 물리기 — 평소 회상에서 빼고, 이 일을 직접 꺼낼 때만 나오게 합니다"></i>'}
                         ${normVisibility(m.visibility) !== 'public' ? `<i class="fa-solid fa-user-group memoria-mem-knowers" title="아는 사람·짐작하는 사람 고치기${m.knowLock ? ' (손으로 고침 — 사서가 덮어쓰지 않음)' : ''}"></i>` : ''}
+                        ${m.when ? '' : '<i class="fa-solid fa-clock-rotate-left memoria-mem-when" title="회상 · 꿈 · 들은 말로 표시 — 그때의 일로 실리고 지금 상태를 바꾸지 않아요 (누를 때마다 바뀜)"></i>'}
                         <i class="fa-solid fa-thumbtack memoria-mem-pin" title="${m.pinned ? '고정 해제' : '예산 안에서 우선 주입(고정)'}"></i>
                         <i class="fa-solid ${m.disabled ? 'fa-eye-slash' : 'fa-eye'} memoria-mem-toggle" title="${m.disabled ? '활성화' : '비활성화'}"></i>
                         <i class="fa-solid fa-pen memoria-mem-edit" title="편집"></i>
@@ -9605,11 +9849,15 @@ function renderStatePanel() {
     if (!store.locks.length) $locks.append('<div class="memoria__empty">기록된 서약이 없습니다.</div>');
     for (const l of store.locks) {
         const suggest = (l.suggestResolved && l.status === 'active')
-            ? ` <small class="memoria__suggest" title="사서가 이야기 속에서 풀린 것 같다고 본 서약입니다${l.suggestHow ? ` — ${escapeHtml(l.suggestHow)}` : ''}. 직접 적은 서약이거나 장면 속 근거가 모자라 저절로 닫지 않았습니다. 동의하면 ✔로 확정하세요.">해소된 듯 — ✔로 확정</small>`
+            ? ` <small class="memoria__suggest" title="사서가 이야기 속에서 풀린 것 같다고 본 서약입니다${l.suggestHow ? ` — ${escapeHtml(l.suggestHow)}` : ''}. 직접 적은 서약이거나 장면 속 근거가 모자라 저절로 닫지 않았습니다. 동의하면 ✔로 확정하세요.">해소된 듯${l.suggestOutcome ? ` · ${PLEDGE_OUTCOMES[l.suggestOutcome]}` : ''} — ✔로 확정</small>`
+            : '';
+        // 끝난 까닭 — 누르면 바뀐다. 어긴 약속은 장부에 한동안 남는다
+        const outcome = l.status === 'resolved'
+            ? ` <span class="memoria__badge memoria-lock-outcome memoria-outcome--${l.outcome || 'none'}" role="button" tabindex="0" title="어떻게 끝났는지 — 누르면 바뀌어요. '어김'은 장부에 남아 그 일을 당한 사람이 잊지 않아요">${l.outcome ? PLEDGE_OUTCOMES[l.outcome] : '결말 ?'}</span>`
             : '';
         $locks.append($(`
             <div class="memoria__row${l.status === 'resolved' ? ' is-resolved' : ''}${l.status === 'dormant' ? ' is-dormant' : ''}" data-id="${l.id}">
-                <span class="memoria__row-text"><span class="memoria__badge memoria__badge--lock">${LOCK_LABELS[l.kind] || l.kind}</span>${l.status === 'dormant' ? ' <span class="memoria__badge" title="오래 진전이 없어 주입에서 뺐습니다. 다시 언급되면 깨어납니다">휴면</span>' : ''} ${escapeHtml(l.summary)} <small>(P${l.priority} · t${l.turnIndex})</small>${l.latest?.text && l.status !== 'resolved' ? ` <small class="memoria__lock-now">지금: ${escapeHtml(l.latest.text)}</small>` : ''}${l.resolution && l.status === 'resolved' ? ` <small>— ${escapeHtml(l.resolution)}</small>` : ''}${lockExtraHtml(store, l)}${suggest}</span>
+                <span class="memoria__row-text"><span class="memoria__badge memoria__badge--lock">${LOCK_LABELS[l.kind] || l.kind}</span>${l.status === 'dormant' ? ' <span class="memoria__badge" title="오래 진전이 없어 주입에서 뺐습니다. 다시 언급되면 깨어납니다">휴면</span>' : ''} ${escapeHtml(l.summary)} <small>(P${l.priority} · t${l.turnIndex})</small>${l.latest?.text && l.status !== 'resolved' ? ` <small class="memoria__lock-now">지금: ${escapeHtml(l.latest.text)}</small>` : ''}${outcome}${l.resolution && l.status === 'resolved' ? ` <small>— ${escapeHtml(l.resolution)}</small>` : ''}${lockExtraHtml(store, l)}${suggest}</span>
                 ${normLockKind(l.kind) === 'author_plan' ? '<i class="fa-solid fa-mask memoria-lock-veil" title="가린 줄 고치기 — AI에게는 이 줄만 갑니다"></i>' : ''}
                 <i class="fa-solid ${l.status === 'active' ? 'fa-check' : 'fa-rotate-left'} memoria-lock-toggle" title="${l.status === 'active' ? '해결됨으로 표시' : '다시 활성화'}"></i>
                 <i class="fa-solid fa-trash memoria-lock-delete" title="삭제"></i>
@@ -9983,6 +10231,10 @@ function renderSettingsPanel() {
     $('#memoria_scene_cards').val(s.sceneCards ?? 1);
     $('#memoria_mind_lines').val(s.mindLines ?? 2);
     $('#memoria_feeling_lines').val(s.feelingLines ?? 3);
+    $('#memoria_time_roles').prop('checked', s.timeRoles !== false);
+    $('#memoria_evidence').prop('checked', s.evidence !== false);
+    $('#memoria_recall_tune').prop('checked', s.recallTune !== false);
+    $('#memoria_embed_center').prop('checked', s.embedCenter !== false);
     $('#memoria_tie_notes').prop('checked', s.tieNotes !== false);
     $('#memoria_recall_voice').val(s.recallVoice || 'natural');
     $('#memoria_recall_cooldown').prop('checked', s.recallCooldown !== false);
@@ -11137,13 +11389,29 @@ function bindUI() {
         if (!lock) return;
         lock.status = lock.status === 'active' ? 'resolved' : 'active';
         // 깨운 떡밥은 방금 다뤄진 것으로 친다 — 곧바로 다시 잠들지 않게
-        if (lock.status === 'active') { lock.turnIndex = store.turnCounter; lock.resolvedTurn = null; lock.resolution = null; }
-        // 사서가 "풀린 듯"이라며 적어 둔 경위가 있으면 확정할 때 그대로 남긴다
-        else if (lock.suggestResolved && lock.suggestHow) lock.resolution = lock.suggestHow;
+        if (lock.status === 'active') { lock.turnIndex = store.turnCounter; lock.resolvedTurn = null; lock.resolution = null; delete lock.outcome; }
+        // 사서가 "풀린 듯"이라며 적어 둔 경위 · 지켰는지 어겼는지가 있으면 확정할 때 그대로 남긴다
+        else {
+            lock.resolvedTurn = store.turnCounter;
+            if (lock.suggestResolved && lock.suggestHow) lock.resolution = lock.suggestHow;
+            if (lock.suggestResolved && lock.suggestOutcome) lock.outcome = lock.suggestOutcome;
+        }
         lock.suggestResolved = false; // 사용자가 직접 결정했으니 사서 의견은 정리
         lock.suggestTurn = null;
         lock.suggestHow = null;
+        lock.suggestOutcome = null;
         persistStore(); renderStatePanel(); updateInjection();
+    });
+    // 끝난 까닭(지킴 · 어김 · 없던 일 · 바뀜)을 눌러서 고친다 — 어긴 약속은 장부의 "Broken" 칸에 남아 그 일을 당한 사람의 태도에 배어난다
+    $('#memoria_settings').on('click', '.memoria-lock-outcome', function () {
+        const store = getStore();
+        const lock = store.locks.find(l => l.id === $(this).closest('.memoria__row').data('id'));
+        if (!lock || lock.status !== 'resolved') return;
+        const order = [null, 'kept', 'broken', 'dropped', 'replaced'];
+        const next = order[(order.indexOf(lock.outcome || null) + 1) % order.length];
+        if (next) lock.outcome = next; else delete lock.outcome;
+        if (lock.outcome === 'broken' && !Number.isFinite(lock.resolvedTurn)) lock.resolvedTurn = store.turnCounter;
+        persistStore(); renderStatePanel(); updateInjection({ quiet: true });
     });
 
     // ── 요약
@@ -11515,6 +11783,10 @@ function bindUI() {
     for (const [id, key] of [['present_now', 'presentNow'], ['address_terms', 'addressTerms'], ['due_dates', 'dueDates'], ['guard_secrets', 'guardSecrets'], ['skip_ooc', 'skipOoc'], ['check_confirm', 'checkConfirm'], ['wait_typing', 'waitTyping'], ['forget_hidden', 'forgetHidden']]) flagBind(`#memoria_${id}`, key);
     $('#memoria_raw_recall').on('change', function () { getSettings().rawRecall = this.checked ? 'auto' : 'off'; saveSettingsDebounced(); updateInjection({ quiet: true }); });
     flagBind('#memoria_tie_notes', 'tieNotes', { reinject: false });
+    flagBind('#memoria_time_roles', 'timeRoles', { reinject: false });
+    flagBind('#memoria_evidence', 'evidence', { reinject: false });
+    flagBind('#memoria_recall_tune', 'recallTune');
+    flagBind('#memoria_embed_center', 'embedCenter');
     $('#memoria_scene_cards, #memoria_mind_lines, #memoria_feeling_lines').on('change', function () {
         const key = this.id === 'memoria_scene_cards' ? 'sceneCards' : this.id === 'memoria_feeling_lines' ? 'feelingLines' : 'mindLines';
         const max = key === 'sceneCards' ? 2 : key === 'feelingLines' ? 6 : 3;
@@ -12258,6 +12530,10 @@ function memoryWhoHtml(m) {
     const bits = [];
     if ((m.knowers || []).length) bits.push(`아는 사람: ${m.knowers.join(', ')}${m.knowLock ? ' (고정)' : ''}`);
     if ((m.guessers || []).length) bits.push(`짐작: ${m.guessers.join(', ')}`);
+    const knowsNow = new Set([m.owner, ...(m.knowers || [])].filter(Boolean).map(entityKey));
+    const blind = (m.unaware || []).filter(n => !knowsNow.has(entityKey(n))), hideFrom = (m.keepFrom || []).filter(n => !knowsNow.has(entityKey(n)));
+    if (blind.length) bits.push(`모름: ${blind.join(', ')}`);
+    if (hideFrom.length) bits.push(`숨기는 상대: ${hideFrom.join(', ')}`);
     for (const d of (m.dim || [])) bits.push(`${d.who}: ${d.level === 'none' ? '기억 없음' : '흐릿함'}${d.kept ? ` (${d.kept})` : ''}`);
     if ((m.witnesses || []).length) bits.push(`본 사람: ${m.witnesses.slice(0, 6).join(', ')}`);
     return bits.length ? `<div class="memoria__mem-meta memoria__mem-who">${esc(bits.join(' · '))}</div>` : '';
@@ -12272,10 +12548,14 @@ async function editKnowers(id) {
         <p class="memoria-pop__meta">${esc(m.summary)}</p>
         <label>아는 사람 <input type="text" class="text_pole" name="k" placeholder="이름, 쉼표로"></label>
         <label>짐작만 하는 사람 <input type="text" class="text_pole" name="g" placeholder="이름, 쉼표로"></label>
-        <p class="memoria-pop__meta">저장하면 사서가 덮어쓰지 않습니다. 「풀기」를 누르면 다시 사서에게 맡깁니다.</p>
+        <label>모르는 사람 <input type="text" class="text_pole" name="u" placeholder="본문에서 모른다고 나온 사람"></label>
+        <label>숨기는 상대 <input type="text" class="text_pole" name="h" placeholder="가진 사람이 일부러 알리지 않는 상대"></label>
+        <p class="memoria-pop__meta">"모름"은 그 일을 모르는 사람, "숨기는 상대"는 알면 안 되는 사람이에요 — 한 사람이 둘 다일 수도 있어요. 저장하면 사서가 덮어쓰지 않습니다. 「풀기」를 누르면 다시 사서에게 맡깁니다.</p>
     </div>`);
     $dlg.find('[name="k"]').val((m.knowers || []).join(', '));
     $dlg.find('[name="g"]').val((m.guessers || []).join(', '));
+    $dlg.find('[name="u"]').val((m.unaware || []).join(', '));
+    $dlg.find('[name="h"]').val((m.keepFrom || []).join(', '));
     const pick = await showPopup($dlg, { type: popupCtx().POPUP_TYPE.CONFIRM, okButton: '저장', cancelButton: '취소', customButtons: m.knowLock ? [{ text: '풀기', result: 3 }] : [] });
     if (pick === 3) { delete m.knowLock; persistStore(); renderMemoriesPanel(); return; }
     if (!pick) return;
@@ -12284,6 +12564,10 @@ async function editKnowers(id) {
     const known = new Set([m.owner || '', ...m.knowers].map(entityKey));
     const g = names($dlg.find('[name="g"]').val()).filter(n => !known.has(entityKey(n)));
     if (g.length) m.guessers = g; else delete m.guessers;
+    const un = names($dlg.find('[name="u"]').val()).filter(n => !known.has(entityKey(n))).slice(0, 6);
+    const kf = names($dlg.find('[name="h"]').val()).filter(n => !known.has(entityKey(n))).slice(0, 6);
+    if (un.length) m.unaware = un; else delete m.unaware;
+    if (kf.length) m.keepFrom = kf; else delete m.keepFrom;
     m.knowLock = true;
     delete m.learned;
     persistStore(); renderMemoriesPanel(); updateInjection({ quiet: true });
@@ -12609,6 +12893,7 @@ function decorateMessageButtons($mes, mesId) {
     const mes = chat[mesId];
     if (!mes || mes.is_system) return;
     if (!$extra.find('.memoria-mes-of').length) $extra.prepend('<div class="mes_button memoria-mes-of fa-solid fa-book-bookmark" title="이 메시지의 기억 (Memoria)"></div>');
+    if (!mes.is_user && !$extra.find('.memoria-mes-shown').length) $extra.prepend('<div class="mes_button memoria-mes-shown fa-solid fa-eye" title="이 답에 실린 기억 — 실린 것과 아깝게 빠진 것, 그 자리에서 고정 (Memoria)"></div>');
     if (!mes.is_user && !$extra.find('.memoria-mes-star').length) $extra.prepend('<div class="mes_button memoria-mes-star fa-solid fa-star" title="중요 장면 표시 — 요약이 빠뜨리지 않고 정리에서 지킵니다 (Memoria)"></div>');
     $extra.find('.memoria-mes-star').toggleClass('is-on', !!mes.extra?.memoria_star);
 }
@@ -12691,8 +12976,17 @@ function bindExtraUI() {
     });
     $('#memoria_settings').on('click', '.memoria-lock-veil', function () { editVeil(String($(this).closest('.memoria__row').data('id'))); });
     $('#memoria_settings').on('click', '.memoria-mem-knowers', function () { editKnowers(String($(this).closest('.memoria__mem-card').data('id'))); });
+    // 회상 · 꿈 · 들은 말 표시 — 누르면 다음 것으로, 마지막 다음은 "지금 일"(표시 없음)
+    $('#memoria_settings').on('click', '.memoria-mem-when', function () {
+        const m = getStore().memories.find(x => x.id === String($(this).closest('.memoria__mem-card').data('id')));
+        if (!m) return;
+        const order = ['past', 'dream', 'told'], next = order[order.indexOf(m.when) + 1];
+        if (next) m.when = next; else delete m.when;
+        persistStore(); renderMemoriesPanel(); updateInjection({ quiet: true });
+    });
     $(document).on('click', '.memoria-mes-star', function () { toggleStar(Number($(this).closest('.mes').attr('mesid'))); });
     $(document).on('click', '.memoria-mes-of', function () { showMessageMemories(Number($(this).closest('.mes').attr('mesid'))); });
+    $(document).on('click', '.memoria-mes-shown', function () { showShownMemories(Number($(this).closest('.mes').attr('mesid'))).catch(e => toastr.error(e.message, 'Memoria')); });
 }
 
 /* ============================================================
