@@ -1614,6 +1614,7 @@ function bannedPhrases() {
 function persistStore() {
     lastBuildKey = ''; // 같은 턴에서 편집·정리한 결과도 즉시 주입에 반영
     injectionEpoch++;
+    markPanelsDirty(); // 닫혀 있는 탭은 다음에 열 때 다시 그린다
     if (!getCurrentChatId()) return;
     saveMetadataDebounced();
     scheduleLocalSync();
@@ -9576,6 +9577,8 @@ function refreshOverviewUI() {
     refreshPacketPreview();
 }
 
+const MEM_PAGE = 40;
+let memShown = MEM_PAGE, memShownChat = '';
 function renderMemoriesPanel() {
     const store = getStore();
     const list = $('#memoria_memory_list');
@@ -9586,6 +9589,8 @@ function renderMemoriesPanel() {
     // 휴대폰에서 접어 둔 「필터」 — 종류를 골랐거나 회상하지 않을 말이 있으면 단추에 표시한다
     $('#memoria_memory_filt').toggleClass('is-on', !!kindFilter || !!(store.recallMute || []).length);
 
+    const chatNow = getCurrentChatId();
+    if (memShownChat !== chatNow) { memShownChat = chatNow; memShown = MEM_PAGE; }
     let items = [...store.memories].sort((a, b) => b.turnIndex - a.turnIndex);
     if (kindFilter) items = items.filter(m => m.kind === kindFilter);
     if (search) {
@@ -9597,14 +9602,16 @@ function renderMemoriesPanel() {
     }
 
     renderKindChips(kindFilter);
-    $('#memoria_memory_count').text(store.memories.length ? `전체 ${store.memories.length}개 가운데 ${items.length}개${items.length > 200 ? ' · 앞의 200개만 보여요' : ''}` : '');
+    $('#memoria_memory_count').text(store.memories.length ? `전체 ${store.memories.length}개 가운데 ${items.length}개` : '');
     list.empty();
     if (!items.length) {
         list.append(`<div class="memoria__empty">${store.memories.length ? '찾는 기억이 없습니다.' : '아직 적힌 기억이 없습니다. 대화를 이어 가면 사서가 적어 둡니다.'}</div>`);
         return;
     }
 
-    for (const m of items.slice(0, 200)) {
+    // 긴 목록은 보이는 만큼만 그린다 — 처음 40장, 내려가면 40장씩 잇는다 (기억 수백 장을 한꺼번에 그리느라 탭이 멈췄다)
+    const shown = Math.min(items.length, memShown);
+    for (const m of items.slice(0, shown)) {
         const visNorm = normVisibility(m.visibility);
         const visIcon = visNorm === 'secret' ? 'fa-user-secret' : visNorm === 'private' ? 'fa-lock' : 'fa-globe';
         const card = $(`
@@ -9634,6 +9641,15 @@ function renderMemoriesPanel() {
             </div>
         `);
         list.append(card);
+    }
+    if (items.length > shown) {
+        const $more = $(`<div class="menu_button memoria__mem-more">${(items.length - shown).toLocaleString()}개 더 보기</div>`).appendTo(list);
+        $more.on('click', () => { memShown += MEM_PAGE; renderMemoriesPanel(); });
+        // 목록 끝이 화면에 들어오면 저절로 잇는다
+        try {
+            const io = new IntersectionObserver((ents) => { if (ents.some(e => e.isIntersecting)) { io.disconnect(); memShown += MEM_PAGE; renderMemoriesPanel(); } }, { rootMargin: '400px 0px' });
+            io.observe($more[0]);
+        } catch { /* 오래된 브라우저 — 단추로 잇는다 */ }
     }
 }
 
@@ -10547,20 +10563,34 @@ async function editTieDialog(b) {
     persistStore(); renderYeonPanel(); renderBondsPanel(); updateInjection({ quiet: true });
 }
 
+/** 서고나 설정이 바뀌었다 — 모든 탭을 다시 그릴 몫으로 */
+function markPanelsDirty() { try { for (const k of Object.keys(PANEL_RENDER)) panelsDirty.add(k); } catch { /* 아직 화면이 없다 */ } }
+/** 탭마다 그 탭의 몸통을 그리는 일 */
+const PANEL_RENDER = {
+    overview: () => refreshPacketPreview(),
+    memories: () => renderMemoriesPanel(),
+    yeon: () => renderYeonPanel(),
+    world: () => { renderStatePanel(); renderTrackersPanel(); },
+    summaries: () => renderSummariesPanel(),
+    config: () => { renderSettingsPanel(); renderPromptsPanel(); renderBundleBar(); },
+    audit: () => renderAuditPanel(),
+    tools: () => { renderCheckpoints(); renderActivityLog(); },
+};
+/** 다시 그려야 하는 탭 — 열려 있지 않은 탭은 열 때 그린다 */
+const panelsDirty = new Set(Object.keys(PANEL_RENDER));
+const openTab = () => { const v = $('#memoria_settings .memoria__tab.is-active').data('tab'); return typeof v === 'string' && v ? v : 'overview'; };
+const drawerOpen = () => { try { return $('#memoria_settings .inline-drawer-content').is(':visible') !== false; } catch { return true; } };
+function renderPanel(tab) {
+    const fn = PANEL_RENDER[tab];
+    if (!fn) return;
+    panelsDirty.delete(tab);
+    try { fn(); } catch (e) { console.error(`[Memoria] ${tab} 탭을 그리지 못했어요`, e); }
+}
+/** 서고가 바뀌었다 — 상태 줄과 열린 탭만 지금 그리고, 나머지 탭은 열 때 그린다 (닫혀 있으면 아무것도 그리지 않는다) */
 function renderAllPanels() {
-    renderTrackersPanel();
+    for (const k of Object.keys(PANEL_RENDER)) panelsDirty.add(k);
     updateStatusUI();
-    refreshPacketPreview();
-    renderMemoriesPanel();
-    renderStatePanel();
-    renderSummariesPanel();
-    renderYeonPanel();
-    renderSettingsPanel();
-    renderPromptsPanel();
-    renderCheckpoints();
-    renderBundleBar();
-    renderActivityLog();
-    renderAuditPanel();
+    if (drawerOpen()) renderPanel(openTab());
 }
 
 /* ============================================================
@@ -11046,9 +11076,14 @@ function bindUI() {
         try { this.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'smooth' }); } catch { /* 오래된 브라우저 */ }
         $('#memoria_settings .memoria__panel').removeClass('is-active');
         $(`#memoria_settings .memoria__panel[data-panel="${tab}"]`).addClass('is-active');
-        if (tab === 'tools') renderActivityLog();
-        renderAllPanels();
+        // 탭부터 바꿔 보이고, 몸통은 그 다음 틈에 — 그 탭이 마지막으로 그린 뒤 바뀐 게 있을 때만 다시 그린다
+        const draw = () => { if (panelsDirty.has(tab) || tab === 'tools') renderPanel(tab); };
+        if (typeof requestAnimationFrame === 'function') requestAnimationFrame(() => setTimeout(draw, 0)); else setTimeout(draw, 0);
     });
+    // 설정을 바꾸면 다른 탭도 다음에 열 때 다시 그린다
+    $('#memoria_settings').on('change', 'input, select, textarea', markPanelsDirty);
+    // 서랍을 열 때 열린 탭이 밀려 있으면 그린다
+    $('#memoria_settings .inline-drawer-toggle').on('click', () => setTimeout(() => { if (drawerOpen() && panelsDirty.has(openTab())) renderPanel(openTab()); }, 60));
 
     // 탭 줄: 넘치면 옆으로 넘기고, 더 있는 쪽 끝을 흐리게
     const $tabRow = $('#memoria_settings .memoria__tabs');
@@ -11258,8 +11293,8 @@ function bindUI() {
     });
 
     // ── 기억 브라우저
-    $('#memoria_memory_search').on('input', renderMemoriesPanel);
-    $('#memoria_memory_kind_filter').on('change', renderMemoriesPanel);
+    $('#memoria_memory_search').on('input', () => { memShown = MEM_PAGE; renderMemoriesPanel(); });
+    $('#memoria_memory_kind_filter').on('change', () => { memShown = MEM_PAGE; renderMemoriesPanel(); });
     $('#memoria_memory_filt').on('click', function () {
         const open = !$('#memoria_memory_filters').hasClass('is-open');
         $('#memoria_memory_filters').toggleClass('is-open', open);
