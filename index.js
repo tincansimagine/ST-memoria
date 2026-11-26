@@ -409,7 +409,12 @@ const DEFAULT_SETTINGS = Object.freeze({
     },
 });
 
+// 설정 묶음의 기본값 채우기 · 개정 확인은 한 번 이어지는 일 안에서는 한 번만 한다 — 메시지마다 부르는 곳(막간 가리기 · 상태창 읽기)이 있어
+// 긴 채팅을 한 번 훑는 데 수백 번을 다시 했다. 다음 차례(마이크로태스크)에는 다시 확인한다
+let settingsChecked = null;
 function getSettings() {
+    const ready = extension_settings[MODULE_NAME];
+    if (ready && settingsChecked === ready) return ready;
     if (!extension_settings[MODULE_NAME]) {
         extension_settings[MODULE_NAME] = structuredClone(DEFAULT_SETTINGS);
         // 처음 설치한 경우에만: 요약된 옛 메시지를 숨긴다 (최근 20개는 원문 그대로).
@@ -472,6 +477,8 @@ function getSettings() {
         if (s.mindLines === 2) s.mindLines = 0;
         s.settingsRev = 4;
     }
+    settingsChecked = s;
+    Promise.resolve().then(() => { if (settingsChecked === s) settingsChecked = null; });
     return s;
 }
 
@@ -3510,8 +3517,17 @@ function upsertWorldRule(store, rule, turnIndex) {
  * ------------------------------------------------------------ */
 
 /** 비교용 정규화 — 대소문자·공백·구두점 무시 (kkang / Kkang / 깡 은 각각 자기 형태로 유지) */
+// 같은 이름을 회상 한 번에 수만 번 되짚는다 (canonEntityName 이 인물 카드마다 부른다) — 글자에서 글자로만 가는 계산이라 결과를 기억해 둔다
+const entityKeyCache = new Map();
 function entityKey(s) {
-    return String(s || '').toLowerCase().replace(/[\s._\-'"`]+/g, '').trim();
+    const raw = String(s || '');
+    let k = entityKeyCache.get(raw);
+    if (k === undefined) {
+        if (entityKeyCache.size > 4000) entityKeyCache.clear();
+        k = raw.toLowerCase().replace(/[\s._\-'"`]+/g, '').trim();
+        entityKeyCache.set(raw, k);
+    }
+    return k;
 }
 
 /** 이름을 인물 도감의 정식 이름으로 바꾼다. 도감에 없으면 원래 이름 그대로. */
