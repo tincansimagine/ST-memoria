@@ -1468,7 +1468,7 @@ body[data-memoria-paper="dark"] :is(#memoria_settings.memoria, .memoria-library,
 
 /* ── 탭: 알약 줄 ── */
 #memoria_settings .memoria__tabs {
-    display: flex; gap: 4px; align-items: center; margin: 0; padding: 4px; border: 0; border-radius: 999px; background: var(--surface2);
+    display: flex; gap: 4px; align-items: center; margin: 16px 0 0; padding: 4px; border: 0; border-radius: 999px; background: var(--surface2);
     overflow-x: auto; scrollbar-width: none; position: static;
 }
 #memoria_settings .memoria__tab {
