@@ -59,13 +59,19 @@ export const chat_metadata = { memoria: { version: 1, lexiconRev: 5, turnCounter
     worldRules: [{ id: 'rule', scope: 'world', key: 'lighthouse', value: '등대는 여행자들의 귀환을 알린다.', turnIndex: 1 }],
     entityStates: [{ id: 'place', entity: 'scene', slot: 'location', value: '해안의 등대', turnIndex: 18 }],
     locks: [{ id: 'pledge', kind: 'keep_unresolved', summary: '여행자는 보라에게 편지를 전하기로 약속했다.', status: 'active', priority: 1, turnIndex: 10 }],
-    bonds: [{ id: 'bond1', from: name2, to: name1, manual: false, disabled: false, log: [
+    pivots: [
+        { id: 'pv1', way: 'closer', who: name2, with: name1, was: '경계', now: '마지못한 신뢰', why: '창고 열쇠를 맡겼다', turn: 8 },
+        { id: 'pv2', way: 'heart', who: name2, with: name1, was: '마지못한 신뢰', now: '떠나보내기 싫음', why: '반지를 받고 한참 말이 없었다', turn: 16 },
+        { id: 'pv3', way: 'apart', who: name2, with: '보라', was: '동료', now: '멀어진 사이', why: '편지를 뜯지 않았다', turn: 6 },
+        { id: 'pv4', way: 'lot', who: name1, was: '떠돌이', now: '등대에 머무는 손님', why: '새벽 기차를 타지 않았다', turn: 12 }],
+    tieRev: 1,
+    bonds: [{ id: 'bond1', from: name2, to: name1, manual: false, disabled: false, types: [{ group: 'affection', type: 'pining' }, { group: 'debt', type: 'benefactor' }], word: '말없이 곁을 지킴', tieTurn: 16, log: [
         { turn: 1, stage: '경계하는 낯선 손님', basis: '등대 문을 반만 열고 이름을 물었다', calls: '손님', unsaid: '' },
         { turn: 8, stage: '마지못한 신뢰', basis: '창고 열쇠를 맡겼다', calls: '여행자 씨, 존댓말', unsaid: '' },
         { turn: 16, stage: '떠나보내기 싫은 사람', basis: '반지를 받고 한참 말이 없었다', calls: '여행자 씨, 존댓말', unsaid: '가지 말라는 말' }] },
-        { id: 'bond2', from: name1, to: name2, manual: false, disabled: false, log: [{ turn: 2, stage: '호기심', basis: '등대에 다시 찾아갔다', calls: '아리아 씨', unsaid: '' }, { turn: 16, stage: '돌아오고 싶은 곳', basis: '반지를 건넸다', calls: '아리아', unsaid: '' }] },
-        { id: 'bond3', from: name2, to: '보라', manual: false, disabled: false, log: [{ turn: 6, stage: '멀어진 옛 동료', basis: '편지를 뜯지 않고 서랍에 넣었다', calls: '보라', unsaid: '왜 떠났는지' }] },
-        { id: 'bond4', from: '보라', to: name1, manual: false, disabled: false, log: [{ turn: 12, stage: '경계', basis: '이름을 묻지 않았다', calls: '', unsaid: '' }] }],
+        { id: 'bond2', from: name1, to: name2, manual: false, disabled: false, types: [{ group: 'affection', type: 'flirt' }], word: '돌아오고 싶은 곳', log: [{ turn: 2, stage: '호기심', basis: '등대에 다시 찾아갔다', calls: '아리아 씨', unsaid: '' }, { turn: 16, stage: '돌아오고 싶은 곳', basis: '반지를 건넸다', calls: '아리아', unsaid: '' }] },
+        { id: 'bond3', from: name2, to: '보라', manual: false, disabled: false, types: [{ group: 'work', type: 'colleague' }], word: '멀어진 옛 동료', log: [{ turn: 6, stage: '멀어진 옛 동료', basis: '편지를 뜯지 않고 서랍에 넣었다', calls: '보라', unsaid: '왜 떠났는지' }] },
+        { id: 'bond4', from: '보라', to: name1, manual: false, disabled: false, types: [{ group: 'conflict', type: 'wary' }], log: [{ turn: 12, stage: '경계', basis: '이름을 묻지 않았다', calls: '', unsaid: '' }] }],
     chunkSummaries: [{ id: 'chapter', fromTurn: 1, toTurn: 8, text: '여행자는 아리아를 만나 함께 해안을 걸었다. 등대에서 반지를 건네며 돌아오겠다고 약속했다.' },
         { id: 'chapter2', fromTurn: 9, toTurn: 16, text: 'WHEN: 2일째 낮 ~ 3일째 새벽 · 기차역, 정원, 해안\nPLOT:\n- 여행자가 새벽 기차표를 끊었지만 타지 않았다.\n- 아리아가 정원 우물에서 낡은 나침반을 건져 건넸다. "길 잃지 말라고요."\n- 해안에서 일출을 보며 여행자가 은빛 반지를 건넸다.\nSHIFTS: 아리아 → 여행자: 떠나보내기 싫은 사람 · 나침반은 여행자에게\nOPEN: 보라에게 전할 편지 · 닫힌 북문 너머' }],
     arcSummaries: [], milestones: [{ id: 'ms1', title: '등대의 약속', summary: '돌아오겠다고 약속했다', participants: [name2, name1], grade: 'major', turnIndex: 2 }, { id: 'ms2', title: '은빛 반지', summary: '해안에서 반지를 건넸다', participants: [name2, name1], grade: 'major', turnIndex: 15 }], items: [], dossier: [] } };

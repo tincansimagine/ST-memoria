@@ -37,6 +37,9 @@
                 <button class="memoria__tab" type="button" data-tab="memories">
                     <i class="fa-solid fa-brain"></i><span>기억</span>
                 </button>
+                <button class="memoria__tab" type="button" data-tab="yeon" title="인연 — 관계도 · 인연 카드 · 마음 · 전환점">
+                    <i class="fa-solid fa-link"></i><span>인연</span>
+                </button>
                 <button class="memoria__tab" type="button" data-tab="world">
                     <i class="fa-solid fa-globe"></i><span>세계</span>
                 </button>
@@ -156,6 +159,11 @@
                 </div>
             </section>
 
+            <!-- ===== 인연 ===== -->
+            <section class="memoria__panel" data-panel="yeon">
+                <div id="memoria_yeon"></div>
+            </section>
+
             <!-- ===== 세계 ===== -->
             <section class="memoria__panel" data-panel="world">
                 <div class="memoria__section memoria__conflicts" id="memoria_conflict_section" hidden>
@@ -197,10 +205,6 @@
                             <p>한 사람이 다른 한 사람을 지금 어떻게 대하는지 — 단계, 근거가 된 장면, 부르는 말, 아직 말하지 못한 것. 관계가 실제로 움직인 장면에서만 기록되고, 지나온 단계가 함께 남아 AI가 감정선을 건너뛰거나 되돌리지 않게 합니다.</p>
                         </div>
                         <div class="memoria__compact-actions">
-                            <div class="menu_button" id="memoria_ties_scan" title="지난 요약에서 사이 이름 · 변화를 찾아 채워요 (요약만 읽어요 · 한 번 누를 때 호출 4번까지)">
-                                <i class="fa-solid fa-wand-magic-sparkles"></i>
-                                <span>찾기</span>
-                            </div>
                             <div class="menu_button" id="memoria_bond_add" title="관계선 추가">
                                 <i class="fa-solid fa-heart-circle-plus"></i>
                                 <span>추가</span>
@@ -311,8 +315,6 @@
                         <div id="memoria_story_tabs" class="mmv-views" role="tablist">
                             <button type="button" data-view="flow" class="is-active">흐름</button>
                             <button type="button" data-view="line">연표</button>
-                            <button type="button" data-view="bonds">관계</button>
-                            <button type="button" data-view="changes" title="관계·감정·상태가 바뀐 순간만 모아 봅니다">변화</button>
                             <button type="button" data-view="table">표</button>
                         </div>
                         <div class="menu_button" id="memoria_summarize_now" title="지금 요약 — 주기를 못 채운 자투리 턴까지 요약합니다"><i class="fa-solid fa-wand-magic-sparkles"></i></div>
@@ -812,7 +814,7 @@
                     </label>
                     <label class="memoria__toggle-row" for="memoria_tie_notes">
                         <input type="checkbox" id="memoria_tie_notes">
-                        <span><strong>사이 이름 · 변화 기록</strong><small>관계선마다 마음의 핵심을 짧은 이름으로(예: 죄책감 섞인 집착), 관계·감정·상황·성장이 바뀐 순간을 까닭과 함께 받아 둡니다. 턴 기록과 같은 호출에 받아 호출은 늘지 않습니다.</small></span>
+                        <span><strong>인연 · 전환점도 함께 적기</strong><small>관계선마다 갈래(세 개까지)와 인연 한마디, 사이가 가까워지고 멀어지고 뒤집힌 순간과 한 사람의 마음 · 처지가 바뀐 순간을 함께 받아 둡니다. 턴 기록과 같은 호출에 받아 호출은 늘지 않습니다. 인연 탭에서 봅니다.</small></span>
                     </label>
                     <div class="memoria__field-grid">
                         <div class="memoria__field">
@@ -824,7 +826,7 @@
                             <input type="number" id="memoria_mind_lines" min="0" max="3" step="1">
                         </div>
                         <div class="memoria__field">
-                            <label for="memoria_feeling_lines" title="장면에 함께 있는 사람들끼리 가장 최근에 적힌 마음을 '지금' 장부에 몇 줄까지 실을지 (0 = 끔). 고정 장부의 관계선보다 새것입니다.">지금의 마음 줄 수</label>
+                            <label for="memoria_feeling_lines" title="장면에 함께 있는 사람들의 지금 사이(갈래 · 한마디와 가장 늦은 전환점)를 '지금' 장부에 몇 줄까지 실을지 (0 = 끔). 고정 장부의 관계선보다 새것입니다.">지금 사이 줄 수</label>
                             <input type="number" id="memoria_feeling_lines" min="0" max="6" step="1">
                         </div>
                         <div class="memoria__field">

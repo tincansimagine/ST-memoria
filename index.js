@@ -41,6 +41,7 @@ import { MacrosParser } from "../../../../scripts/macros.js";
 import { NARRATOR_PERSPECTIVE, isSharedPerspective, hasChatPerspective, resolvePerspective, findAssociations, sameKnowledgeScope, archiveSnapshot, validateArchive, addCheckpoint, archiveChanges, packetSections } from './archive-engine.mjs';
 import { showArchiveLibrary } from './library-ui.mjs';
 import * as Ties from './ties-engine.mjs';
+import { yeonHtml, yeonView, tiePickerHtml, typeChipsHtml, typeName, clampZoom } from './yeon-view.mjs';
 import { withDeadline, parsePhraseList, stripPhrases, hasPhrase, findRepeatedPhrases, pickBundleValues, resolveBundleName, switchBundle, saveBundle, deleteBundle, renameBundle, exportBundle, parseBundleFile, diffStableEntries, shouldRefreeze, createActivityLog, findRivalExtensions, splitClosedLine, sleepStaleThreads, pickPledges, stripOpenLines, THREAD_KINDS, recallCooldown, pushRecallHistory, isEndedValue, ungroundedFigures, roughTokens, noteUsage, usageTotals, groundedIn, soundsHedged, noteThreadSightings, threadTouched, rareQueryWords, findConflicts, looksRefused, looksBlocked, strayHidden, pickTranscript, transcriptTerms, crossScriptPairs, crossScriptSame, pickPledgesToCheck, ensembleLabel, firstOf, listOf, joinValue, clampScore, splitPair, jsonRepairVariants, normalizeRecordLabels, BOND_KINDS, bondKindOf, summaryGaps, spanWindows, TIC_TYPES, readTicPicks, keptMilestones, sameTrait, mergeTraits, startsWithFieldLabel, looksLikeAlias, looksLikeAge, storyOnly, endsMidSentence, mergeLoss, sameText, cardVoicesMany } from './craft-engine.mjs';
 import { isOocText, looksOocReply, attributeQuote, addressTermsIn, tallyAddress, pickAddressLines, personNowLine } from './stage-engine.mjs';
 import { parseStoryDate, storyDatesOf, isIsoDate, trackerText, trackerLineOf, pickBeats, beatLines, veilLeaks } from './calendar-engine.mjs';
@@ -9766,7 +9767,7 @@ function renderBondsPanel() {
         const path = [];
         for (const e of b.log) if (path[path.length - 1] !== e.stage) path.push(e.stage);
         const detail = [
-            b.name ? `<div class="memoria__char-line"><i class="fa-solid fa-heart"></i> 사이 이름: ${escapeHtml(b.name)}${b.nameManual ? ' (직접 적음)' : ''}</div>` : '',
+            ((r) => Ties.hasRead(r) ? `<div class="memoria__char-line memoria__bond-read"><i class="fa-solid fa-link"></i> ${r.word ? `<b>${escapeHtml(r.word)}</b> ` : ''}${typeChipsHtml(r.types)}${b.tieHand ? ' <span class="mm-yn-tag">직접 고침</span>' : ''}</div>` : '')(Ties.tieOf(b)),
             now.basis ? `<div class="memoria__char-line"><i class="fa-solid fa-magnifying-glass"></i> ${escapeHtml(now.basis)}</div>` : '',
             now.calls ? `<div class="memoria__char-line"><i class="fa-solid fa-comment-dots"></i> 부르는 말: ${escapeHtml(now.calls)}</div>` : '',
             now.unsaid ? `<div class="memoria__char-line"><i class="fa-solid fa-ellipsis"></i> 말하지 못한 것: ${escapeHtml(now.unsaid)}</div>` : '',
@@ -10471,6 +10472,81 @@ function renderPromptsPanel() {
     $('#memoria_prompt_arc').val(s.prompts.arc);
 }
 
+/* ============================================================
+ * 인연 탭 — 관계도 · 인연 카드 · 마음 · 전환점 · 지난 기록 되짚기
+ * ============================================================ */
+const yeonState = yeonView();
+/** 전환점이 적힌 기록이 덮는 메시지 범위 (#시작~#끝) */
+function pivotRange(store, p) {
+    const turnAt = (n) => store.turns.find(t => t.turnIndex === n);
+    const a = Array.isArray(p.span) ? p.span[0] : p.turn, b = Array.isArray(p.span) ? p.span[1] : p.turn;
+    const end = turnAt(b)?.mesId;
+    if (end == null || end < 0) return null;
+    const prev = [...store.turns].filter(t => t.turnIndex < a).sort((x, y) => y.turnIndex - x.turnIndex)[0];
+    const start = prev?.mesId != null ? Math.min(end, prev.mesId + 1) : (turnAt(a)?.mesId ?? end);
+    return [Math.max(0, start), end];
+}
+function renderYeonPanel() {
+    const $box = $('#memoria_yeon');
+    if (!$box.length) return;
+    if (!getCurrentChatId()) { $box.html('<div class="memoria__empty">열린 채팅이 없어요.</div>'); return; }
+    const store = getStore(), settings = getSettings(), host = hostCardOf(store);
+    const isHost = (n) => !!host && entityKey(n) === entityKey(host);
+    const bonds = (store.bonds || []).filter(b => !b.disabled && bondNow(b) && !isHost(b.from) && !isHost(b.to))
+        .map(b => ({ id: b.id, from: b.from, to: b.to, stage: bondNow(b).stage, read: Ties.tieOf(b), hand: !!b.tieHand }));
+    const clock = settings.storyClock !== false;
+    const pivots = pivotsOf(store).filter(p => !isHost(p.who) && !(p.with && isHost(p.with)))
+        .map(p => ({ ...p, range: pivotRange(store, p), day: clock ? `${storyDayBefore(store, p.turn + 1)}일째` : '' }));
+    $box.html(yeonHtml({ bonds, pivots, v: yeonState, plan: tieScanPlan(store), host, tieNotes: settings.tieNotes !== false,
+        between: (Number(settings.feelingLines ?? 3) || 0) > 0, narrow: window.innerWidth < 640 }));
+}
+
+/** 최근 고른 갈래 (이 기기에 남는다) */
+const TIE_RECENT_KEY = 'memoria.tieRecent';
+const tieRecent = () => { try { const j = JSON.parse(localStorage.getItem(TIE_RECENT_KEY) || '[]'); return Array.isArray(j) ? j.map(x => Ties.readTieType(x)).filter(Boolean).slice(0, 8) : []; } catch { return []; } };
+const rememberTies = (picked) => { try { const list = [...picked, ...tieRecent()].filter((x, i, a) => a.findIndex(y => Ties.sameType(x, y)) === i).slice(0, 8); localStorage.setItem(TIE_RECENT_KEY, JSON.stringify(list)); } catch { /* 저장하지 못해도 고르기는 된다 */ } };
+/** 인연 고치기 창 — 한마디와 갈래(세 개까지 · 첫 번째가 대표). 직접 고친 인연은 사서가 덮어쓰지 않는다 (둘 다 비우면 다시 사서에게) */
+async function editTieDialog(b) {
+    const r = Ties.tieOf(b), draft = { word: r.word || '', types: (r.types || []).map(x => ({ ...x })) };
+    const st = { query: '', ownGroup: 'other', full: false };
+    const $dlg = $(`<div class="mm-yn-picker">
+        <h3 class="mm-yn-title"></h3>
+        <label class="mm-yn-field"><span class="mm-yn-label">인연 한마디</span><input type="text" class="text_pole mm-yn-word" placeholder="예: 말없이 곁을 지킴" autocomplete="off">
+            <small class="mm-yn-hint">이 사이를 열두 자 안쪽으로. 직접 고친 인연은 사서가 바꾸지 않아요 — 한마디와 갈래를 모두 비우면 다시 사서에게 맡겨요.</small></label>
+        <div class="mm-yn-body"></div>
+        <input type="search" class="text_pole mm-yn-find" placeholder="갈래 찾기 · 없으면 직접 쓰기" aria-label="갈래 찾기" autocomplete="off">
+        <div class="mm-yn-list"></div></div>`);
+    $dlg.find('.mm-yn-title').text(`${b.from} → ${b.to} · 인연 고치기`);
+    $dlg.find('.mm-yn-word').val(draft.word).on('input', function () { draft.word = String($(this).val() || ''); });
+    const paint = () => {
+        const html = tiePickerHtml(draft, { recent: tieRecent(), query: st.query, ownGroup: st.ownGroup, full: st.full });
+        const cut = html.indexOf('<div class="mm-yn-own">') >= 0 ? html.indexOf('<div class="mm-yn-own">') : html.indexOf('<div class="mm-yn-groups">');
+        $dlg.find('.mm-yn-body').html(html.slice(0, cut));
+        $dlg.find('.mm-yn-list').html(html.slice(cut));
+    };
+    const toggle = (x) => {
+        if (draft.types.some(y => Ties.sameType(x, y))) { draft.types = draft.types.filter(y => !Ties.sameType(x, y)); st.full = false; }
+        else if (draft.types.length >= Ties.TYPES_MAX) st.full = true;
+        else { draft.types.push(x); st.full = false; }
+        paint();
+    };
+    $dlg.on('click', '[data-yn-type]', function () { try { toggle(JSON.parse($(this).attr('data-yn-type'))); } catch { /* 망가진 칩은 넘긴다 */ } });
+    $dlg.on('click', '[data-yn-main]', function () { const i = Number($(this).data('yn-main')); const x = draft.types[i]; if (x) { draft.types = [x, ...draft.types.filter((_, k) => k !== i)]; paint(); } });
+    $dlg.on('click', '[data-yn-drop]', function () { draft.types.splice(Number($(this).data('yn-drop')), 1); st.full = false; paint(); });
+    $dlg.on('change', '.mm-yn-owngroup', function () { st.ownGroup = String($(this).val() || 'other'); });
+    $dlg.on('click', '[data-yn-own]', function () { const x = Ties.readTieType(String($(this).data('yn-own')), st.ownGroup); if (x) { st.query = ''; $dlg.find('.mm-yn-find').val(''); toggle(x); } });
+    $dlg.find('.mm-yn-find').on('input', function () { st.query = String($(this).val() || ''); paint(); });
+    paint();
+    const ctx = getContext();
+    const ok = await ctx.callGenericPopup($dlg, ctx.POPUP_TYPE.CONFIRM, '', { okButton: '저장', cancelButton: '취소', wide: false, allowVerticalScrolling: true });
+    if (!ok) return;
+    const store = getStore(), row = store.bonds.find(x => x.id === b.id);
+    if (!row) return;
+    setTieRead(row, { word: draft.word, types: draft.types });
+    rememberTies(draft.types);
+    persistStore(); renderYeonPanel(); renderBondsPanel(); updateInjection({ quiet: true });
+}
+
 function renderAllPanels() {
     renderTrackersPanel();
     updateStatusUI();
@@ -10478,6 +10554,7 @@ function renderAllPanels() {
     renderMemoriesPanel();
     renderStatePanel();
     renderSummariesPanel();
+    renderYeonPanel();
     renderSettingsPanel();
     renderPromptsPanel();
     renderCheckpoints();
@@ -12036,17 +12113,15 @@ function bindUI() {
     const bondForm = (b) => {
         const now = b ? bondNow(b) : null;
         return [`누가: ${b?.from || ''}`, `누구에게: ${b?.to || ''}`, `지금 단계: ${now?.stage || ''}`, `근거: ${now?.basis || ''}`, `부르는 말: ${now?.calls || ''}`, `말하지 못한 것: ${now?.unsaid || ''}`,
-            `사이 이름: ${b?.name || ''}`, '(사이 이름은 관계 전체에서 본 마음의 핵심을 짧게 — 예: 죄책감 섞인 집착. 직접 적으면 사서가 덮어쓰지 않고, 비우면 다시 사서가 붙입니다)',
-            `갈래: ${b?.kind ? BOND_KINDS[b.kind] : ''}`, `(갈래는 관계도의 선 색입니다. ${Object.entries(BOND_KINDS).filter(([k]) => k !== 'other').map(([, label]) => label.split('·')[0]).join(' · ')} 가운데 하나 — 비워 두면 단계 글에서 알아서 가립니다)`].join('\n');
+            ...((r) => [`인연 한마디: ${r.word || ''}`, `갈래: ${(r.types || []).map(typeName).join(', ')}`])(b ? Ties.tieOf(b) : {}),
+            '(인연 한마디는 이 사이를 열두 자 안쪽으로, 갈래는 쉼표로 세 개까지 — 첫 번째가 대표 (예: 소꿉친구, 짝사랑). 직접 고치면 사서가 덮어쓰지 않고, 둘 다 비우면 다시 사서에게 맡깁니다. 인연 탭의 연필로 고를 수도 있어요)'];
     };
     const readBondForm = (raw) => {
         const pick = (label, max) => {
             const m = String(raw).match(new RegExp(`^${label}\\s*[:：]\\s*(.*)$`, 'm'));
             return m ? cleanStr(m[1], max) : '';
         };
-        const kindText = pick('갈래', 20);
-        const kind = !kindText ? '' : (Object.keys(BOND_KINDS).find(k => BOND_KINDS[k] === kindText || BOND_KINDS[k].split('·').includes(kindText)) || bondKindOf(kindText, kindText));
-        return { from: pick('누가', 60), to: pick('누구에게', 60), stage: pick('지금 단계', 120), basis: pick('근거', 200), calls: pick('부르는 말', 100), unsaid: pick('말하지 못한 것', 160), kindPick: kind === 'other' ? '' : kind, tieName: cleanTieName(pick('사이 이름', 80)) };
+        return { from: pick('누가', 60), to: pick('누구에게', 60), stage: pick('지금 단계', 120), basis: pick('근거', 200), calls: pick('부르는 말', 100), unsaid: pick('말하지 못한 것', 160), tieWord: pick('인연 한마디', 60), tieTypes: pick('갈래', 120) };
     };
     const saveBondForm = async (title, existing) => {
         const ctx = getContext();
@@ -12059,11 +12134,9 @@ function bindUI() {
         const row = upsertBond(store, form, store.turnCounter, { manual: true });
         if (!row) return toastr.warning('같은 인물끼리는 관계선을 만들 수 없습니다.', 'Memoria');
         row.disabled = false;
-        // 직접 고른 갈래는 줄에 붙여 둔다 — 단계가 바뀌어도 그대로 (칸을 비우면 다시 글에서 가린다)
-        if (form.kindPick) { row.kind = form.kindPick; row.kindManual = true; } else { delete row.kind; delete row.kindManual; }
-        // 사이 이름: 직접 적었으면 그대로 두고(사서가 덮어쓰지 않는다), 비웠으면 다시 사서에게 맡긴다
-        if (form.tieName && form.tieName !== row.name) { row.name = form.tieName; row.nameManual = true; delete row.nameWas; delete row.nameTurn; }
-        else if (!form.tieName && row.name) { delete row.name; delete row.nameManual; delete row.nameWas; delete row.nameTurn; }
+        // 인연 읽기: 바뀌었으면 직접 고친 것으로 (사서가 덮어쓰지 않는다), 둘 다 비웠으면 다시 사서에게 맡긴다
+        const was = Ties.tieOf(row), next = { word: form.tieWord, types: Ties.readTieTypes(form.tieTypes) };
+        if (!Ties.sameRead(was, { ...(next.types.length ? { types: next.types } : {}), ...(next.word ? { word: Ties.cleanWord(next.word) } : {}) })) setTieRead(row, next);
         persistStore(); renderBondsPanel(); renderSummariesPanel(); updateInjection({ quiet: true });
     };
     $('#memoria_settings').on('click', '.memoria-bond-edit', function () {
@@ -12071,25 +12144,63 @@ function bindUI() {
         if (b) saveBondForm(`${b.from} → ${b.to} — 지금 단계 고치기 (이전 단계는 지나온 길로 남습니다)`, b);
     });
     $('#memoria_bond_add').on('click', () => saveBondForm('관계선 추가 — 한 사람이 다른 한 사람을 지금 어떻게 대하는지 (방향이 있어요)', null));
-    $('#memoria_ties_scan').on('click', async function () {
+    // ── 인연 탭
+    const $yn = $('#memoria_settings');
+    $yn.on('click', '#memoria_yeon [data-yn-focus]', function () {
+        const n = String($(this).attr('data-yn-focus') || '');
+        yeonState.map.focus = yeonState.map.focus === n ? '' : n; yeonState.map.pick = '';
+        renderYeonPanel();
+    });
+    $yn.on('click', '#memoria_yeon [data-yn-pick]', function () { const id = String($(this).attr('data-yn-pick')); yeonState.map.pick = yeonState.map.pick === id ? '' : id; renderYeonPanel(); });
+    $yn.on('click', '#memoria_yeon [data-yn-zoom]', function () {
+        const k = String($(this).data('yn-zoom')), z = yeonState.map.zoom || 1;
+        yeonState.map.zoom = k === 'fit' ? 1 : clampZoom(k === 'in' ? z * 1.3 : z / 1.3);
+        renderYeonPanel();
+    });
+    $yn.on('click', '#memoria_yeon [data-yn-heart]', function () { const n = String($(this).attr('data-yn-heart')); yeonState.open[n] = !yeonState.open[n]; renderYeonPanel(); });
+    $yn.on('click', '#memoria_yeon [data-yn-way]', function () { const w = String($(this).data('yn-way')); yeonState.way = yeonState.way === w ? '' : w; yeonState.more = 30; renderYeonPanel(); });
+    $yn.on('change', '#memoria_yeon .mm-yn-whof', function () { yeonState.who = String($(this).val() || ''); yeonState.more = 30; renderYeonPanel(); });
+    $yn.on('click', '#memoria_yeon [data-yn-more]', function () { yeonState.more += 30; renderYeonPanel(); });
+    $yn.on('click', '#memoria_yeon [data-yn-go]', function () { $(`#memoria_settings .memoria__tab[data-tab="${$(this).data('yn-go')}"]`).trigger('click'); });
+    $yn.on('click', '#memoria_yeon [data-yn-edit]', function () {
+        const b = getStore().bonds.find(x => x.id === String($(this).attr('data-yn-edit')));
+        if (b) editTieDialog(b);
+    });
+    $yn.on('click', '#memoria_yeon [data-yn-del]', async function () {
+        const id = String($(this).attr('data-yn-del'));
+        if (!await confirmDelete('이 전환점')) return;
+        const store = getStore();
+        store.pivots = pivotsOf(store).filter(p => p.id !== id);
+        persistStore(); renderYeonPanel(); updateInjection({ quiet: true });
+    });
+    $yn.on('change', '#memoria_yn_tienotes', function () {
+        getSettings().tieNotes = this.checked; saveSettingsDebounced();
+        $('#memoria_tie_notes').prop('checked', this.checked); renderYeonPanel();
+    });
+    $yn.on('change', '#memoria_yn_between', function () {
+        const s = getSettings(); s.feelingLines = this.checked ? 3 : 0; saveSettingsDebounced();
+        $('#memoria_feeling_lines').val(s.feelingLines); updateInjection({ quiet: true }); renderYeonPanel();
+    });
+    $yn.on('click', '#memoria_yn_retrace', async function () {
         if (!getCurrentChatId()) return toastr.warning('열린 채팅이 없습니다.', 'Memoria');
         if ($(this).hasClass('is-busy')) return;
-        const store = getStore(), todo = tieScanRows(store);
-        if (!todo.length) return toastr.info('이미 모두 훑었어요 — 새 기록은 기록할 때 함께 받아요.', 'Memoria');
-        const $btn = $(this).addClass('is-busy');
-        const $label = $btn.find('span'), was = $label.text();
-        const work = workToast('지난 요약에서 사이 이름·변화를 찾는 중이에요…');
+        const store = getStore(), plan = tieScanPlan(store);
+        if (!plan.rows) return toastr.info('되짚어 채울 것이 없었어요.', 'Memoria');
+        const ctx = getContext();
+        const ok = await ctx.callGenericPopup(`요약 ${plan.rows}묶음을 되짚어 인연과 전환점을 채울까요? 모델을 많아야 ${plan.calls}번 불러요. 대화 원문은 펼치지 않아요.`, ctx.POPUP_TYPE.CONFIRM, '', { okButton: '되짚기', cancelButton: '취소' });
+        if (!ok) return;
+        const $btn = $(this).addClass('is-busy'), $label = $btn.find('span'), was = $label.text();
+        const work = workToast('지난 기록을 되짚는 중이에요…');
         try {
-            const r = await scanTiesFromSummaries(store, { onProgress: (n, total) => { $label.text(`찾는 중 ${n}/${total}`); work.update(`지난 요약에서 사이 이름·변화를 찾는 중이에요… ${n} / ${total}`); } });
+            const r = await scanTiesFromSummaries(store, { onProgress: (n, total) => { $label.text(`되짚는 중 ${n}/${total}`); work.update(`지난 기록을 되짚는 중이에요… 모델 호출 ${n}/${total}`); } });
             if (getStore() !== store) { work.done(); return; }
-            persistStore(); renderBondsPanel(); renderSummariesPanel(); updateInjection({ quiet: true });
-            logActivity('summary', `지난 요약에서 사이 이름 ${r.named}개 · 변화 ${r.shifts}개를 찾았어요 (호출 ${r.calls}번)`);
-            work.done('success', `사이 이름 ${r.named}개 · 변화 ${r.shifts}개를 찾았어요${r.left ? ` — 아직 ${r.left}개 구간이 남아 한 번 더 누르면 이어서 찾아요` : ''}`);
+            persistStore(); renderYeonPanel(); renderBondsPanel(); updateInjection({ quiet: true });
+            logActivity('summary', `지난 기록을 되짚어 인연 ${r.read}개 · 전환점 ${r.pivots}개를 채웠어요 (호출 ${r.calls}번)`);
+            work.done('success', r.calls ? `인연 ${r.read}개를 읽고 전환점 ${r.pivots}개를 찾았어요.${r.left ? ` 아직 ${r.left}묶음이 남았어요 — 한 번 더 누르면 이어서 되짚어요.` : ''}` : '되짚어 채울 것이 없었어요.');
         } catch (e) {
-            work.done('error', `찾지 못했어요: ${e?.message || e}`);
+            work.done('error', `되짚지 못했어요: ${e?.message || e}`);
         } finally {
-            $btn.removeClass('is-busy');
-            $label.text(was);
+            $btn.removeClass('is-busy'); $label.text(was);
         }
     });
 
