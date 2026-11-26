@@ -1738,3 +1738,43 @@ body[data-memoria-paper="dark"] :is(#memoria_settings.memoria, .memoria-library,
 /* 전환점 고정 — 오래돼도 장부에서 밀려나지 않게 */
 .memoria-milestone-pin { opacity: .45; cursor: pointer; }
 .memoria-milestone-pin.is-on { opacity: 1; color: var(--mm-accent); }
+
+/* ── 검사 탭 ── */
+#memoria_settings .memoria-au-status { display: flex; align-items: center; gap: 8px; margin: 2px 2px 10px; }
+#memoria_settings .memoria-au-lamp { width: 8px; height: 8px; border-radius: 50%; background: var(--line); flex: none; }
+#memoria_settings .memoria-au-lamp.is-busy { background: var(--mm-accent); animation: memoria-au-pulse 1.2s ease-in-out infinite; }
+@keyframes memoria-au-pulse { 50% { opacity: .35; } }
+#memoria_settings .memoria-au-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 6px 0; }
+#memoria_settings .memoria-au-seg { display: inline-flex; padding: 3px; gap: 2px; border-radius: 999px; background: var(--surface2); }
+#memoria_settings .memoria-au-mode { min-height: 30px; padding: 4px 12px; border: 0; border-radius: 999px; background: none; color: var(--dim); font: 600 .86em var(--font); cursor: pointer; }
+#memoria_settings .memoria-au-mode.is-on { background: var(--surface); color: var(--text); box-shadow: 0 0 0 1px var(--line); }
+#memoria_settings .memoria-au-num { display: inline-flex; align-items: center; gap: 6px; font-size: .86em; color: var(--dim); }
+#memoria_settings .memoria-au-num input { width: 4.2em; min-height: 32px; margin: 0; }
+#memoria_settings .memoria-au-num select { width: auto; min-height: 32px; margin: 0; }
+#memoria_settings .memoria-au-head { margin: 12px 0 6px; font-weight: 700; }
+#memoria_settings .memoria-au-head small, #memoria_settings .memoria-au-card header small { font-weight: 400; color: var(--dim); }
+#memoria_settings .memoria-au-sub { margin: 14px 0 6px; font-size: .92em; }
+#memoria_settings .memoria-au-card { margin: 8px 0; padding: 10px 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); min-width: 0; }
+#memoria_settings .memoria-au-card.is-off { opacity: .72; border-style: dashed; }
+#memoria_settings .memoria-au-card header { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+#memoria_settings .memoria-au-card p { margin: 6px 0; overflow-wrap: anywhere; word-break: keep-all; }
+#memoria_settings .memoria-au-card blockquote { margin: 6px 0; padding-left: 10px; border-left: 2px solid var(--line); color: var(--dim); overflow-wrap: anywhere; }
+#memoria_settings .memoria-au-card footer { display: flex; justify-content: flex-end; gap: 6px; margin-top: 6px; }
+#memoria_settings .memoria-au-evid { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: .88em; color: var(--dim); overflow-wrap: anywhere; }
+#memoria_settings .memoria-au-span { display: inline-flex; align-items: center; gap: 2px; }
+#memoria_settings .memoria-au-span i { font-style: normal; color: var(--dim); }
+#memoria_settings .memoria-au-dash { background: none; border: 1px dashed var(--line); color: var(--dim); }
+#memoria_settings .memoria-au-issue { padding: 8px 0; border-top: 1px solid var(--line); min-width: 0; }
+#memoria_settings .memoria-au-issue:first-of-type { border-top: 0; }
+#memoria_settings .memoria-au-issue.is-done { opacity: .6; }
+#memoria_settings .memoria-au-issue p { margin: 0 0 6px; overflow-wrap: anywhere; word-break: keep-all; }
+#memoria_settings .memoria-au-acts { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+#memoria_settings .memoria-au-acts small { color: var(--dim); }
+#memoria_settings .memoria-au-aside summary { cursor: pointer; color: var(--dim); margin: 8px 0; }
+#memoria_settings .memoria-au-link { text-decoration: underline; cursor: pointer; }
+#memoria_settings .memoria-au-tok { font-variant-numeric: tabular-nums; }
+#memoria_settings .memoria-au-card .menu_button, #memoria_settings .memoria-au-issue .menu_button { min-height: 32px; padding: 4px 10px; font-size: .84em; }
+@media (max-width: 480px) {
+    #memoria_settings .memoria__tabs { gap: 2px; }
+    #memoria_settings .memoria__tab { padding: 7px 8px; }
+}

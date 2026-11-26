@@ -46,6 +46,9 @@
                 <button class="memoria__tab" type="button" data-tab="config">
                     <i class="fa-solid fa-sliders"></i><span>설정</span>
                 </button>
+                <button class="memoria__tab" type="button" data-tab="audit" title="검사">
+                    <i class="fa-solid fa-stethoscope"></i><span>검사</span>
+                </button>
                 <button class="memoria__tab" type="button" data-tab="tools">
                     <i class="fa-solid fa-screwdriver-wrench"></i><span>도구</span>
                 </button>
@@ -720,7 +723,7 @@
                     </label>
                     <label class="memoria__toggle-row" for="memoria_reply_check">
                         <input type="checkbox" id="memoria_reply_check">
-                        <span><strong>연속성 검사</strong><small>새 답변이 기록·최근 대화와 어긋나면 이름 옆에 ⚠를 붙입니다. 답변마다 사서 API를 한 번 더 씁니다.</small></span>
+                        <span><strong>연속성 검사 (답변마다)</strong><small>새 답변이 기록·최근 대화와 어긋나면 이름 옆에 ⚠를 붙입니다. 답변마다 사서 API를 한 번 더 씁니다. 답 N개마다 한 번만 보려면 검사 탭에서 고르세요.</small></span>
                     </label>
                     <p class="memoria__hint">막간은 롤플을 멈추고 뽑은 퀴즈·인터뷰·운세 같은 QR 결과입니다. 지시문에 "롤플·시나리오를 멈춰라"는 문구가 있으면 자동으로 알아보고, 기록·회상·점검에서 뺍니다.</p>
                 </div>
@@ -878,6 +881,32 @@
             </section>
 
             <!-- ===== 도구 ===== -->
+            <!-- ===== 검사 ===== -->
+            <section class="memoria__panel" data-panel="audit">
+                <p class="memoria__hint memoria-au-status" id="memoria_audit_status" role="status"></p>
+                <div class="memoria__section">
+                    <div class="memoria__section-head">
+                        <div>
+                            <h4>어긋난 곳 자동 감지</h4>
+                            <p>답이 몇 개 쌓일 때마다 한 번, 최근 답들을 기록(요약·장면 기록·인물·설정)과 견주어 어긋난 곳을 찾아요. 근거 문장을 기록에서 실제로 찾은 것만 ‘근거 확인’으로 보여 줘요.</p>
+                        </div>
+                    </div>
+                    <div id="memoria_audit_drift"></div>
+                </div>
+                <div class="memoria__section">
+                    <div class="memoria__section-head">
+                        <div>
+                            <h4>요약 검수 · 채점 · 고쳐 쓰기</h4>
+                            <p>요약의 범위·날짜·이름을 코드로 먼저 확인해요 (호출 없음). 내용이 맞는지는 ‘채점’으로 물어볼 수 있어요.</p>
+                        </div>
+                        <div class="memoria__compact-actions">
+                            <div class="menu_button" id="memoria_audit_recheck" title="대화와 서고를 다시 읽고 점검해요 (호출 없음)"><i class="fa-solid fa-rotate"></i><span>다시 확인</span></div>
+                        </div>
+                    </div>
+                    <div id="memoria_audit_sums"></div>
+                </div>
+            </section>
+
             <section class="memoria__panel" data-panel="tools">
                 <div class="memoria__section">
                     <div class="memoria__section-head">

@@ -43,8 +43,9 @@ import { showArchiveLibrary } from './library-ui.mjs';
 import { withDeadline, parsePhraseList, stripPhrases, hasPhrase, findRepeatedPhrases, pickBundleValues, resolveBundleName, switchBundle, saveBundle, deleteBundle, renameBundle, exportBundle, parseBundleFile, diffStableEntries, shouldRefreeze, createActivityLog, findRivalExtensions, splitClosedLine, sleepStaleThreads, pickPledges, stripOpenLines, THREAD_KINDS, recallCooldown, pushRecallHistory, isEndedValue, ungroundedFigures, roughTokens, noteUsage, usageTotals, groundedIn, soundsHedged, noteThreadSightings, threadTouched, rareQueryWords, findConflicts, looksRefused, looksBlocked, strayHidden, pickTranscript, transcriptTerms, crossScriptPairs, crossScriptSame, pickPledgesToCheck, ensembleLabel, firstOf, listOf, joinValue, clampScore, splitPair, jsonRepairVariants, normalizeRecordLabels, BOND_KINDS, bondKindOf, summaryGaps, spanWindows, TIC_TYPES, readTicPicks, keptMilestones, sameTrait, mergeTraits, startsWithFieldLabel, looksLikeAlias, looksLikeAge, storyOnly, endsMidSentence, mergeLoss } from './craft-engine.mjs';
 import { isOocText, looksOocReply, attributeQuote, addressTermsIn, tallyAddress, pickAddressLines, personNowLine } from './stage-engine.mjs';
 import { parseStoryDate, storyDatesOf, isIsoDate, trackerText, trackerLineOf, pickBeats, beatLines, veilLeaks } from './calendar-engine.mjs';
-import { peopleList, matchPerson, personPage, nameSuggestions, planMerge, pairKey, WIPE_KINDS, wipeCounts, NOW_ORDER } from './people-engine.mjs';
+import { peopleList, matchPerson, personPage, nameSuggestions, planMerge, pairKey, WIPE_KINDS, wipeCounts, NOW_ORDER, strayPeople, mentions } from './people-engine.mjs';
 import { readerSystem, readerUser, readerKey, needsReading, packBatches, replyBudget, readReply, trimItems, READER_LANGS } from './reader-engine.mjs';
+import { checkModeOf, checkEveryOf, gradeEveryOf, NOTE_REPLIES, auditHash, sumSecs, whenOf, evidenceRows, readFindings, liveFindings, repliesSince, driftNoteLines, sumChecks, applySumFix, excerptsFor, readGrade, readRepair, repairBad } from './audit-engine.mjs';
 import { KNOW_DIRECTIVE, LEARN_DIRECTIVE, BEATS_DIRECTIVE, FEELING_DIRECTIVE, THREAD_KIND_NOTE, VOICE_LINES, PLAN_HEAD, VEIL_PROMPT } from './directives.mjs';
 import { findStatusBars, statusOneLine, isPauseDirective, isPauseMessage, buildTimelineRows, filterTimelineRows, timelineMarkdown, timelineCsv, layoutTimelineGraph, verifyIssues, applyVerdicts } from './scene-engine.mjs';
 import { heroHtml, pulseSvg, flowHtml, railHtml, tableHtml, bondMapSvg, bondCardsHtml, statusListHtml, bondLegendHtml, bondPeopleHtml, buildChanges, changesHtml } from './story-view.mjs';
@@ -384,6 +385,11 @@ const DEFAULT_SETTINGS = Object.freeze({
     statusInject: true,       // 가장 최근 상태창을 AI에게 알려 시간·날짜·장소를 잇는다
     qrMode: 'side',           // QR·슬래시 명령 메시지: 'side' 코멘트와 막간만 빼기 | 'all' 전부 빼기 | 'keep' 빼지 않기
     replyCheck: false,        // 연속성 검사 — 새 답변이 기록·최근 대화와 어긋나면 ⚠ (답변마다 호출 1회)
+    checkMode: '',            // 어긋난 곳 검사 방식 — '' 옛 설정(replyCheck) 그대로 | 'off' | 'each' 답변마다 | 'batch' 답 N개마다 한 번 (그때만 호출 1회)
+    checkEvery: 5,            // 답 몇 개마다 한 번 검사하나 (checkMode 'batch')
+    driftNote: true,          // 검사에서 근거를 확인한 어긋남을 다음 답 3개 동안 「지금」 쪽에 짧은 메모로 싣는다 (모델 호출 없음 · 보고서가 없으면 아무것도 싣지 않는다)
+    gradeMode: 'manual',      // 요약 채점 — 'manual' 단추로만 | 'flagged' 점검에 걸렸을 때만 | 'every' 새 요약 gradeEvery 개마다 (호출 1회)
+    gradeEvery: 3,            // 새 요약 몇 개마다 채점하나 (gradeMode 'every')
     bundles: {},              // 설정 세트 { 이름: 값들 }
     bundleByOwner: {},        // 캐릭터·그룹에 붙인 세트 { 'char:avatar.png' | 'group:id': 이름 }
     activeBundle: '',         // 지금 적용 중인 세트 ('' = 기본 설정)
@@ -921,7 +927,7 @@ async function checkReply(mesId) {
     }
     const store = getStore();
     const parts = await buildPacketSections(reply.slice(0, 600), null);
-    const archive = renderPacket({ ...parts, voices: [], banned: [], banTell: false }, { excerptLimit: 4 })
+    const archive = renderPacket({ ...parts, voices: [], banned: [], banTell: false, driftNotes: [] }, { excerptLimit: 4 })
         .split('\n').filter(l => l !== PACKET_HEADER && l !== PACKET_FOOTER).slice(packetGuidance(parts).length).join('\n');
     const context = `<archive>\n${archive}\n</archive>\n\n<recent_messages>\n${recent.join('\n\n')}\n</recent_messages>`;
     const userPrompt = `${context}\n\n<new_reply number="#${mesId}" by="${mes.name || name2 || 'Character'}">\n${reply.slice(0, 8000)}\n</new_reply>`;
@@ -966,6 +972,508 @@ async function checkReply(mesId) {
 function queueCheck(mesId) {
     commitQueue = commitQueue.then(() => checkReply(mesId)).catch(e => console.error(`[${MODULE_NAME}] 연속성 검사 오류:`, e));
     return commitQueue;
+}
+
+/* ============================================================
+ * 검사 — 어긋난 곳 자동 감지(답 N개마다 호출 1회) · 요약의 범위·날짜·이름 점검과 채점·고쳐 쓰기
+ * 모델을 부르는 일은 모두 기록과 같은 줄(commitQueue)에 세운다
+ * ============================================================ */
+
+const DRIFT_PROMPT = `You audit a stretch of an ongoing roleplay for continuity. You get the story's archive (what has been recorded so far) and the latest messages in order. Check ONLY the messages marked check="yes" against the archive; the other messages are there for context. You never rewrite anything.
+
+How to judge:
+- The story moves forward. A change the messages themselves show or explain — a move to another place, a healed wound, a new object, a relationship that shifted, time passing — is not a contradiction. The archive may lag a few replies behind the messages.
+- Report only a plain contradiction of what the archive records, as one of these kinds:
+  "fact" — a recorded fact is told differently: a name, a place, an injury, an object, who did what, a promise;
+  "knows" — a character acts on or mentions something the archive shows they do not know: a secret, an event they did not witness;
+  "address" — a character uses a form of address or a speech level that conflicts with how the archive records them speaking to that person;
+  "time" — the order of events, the date, the day count or the time of day conflicts with the archive.
+- Never report style, a new detail, a plausible development, or something the archive simply does not mention. When in doubt, leave it out — an empty list is the usual answer.
+
+Reply with ONE minified JSON object and nothing else:
+{"findings":[{"n":165,"kind":"fact","quote":"short exact quote from that message","evidence":"short exact quote, copied character for character from the archive, that states the recorded fact","problem":"one sentence: what the message says and what the record says — written in Korean"}]}
+"n" is the number of the checked message. Use an empty array when nothing is wrong.`;
+
+const GRADE_PROMPT = `You grade "story so far" records of a roleplay chat against the original messages they summarize. Each record is tagged like [S2] with the message range it covers and is followed by excerpts of those messages. Not every message is shown, and " … " marks a cut inside a message.
+
+Report only problems you can point to in the excerpts:
+- "wrong": the record states something the messages contradict — who did what, a name, a place, the order of events, a number, a date;
+- "missing": something that clearly matters later — a decision, a promise, a reveal, a lasting change — is in the messages but nowhere in the record;
+- "invented": the record states something specific about a scene whose messages ARE shown, and those messages give no basis for it. Never use this just because a message is not shown.
+Do not report wording, style, the order of bullets, or small omissions. An empty list is a fine answer.
+
+Reply with ONE minified JSON object and nothing else:
+{"items":[{"sec":"S2","kind":"wrong","text":"one sentence: what is off and what the messages show — written in Korean","refs":[131,140]}]}
+"refs" are one to three message numbers that show it.`;
+
+const REPAIR_PROMPT = `You repair "story so far" records of a roleplay chat. For each record you get its current text, the problems found in it, the turn notes on file for the same stretch, and excerpts of the original messages.
+
+Rewrite each record so the listed problems are fixed and everything else stays as it is: the same structure (the WHEN / PLOT / SHIFTS / OPEN lines it already uses), the same language, the same level of detail, and the same facts wherever they were not flagged. Never shorten a record and never drop a line that was not flagged. Add nothing the notes or excerpts do not show. Numbers, dates and names appear only as the material states them. Keep quoted dialogue word for word.
+
+Output every record in full, each under its own marker line, and nothing else — no commentary before, between or after:
+=== S1 ===
+(the full rewritten record)`;
+
+const DRIFT_KIND_LABEL = { fact: '사실 다름', knows: '모르는 걸 앎', address: '호칭·말투', time: '시간·순서' };
+const DRIFT_SRC_LABEL = { summary: '요약', arc: '연대기', scene: '장면 기록', canon: '캐논', cast: '인물', bond: '관계선', status: '상태', pledge: '서약', memory: '기억', item: '물건·전환점', ledger: '장부' };
+let auditBusy = '';
+
+function auditState(store = getStore()) {
+    if (!store.audit || typeof store.audit !== 'object') store.audit = {};
+    return store.audit;
+}
+/** 검사할 만한 답 — 첫 인사 · 막간 · 숨긴 것 · 너무 짧은 것은 뺀다 */
+function auditableAt(i) {
+    const m = chat[i];
+    if (!m || m.is_user || m.is_system || isSideMessage(m) || isPartialReply(m)) return false;
+    const fu = firstUserMesIndex();
+    if (fu < 0 || i < fu) return false;
+    return visibleProse(m.mes || '').trim().length >= 20;
+}
+function speakerOf(m) { return m?.is_user ? (m.name || name1 || 'User') : (m?.name || name2 || 'Character'); }
+/** 마지막 검사 뒤로 쌓인 답 수 · 다음 검사까지 남은 수. anchored: 세기 시작한 자리가 있는가 */
+function driftDue(store = getStore()) {
+    const st = store.audit || {}, every = checkEveryOf(getSettings());
+    if (!Number.isInteger(st.driftAt)) return { count: 0, need: every, anchored: false, from: -1 };
+    const from = Math.min(st.driftAt, chat.length - 1);
+    let count = 0;
+    for (let i = chat.length - 1; i > from; i--) if (auditableAt(i)) count++;
+    return { count, need: Math.max(0, every - count), anchored: true, from };
+}
+function lastAuditable(n, after = -1, before = chat.length) {
+    const out = [];
+    for (let i = before - 1; i > after && out.length < n; i--) if (auditableAt(i)) out.unshift(i);
+    return out;
+}
+/** 새 답이 왔다 (묶어서 검사할 때만) — N개가 찼으면 검사를 줄에 세운다. 처음이면 세기 시작할 자리만 적는다 (호출 없음) */
+function noteReplyForDrift(mesId) {
+    const settings = getSettings();
+    if (!settings.enabled || checkModeOf(settings) !== 'batch' || !auditableAt(mesId)) return;
+    const store = getStore(), st = auditState(store), due = driftDue(store);
+    if (!due.anchored) { st.driftAt = lastAuditable(1, -1, mesId)[0] ?? -1; persistStore(); return; }
+    if (due.count >= checkEveryOf(settings)) queueDrift();
+}
+function queueDrift({ manual = false } = {}) {
+    const job = commitQueue.then(() => driftNow({ manual }));
+    commitQueue = job.catch(e => console.error(`[${MODULE_NAME}] 어긋난 곳 검사 오류:`, e));
+    return job;
+}
+function driftIssue(f) {
+    const src = f.src ? [DRIFT_SRC_LABEL[f.src.kind] || f.src.kind, f.src.name, f.src.from >= 0 && f.src.from != null ? `#${f.src.from}${f.src.to > f.src.from ? `–#${f.src.to}` : ''}` : ''].filter(Boolean).join(' · ') : '';
+    return { quote: f.quote, problem: `${f.kind === 'address' ? '[말투] ' : ''}${f.text}`, evidence: f.evidence, source: src, ...(f.ok ? {} : { why: '근거 문장을 기록에서 찾지 못했어요' }) };
+}
+/** 보고서의 건을 메시지의 ⚠ 배지로 옮겨 적는다 — 근거를 확인한 건은 경고로, 못 한 건은 걸러 둔 쪽으로. 넘긴 건은 뺀다 */
+function stampDrift(report, only = null) {
+    const ids = only || [...new Set(report.checkedIds || [])];
+    let touched = false;
+    for (const no of ids) {
+        const m = chat[no];
+        if (!m || m.is_user) continue;
+        const h = mesHashOf(m), mine = report.findings.filter(f => f.no === no && f.h === h && !f.dismissed), had = checkOf(m);
+        if (!mine.length) { if (had?.batch) { setCheck(m, h, null); touched = true; decorateCheck(no); } continue; }
+        setCheck(m, h, { h, issues: mine.filter(f => f.ok).map(driftIssue), filtered: mine.filter(f => !f.ok).map(driftIssue), batch: true, at: report.at });
+        touched = true;
+        decorateCheck(no);
+    }
+    if (touched) getContext().saveChatDebounced?.();
+}
+/** 검사 한 번 (호출 1회). manual: 「지금 검사」 — 세어 둔 자리와 상관없이 끝의 N개를 본다. 반환: 보고서 | null (실패하면 manual 일 때만 오류를 던진다) */
+async function driftNow({ manual = false } = {}) {
+    const settings = getSettings();
+    if (!settings.enabled || !getCurrentChatId()) return null;
+    const chatId = getCurrentChatId();
+    await waitForChatIdle('연속성 검사');
+    if (getCurrentChatId() !== chatId) return null;
+    const store = getStore(), st = auditState(store), every = checkEveryOf(settings), due = driftDue(store);
+    if (!manual && (checkModeOf(settings) !== 'batch' || !due.anchored || due.count < every)) return null; // 기다리는 사이 방식이 바뀌었거나 이미 검사했다
+    const win = manual ? lastAuditable(every) : lastAuditable(12, due.from); // 밀린 것이 많아도 한 번에 12개까지
+    if (!win.length) { if (manual) throw new Error('검사할 답이 아직 없어요'); return null; }
+    const checked = new Set(win), h0 = new Map(win.map(i => [i, mesHashOf(chat[i])]));
+    const cap = Math.max(700, Math.min(2400, Math.floor(20000 / win.length)));
+    // 검사할 답과 그 사이의 내 말, 그리고 바로 앞의 몇 개 — 그 안에서 바뀐 것을 어긋남으로 짚지 않게
+    const lines = [];
+    for (let i = Math.max(0, win[0] - 4); i <= win[win.length - 1]; i++) {
+        const m = chat[i];
+        if (!m || m.is_system || isSideMessage(m)) continue;
+        const body = cleanMultiline(visibleProse(m.mes || ''), checked.has(i) ? cap : 700);
+        if (!body) continue;
+        lines.push(`<message n="#${i}" by="${speakerOf(m).replace(/"/g, "'")}"${checked.has(i) ? ' check="yes"' : ''}>\n${body}\n</message>`);
+    }
+    const query = win.map(i => visibleProse(chat[i].mes || '').slice(0, 240)).join('\n').slice(0, 1200);
+    const parts = await buildPacketSections(query, null);
+    const render = (lim) => renderPacket({ ...parts, voices: [], banned: [], banTell: false, driftNotes: [] }, lim)
+        .split('\n').filter(l => l !== PACKET_HEADER && l !== PACKET_FOOTER).slice(packetGuidance(parts).length).join('\n');
+    let archive = render({ excerptLimit: 2, sourceLimit: 0 });
+    if (await getTokenCountAsync(archive) > 6000) archive = render({ withExcerpts: false, recallLimit: 6, protectedLimit: 4, summaryLimit: 4, charLimit: 8, extraLimit: 6, sourceLimit: 0 });
+    const user = `<archive>\n${archive}\n</archive>\n\n<messages>\n${lines.join('\n\n')}\n</messages>`;
+    auditBusy = '어긋난 곳 검사 중…';
+    updateStatusUI(auditBusy);
+    renderAuditPanel();
+    let raw = null, out = '', why = '';
+    try {
+        const { value, timedOut } = await withDeadline(callAuxLLM(DRIFT_PROMPT, user, { task: 'check', maxTokens: auxTokens(1600) }), 150000, null);
+        if (timedOut) why = '응답이 너무 늦었어요';
+        else { out = String(value || ''); raw = parseJsonLoose(out); if (!raw) why = '받은 답을 읽지 못했어요'; }
+    } catch (e) {
+        why = e?.message || String(e);
+    } finally {
+        auditBusy = '';
+        updateStatusUI();
+    }
+    if (getStore() !== store) return null;
+    if (!raw) {
+        // 실패: 세어 둔 자리를 그대로 둔다 — 다음 답이 오면 다시 해 본다. 세 번 잇달아 실패하면 이 구간은 넘긴다 (답마다 헛호출이 되지 않게)
+        st.driftFail = (st.driftFail || 0) + 1;
+        if (!manual && st.driftFail >= 3) { st.driftAt = win[win.length - 1]; st.driftFail = 0; }
+        persistStore();
+        logActivity('error', `어긋난 곳 검사 #${win[0]}–#${win[win.length - 1]} 실패: ${why}`);
+        renderAuditPanel();
+        if (manual) throw new Error(why);
+        return null;
+    }
+    // 기다리는 사이 고쳤거나 넘긴 답은 결과에서 뺀다
+    const rows = win.filter(i => chat[i] && mesHashOf(chat[i]) === h0.get(i)).map(i => ({ no: i, h: h0.get(i), who: speakerOf(chat[i]), text: visibleProse(chat[i].mes || '') }));
+    const findings = readFindings(Array.isArray(raw) ? raw : raw.findings ?? raw.issues, rows, evidenceRows(store, chat), archive, uuidv4);
+    const last = win[win.length - 1];
+    const report = { at: Date.now(), from: win[0], to: last, lastH: h0.get(last), checkedIds: win, checked: win.length, findings, every, tokIn: Math.ceil((DRIFT_PROMPT.length + user.length) / 3), tokOut: Math.ceil(out.length / 3), ...(manual ? { manual: true } : {}) };
+    st.drift = report; st.driftAt = last; st.driftFail = 0;
+    persistStore();
+    stampDrift(report);
+    const sure = findings.filter(f => f.ok).length;
+    logActivity('check', findings.length ? `어긋난 곳 검사 #${report.from}–#${report.to}: 근거 확인 ${sure}개 · 미확인 ${findings.length - sure}개` : `어긋난 곳 검사 #${report.from}–#${report.to}: ${report.checked}개 모두 기록과 맞아요`);
+    renderAuditPanel();
+    updateInjection({ quiet: true });
+    return report;
+}
+/** 「괜찮아요」 — 그 건을 넘긴다 (바로잡기 메모와 ⚠ 배지에서 빠진다). on false 로 되돌린다 */
+function dismissDrift(id, on = true) {
+    const report = getStore().audit?.drift, f = report?.findings.find(x => x.id === id);
+    if (!report || !f) return;
+    if (on) f.dismissed = true; else delete f.dismissed;
+    persistStore();
+    stampDrift(report, [f.no]);
+    updateInjection({ quiet: true });
+}
+/** 바로잡기 메모가 지금 실리는가 — { lines: 실릴 건 수, left: 남은 답 수 } */
+function driftNoteState(store = getStore()) {
+    const report = store.audit?.drift, since = repliesSince(report, chat, mesHashOf), live = liveFindings(report, chat, mesHashOf).length;
+    return { lines: getSettings().driftNote !== false && since >= 0 && since < NOTE_REPLIES ? Math.min(4, live) : 0, left: since < 0 ? 0 : Math.max(0, NOTE_REPLIES - since), live };
+}
+
+// ── 요약 검수 · 채점 · 고쳐 쓰기 ──
+function knownNamesForAudit() {
+    const out = [name1, name2];
+    try { const ctx = getContext(); if (selected_group) for (const g of ctx.groups || []) if (g.id === selected_group) for (const av of g.members || []) out.push(ctx.characters?.find(c => c.avatar === av)?.name); } catch { /* 그룹을 못 읽어도 된다 */ }
+    return out.filter(Boolean);
+}
+/** 범위 · 날짜 · 이름 점검 (모델 호출 없음). 「괜찮아요」로 넘긴 것은 skipped 로 센다 */
+function summaryIssues(store = getStore()) {
+    const skip = new Set(store.audit?.skip || []);
+    let strays = [];
+    try { strays = strayPeople(peopleMem(store)); } catch { /* 이름 점검은 빼고 본다 */ }
+    const all = sumChecks(store, chat, { strays, known: knownNamesForAudit(), mentions });
+    return { list: all.filter(i => !skip.has(i.key)), skipped: all.filter(i => skip.has(i.key)).length };
+}
+function summaryCount(store) { return store.chunkSummaries.length + store.arcSummaries.length; }
+/** 다음 채점이 볼 요약 — 점검에 걸린 것 먼저, 그다음 아직 채점하지 않은 최근 것 (넷까지). force: 채점한 적 있어도 최근 것부터 */
+function gradePlan(store = getStore(), force = false) {
+    const st = store.audit || {}, all = sumSecs(store, chat).filter(x => x.from >= 0 && String(x.s.text || '').trim());
+    const flagged = new Set(summaryIssues(store).list.map(i => i.sum).filter(Boolean));
+    const fresh = all.filter(x => force || st.graded?.[x.s.id] !== auditHash(x.s.text));
+    return fresh.sort((a, b) => (+flagged.has(b.s.id) - +flagged.has(a.s.id)) || b.s.fromTurn - a.s.fromTurn).slice(0, 4).sort((a, b) => a.s.fromTurn - b.s.fromTurn);
+}
+function queueAuditJob(label, fn) {
+    const job = commitQueue.then(async () => {
+        await waitForChatIdle('요약·서고 정리');
+        auditBusy = label;
+        updateStatusUI(label);
+        renderAuditPanel();
+        try { return await fn(); } finally { auditBusy = ''; updateStatusUI(); renderAuditPanel(); }
+    });
+    commitQueue = job.catch(e => console.error(`[${MODULE_NAME}] ${label}`, e));
+    return job;
+}
+/** 채점 (호출 1회) — 요약과 그 요약이 덮는 원문 발췌를 함께 보내 틀린 곳 · 빠진 곳 · 지어낸 곳을 메시지 번호와 함께 받는다. 채점할 것이 없으면 null */
+function gradeSummaries({ force = false, auto = false } = {}) {
+    return queueAuditJob('요약 채점 중…', async () => {
+        const store = getStore(), secs = gradePlan(store, force);
+        if (!secs.length) return null;
+        const tags = new Map(), budget = Math.max(2000, Math.floor(10000 / secs.length)), clean = (m) => visibleProse(m.mes || '');
+        const blocks = secs.map((x, i) => {
+            const tag = `S${i + 1}`;
+            tags.set(tag, x);
+            return `[${tag}] record for messages #${x.from}–#${x.to}:\n${x.s.text}\n\nExcerpts of messages #${x.from}–#${x.to}:\n${excerptsFor(chat, x.from, x.to, budget, speakerOf, clean).join('\n')}`;
+        });
+        const user = blocks.join('\n\n────────\n\n');
+        const out = String(await callAuxLLM(GRADE_PROMPT, user, { task: 'summary', maxTokens: auxTokens(1400) }) || '');
+        const raw = parseJsonLoose(out);
+        if (getStore() !== store) return null;
+        if (!raw) throw new Error('받은 답을 읽지 못했어요');
+        const st = auditState(store);
+        const report = { at: Date.now(), sums: secs.map(x => x.s.id), items: readGrade(Array.isArray(raw) ? raw : raw.items, tags), tokIn: Math.ceil((GRADE_PROMPT.length + user.length) / 3), tokOut: Math.ceil(out.length / 3), ...(auto ? { auto: true } : {}) };
+        const alive = new Set([...store.chunkSummaries, ...store.arcSummaries].map(x => x.id));
+        st.graded = Object.fromEntries(Object.entries(st.graded || {}).filter(([id]) => alive.has(id)));
+        for (const x of secs) st.graded[x.s.id] = auditHash(x.s.text);
+        st.grade = report;
+        st.gradeCount = summaryCount(store);
+        persistStore();
+        logActivity('summary', `요약 ${secs.length}개 채점: 확인할 곳 ${report.items.length}개`);
+        return report;
+    });
+}
+/** 고쳐 달라고 보낼 요약 — 채점에 걸린 것(그 뒤로 글이 바뀌지 않은 것)과 비었거나 너무 짧은 것. 넷까지 */
+function repairPlan(store = getStore()) {
+    const st = store.audit || {}, items = st.grade?.items || [], done = new Set(st.grade?.fixed || []);
+    const weak = new Set(summaryIssues(store).list.filter(i => i.type === 'short' || i.type === 'empty').map(i => i.sum));
+    return sumSecs(store, chat).filter(x => x.from >= 0).map(x => {
+        const mine = done.has(x.s.id) || st.graded?.[x.s.id] !== auditHash(x.s.text) ? [] : items.filter(i => i.sum === x.s.id);
+        return {
+            x, weak: weak.has(x.s.id), refs: mine.flatMap(i => i.refs),
+            notes: [...mine.map(i => `(${i.kind}) ${i.text}${i.refs.length ? ` [${i.refs.map(n => `#${n}`).join(', ')}]` : ''}`), ...(weak.has(x.s.id) ? ['(too short) the record is far shorter than the stretch it covers — write it out in full from the notes and excerpts'] : [])],
+        };
+    }).filter(p => p.notes.length).slice(-4);
+}
+/**
+ * 고쳐 달라고 보내기 (호출 1회) — 걸린 요약만, 그 구간의 턴 기록과 원문 발췌를 함께 보내 다시 쓰게 한다.
+ * 받은 글이 훨씬 짧아졌거나 있던 칸이 빠졌으면 그 요약만 한 번 더 시키고, 그래도 그러면 옛 글을 그대로 둔다. 바꾼 요약은 직전 글을 was 에 남긴다 (되돌릴 수 있다)
+ */
+function repairSummaries() {
+    return queueAuditJob('요약 고치는 중…', async () => {
+        const store = getStore(), plan = repairPlan(store);
+        if (!plan.length) return null;
+        const clean = (m) => visibleProse(m.mes || ''), budget = Math.max(2000, Math.floor(9000 / plan.length));
+        const capOf = (x) => (x.s.saga ? 2800 : x.level === 'arc' ? 2400 : 2000);
+        const tagged = plan.map((p, i) => ({ ...p, tag: `S${i + 1}` })), byTag = new Map(tagged.map(p => [p.tag, p]));
+        const block = (p, extra = '') => {
+            const turns = store.turns.filter(t => t.turnIndex >= p.x.s.fromTurn && t.turnIndex <= p.x.s.toTurn && t.summary && !t.failed).sort((a, b) => a.turnIndex - b.turnIndex);
+            const step = Math.max(1, Math.ceil(turns.length / 20));
+            const notes = turns.filter((_, i) => i % step === 0).map(t => `- ${[t.when, t.where].filter(Boolean).length ? `[${[t.when, t.where].filter(Boolean).join(' · ')}] ` : ''}${cleanStr(t.summary, 300)}`);
+            return [`[${p.tag}] record for messages #${p.x.from}–#${p.x.to}`, `Current text:\n${String(p.x.s.text || '').trim() || '(empty)'}`, `Problems:\n${[...p.notes, extra].filter(Boolean).map(n => `- ${n}`).join('\n')}`,
+                notes.length ? `Turn notes on file for this stretch:\n${notes.join('\n')}` : '', `Excerpts of the original messages:\n${excerptsFor(chat, p.x.from, p.x.to, budget, speakerOf, clean, p.refs).join('\n')}`].filter(Boolean).join('\n\n');
+        };
+        const ask = async (list, extra = () => '') => {
+            const reply = await callAuxLLM(`${REPAIR_PROMPT}\n\n${languageDirective()}`, list.map(p => block(p, extra(p))).join('\n\n────────\n\n') + languageTail(), { task: 'summary', maxTokens: auxTokens(4000) });
+            const got = readRepair(reply, (text, tag) => cleanMultiline(sanitizeRecordOutput(text), capOf(byTag.get(tag)?.x || tagged[0].x)));
+            if (!got.size && list.length === 1) { const whole = cleanMultiline(sanitizeRecordOutput(reply), capOf(list[0].x)); if (whole) got.set(list[0].tag, whole); } // 하나만 보냈는데 표시 줄 없이 글만 돌아온 경우
+            return got;
+        };
+        const good = new Map(), bad = new Map();
+        const sift = (got, list) => { for (const p of list) { const text = got.get(p.tag) || '', why = repairBad(String(p.x.s.text || ''), text, p.weak); if (why) bad.set(p.tag, why); else { good.set(p.tag, text); bad.delete(p.tag); } } };
+        sift(await ask(tagged), tagged);
+        if (bad.size && getStore() === store) { // 짧아졌거나 칸이 빠진 요약만 한 번 더 — 그래도 그러면 옛 글을 둔다
+            const again = tagged.filter(p => bad.has(p.tag));
+            const hint = { empty: 'your previous answer left this record out — output it in full under its marker line', refused: 'your previous answer was not a record — output only the rewritten record', shrunk: 'your previous rewrite was much shorter than the record — keep every line that was not flagged', fields: 'your previous rewrite dropped lines or labels (WHEN / PLOT / SHIFTS / OPEN) the record had — keep them all' };
+            try { sift(await ask(again, p => hint[bad.get(p.tag) || 'shrunk']), again); } catch (e) { console.debug(`[${MODULE_NAME}] 요약 고쳐 쓰기 다시 시키기 실패 — 옛 글을 둡니다`, e); }
+        }
+        if (getStore() !== store) return null;
+        const st = auditState(store), fixed = [], kept = [], at = Date.now();
+        checkpointBeforeChange(store, '요약 고쳐 쓰기 전');
+        for (const p of tagged) {
+            const text = good.get(p.tag), sm = p.x.s;
+            if (!text || text === sm.text) { kept.push(sm.id); continue; }
+            sm.was = { text: sm.text, at, ...(sm.unverified ? { unverified: sm.unverified } : {}) };
+            sm.text = text; sm.fixedAt = at;
+            delete sm.avec; delete sm.unverified; // 본문이 바뀌었으니 임베딩은 다음 회상 때 다시 잡는다
+            if (st.graded) delete st.graded[sm.id];
+            fixed.push(sm.id);
+        }
+        if (st.grade) { st.grade.fixed = [...new Set([...(st.grade.fixed || []), ...fixed])]; st.grade.kept = kept; }
+        persistStore();
+        if (fixed.length) { stableFreeze = null; renderSummariesPanel(); updateInjection({ quiet: true }); } // 고친 요약을 「달라진 줄」로 매 턴 싣지 않고, 얼려 둔 장부를 한 번 새로 뜬다
+        logActivity('summary', `요약 ${fixed.length}개를 고쳐 썼어요${kept.length ? ` · ${kept.length}개는 그대로 뒀어요` : ''}`);
+        return { fixed, kept };
+    });
+}
+/** 고치기 전 글로 되돌린다 (다시 누르면 고친 글로) — 모델 호출 없음 */
+function restoreRepairedSummary(id) {
+    const store = getStore(), sm = [...store.chunkSummaries, ...store.arcSummaries].find(x => x.id === id), was = sm?.was;
+    if (!sm || typeof was?.text !== 'string') return false;
+    const now = sm.text;
+    sm.text = was.text;
+    sm.was = { text: now, at: Date.now() };
+    if (was.unverified?.length) sm.unverified = was.unverified; else delete sm.unverified;
+    delete sm.avec;
+    if (store.audit?.graded) delete store.audit.graded[id];
+    persistStore();
+    stableFreeze = null;
+    renderSummariesPanel();
+    updateInjection({ quiet: true });
+    return true;
+}
+/** 새 요약이 생긴 뒤: 범위·날짜·이름을 점검하고(호출 없음), 설정에 따라 채점한다 */
+async function afterSummariesAudit(store = getStore()) {
+    const settings = getSettings();
+    if (!settings.enabled || getStore() !== store) return;
+    const st = auditState(store), keys = summaryIssues(store).list.map(i => i.key).sort(), seen = keys.join('\u0001'), fresh = seen !== (st.gradeSeen || ''), now = summaryCount(store);
+    if (fresh) { st.gradeSeen = seen; persistStore(); if (keys.length) logActivity('summary', `요약 점검에 걸린 곳 ${keys.length}개 — 검사 탭에서 볼 수 있어요`); }
+    const auto = () => gradeSummaries({ auto: true }).catch(e => logActivity('error', `요약 채점 실패: ${e?.message || e}`));
+    if (settings.gradeMode === 'every') {
+        if (st.gradeCount == null) { st.gradeCount = now; persistStore(); } else if (now - st.gradeCount >= gradeEveryOf(settings)) auto();
+    } else if (settings.gradeMode === 'flagged' && fresh && keys.length) auto();
+}
+
+// ── 검사 탭 그리기 ──
+function auditWhen(at) {
+    const d = new Date(at), now = new Date(), pad = (n) => String(n).padStart(2, '0'), time = `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+    return d.toDateString() === now.toDateString() ? `오늘 ${time}` : `${d.getMonth() + 1}. ${d.getDate()}. ${time}`;
+}
+const auditJump = (n) => (Number.isInteger(n) && n >= 0 ? `<button type="button" class="mmv-jump" data-mes="${n}">#${n}</button>` : '');
+const auditSpan = (from, to) => (Number.isInteger(from) && from >= 0 ? `<span class="memoria-au-span">${auditJump(from)}${to > from ? `<i>–</i>${auditJump(to)}` : ''}</span>` : '');
+function auditFindingHtml(f, off = '', act = '') {
+    const srcName = f.src ? [DRIFT_SRC_LABEL[f.src.kind] || f.src.kind, f.src.name].filter(Boolean).join(' · ') : '';
+    return `<article class="memoria-au-card${off ? ' is-off' : ''}">
+        <header>${auditJump(f.no)}<b>${escapeHtml(f.who || '')}</b><span class="memoria__badge">${DRIFT_KIND_LABEL[f.kind] || f.kind}</span>${off ? `<span class="memoria__badge memoria-au-dash">${escapeHtml(off)}</span>` : '<span class="memoria__badge memoria__badge--arc">근거 확인</span>'}</header>
+        <p>${escapeHtml(f.text)}</p>
+        ${f.quote ? `<blockquote>“${escapeHtml(f.quote)}”</blockquote>` : ''}
+        ${f.evidence ? `<div class="memoria-au-evid"><span>기록에는: “${escapeHtml(f.evidence)}”</span>${srcName ? `<small>${escapeHtml(srcName)}</small>` : ''}${f.src ? auditSpan(f.src.from, f.src.to) : ''}</div>` : ''}
+        ${act ? `<footer>${act}</footer>` : ''}
+    </article>`;
+}
+function auditIssueText(i) {
+    const span = Number.isInteger(i.from) && i.from >= 0 ? `#${i.from}–#${i.to}` : '';
+    switch (i.type) {
+        case 'range': return '요약 하나가 기록에 없는 범위를 가리켜요';
+        case 'order': return '요약이 이야기 순서대로 놓여 있지 않아요';
+        case 'overlap': return `두 요약이 ${span || '같은 범위'}에서 겹쳐요`;
+        case 'empty': return `${span ? `${span} ` : ''}요약이 비어 있어요`;
+        case 'short': return `${span ? `${span} ` : ''}요약이 덮는 분량에 비해 너무 짧아요 (${i.n}자)`;
+        case 'date': return `요약 머리에는 ${i.said}일째라고 적혀 있는데, 이야기 시계로는 ${i.real}일째예요`;
+        case 'name': return `요약에 나오는 ‘${i.name}’ — 인물 목록에 없는 이름이에요`;
+        default: return i.type;
+    }
+}
+const AUDIT_FIX_LABEL = { sort: '순서대로 놓기', clamp: '범위 맞추기', trim: '겹친 범위 정리' };
+const AUDIT_FIX_TITLE = { sort: '요약을 범위 순서대로 다시 놓아요', clamp: '요약의 끝 번호를 마지막 기록에 맞춰요', trim: '뒤 요약의 시작을 앞 요약 끝 다음으로 옮겨요 (요약 글은 그대로)' };
+
+function renderAuditPanel() {
+    const $drift = $('#memoria_audit_drift');
+    if (!$drift.length) return;
+    const settings = getSettings(), store = getStore(), st = store.audit || {}, has = !!getCurrentChatId();
+    $('#memoria_audit_status').html(`<i class="memoria-au-lamp${auditBusy ? ' is-busy' : ''}"></i>${escapeHtml(auditBusy || '쉬는 중 — 검사는 답이 쌓이면 저절로 돌아요')}`);
+    if (!has) { $drift.html('<div class="memoria__empty">열린 채팅이 없어요.</div>'); $('#memoria_audit_sums').empty(); return; }
+    // ── 1. 어긋난 곳
+    const mode = checkModeOf(settings), every = checkEveryOf(settings), report = st.drift || null, due = driftDue(store), note = driftNoteState(store);
+    const live = liveFindings(report, chat, mesHashOf), liveIds = new Set(live.map(f => f.id)), aside = (report?.findings || []).filter(f => !liveIds.has(f.id));
+    const seg = [['off', '끔'], ['each', '답마다'], ['batch', `${every}개마다`]].map(([id, label]) => `<button type="button" class="memoria-au-mode${mode === id ? ' is-on' : ''}" data-mode="${id}" aria-pressed="${mode === id}">${label}</button>`).join('');
+    const foot = mode === 'batch'
+        ? (due.anchored ? (due.need ? `다음 자동 검사까지 답 ${due.need}개 남았어요` : '다음 답이 오면 검사해요') : `지금부터 세요 — 답이 ${every}개 쌓이면 처음 검사해요`)
+        : mode === 'each' ? '새 답이 올 때마다 검사해요 (답마다 호출 1회, 경고가 나오면 재확인 1회 더).' : '자동으로는 검사하지 않아요. ‘지금 검사’는 언제든 쓸 수 있어요 (호출 1회).';
+    let html = `<div class="memoria-au-row"><span class="memoria-au-seg" role="group" aria-label="검사 방식">${seg}</span>
+        ${mode === 'batch' ? `<label class="memoria-au-num">답<input type="number" class="text_pole" id="memoria_audit_every" min="2" max="30" step="1" value="${every}" aria-label="답 몇 개마다 검사할지">개마다</label>` : ''}
+        <div class="menu_button${settings.enabled ? '' : ' disabled'}" id="memoria_audit_drift_now" title="최근 답 ${every}개를 지금 검사해요 (호출 1회)"><i class="fa-solid fa-magnifying-glass"></i><span>지금 검사</span></div></div>
+        <p class="memoria__hint">${foot}</p>
+        <label class="memoria__toggle-row" for="memoria_audit_note"><input type="checkbox" id="memoria_audit_note"${settings.driftNote !== false ? ' checked' : ''}><span><strong>다음 답에 바로잡기 메모 싣기</strong><small>근거를 확인한 어긋남을 기록 쪽 문장과 함께 다음 답 ${NOTE_REPLIES}개 동안 ‘지금’ 장부에 짧게 실어요. 호출은 늘지 않고, ‘괜찮아요’로 넘긴 것은 빠져요.</small></span></label>`;
+    if (report) {
+        const rest = report.checked - new Set(live.map(f => f.no)).size;
+        html += `<p class="memoria-au-head">어긋난 곳 ${live.length}개<small> · ${auditWhen(report.at)} · #${report.from}–#${report.to} · ${report.checked}개 검사</small></p>`;
+        html += live.map(f => auditFindingHtml(f, '', `<div class="menu_button memoria-au-fine" data-id="${f.id}" title="이 건은 넘겨요 — 바로잡기 메모와 ⚠ 표시에서 빠져요">괜찮아요</div>`)).join('');
+        html += `<p class="memoria__hint">${live.length ? (rest > 0 ? `나머지 ${rest}개 메시지는 기록과 맞아요` : '') : `검사한 ${report.checked}개 메시지 모두 기록과 맞아요`}</p>`;
+        if (aside.length) {
+            html += `<details class="memoria-au-aside"><summary>따로 둔 것 · ${aside.length}개</summary><p class="memoria__hint">근거 문장을 기록에서 찾지 못했거나, 괜찮다고 넘겼거나, 그 뒤로 글이 바뀐 것이에요. 사실로 다루지 않고, 다음 답에도 싣지 않아요.</p>`
+                + aside.map(f => auditFindingHtml(f, f.dismissed ? '괜찮아요' : !f.ok ? '근거 미확인' : '글이 바뀜', f.dismissed ? `<div class="menu_button memoria-au-unfine" data-id="${f.id}">되돌리기</div>` : '')).join('') + '</details>';
+        }
+        if (note.lines) html += `<p class="memoria__hint">다음 답 ${note.left}개까지 바로잡기 메모 ${note.lines}줄이 실려요</p>`;
+        html += `<p class="memoria__hint memoria-au-tok">약 ${(report.tokIn + report.tokOut).toLocaleString()}토큰 · ${report.manual && mode !== 'batch' ? '직접 검사' : mode === 'batch' ? `답 ${every}개마다 자동 감지` : mode === 'each' ? '답변마다 검사' : '자동 감지 꺼짐'}</p>`;
+    } else html += `<div class="memoria__empty">${settings.enabled ? '아직 검사한 적이 없어요. ‘지금 검사’를 누르거나 ‘N개마다’를 켜 보세요.' : '장기기억이 꺼져 있어요. 켜면 검사할 수 있어요.'}</div>`;
+    $drift.html(html);
+
+    // ── 2. 요약 검수 · 채점 · 고쳐 쓰기
+    const { list, skipped } = summaryIssues(store), all = sumSecs(store, chat), secOf = new Map(all.map(x => [x.s.id, x]));
+    const gaps = findSummaryGaps(store), plan = gradePlan(store), fixes = repairPlan(store), grade = st.grade || null;
+    const restorable = all.filter(x => typeof x.s.was?.text === 'string');
+    let sh = '';
+    if (list.length || gaps.length) {
+        sh += `<h5 class="memoria-au-sub">확인해 주세요 · ${list.length + gaps.length}개</h5>`;
+        sh += gaps.map(g => `<div class="mmv-gap" data-from="${g.fromTurn}" data-to="${g.toTurn}"><span class="mmv-gap-text"><b>t${g.fromTurn}–t${g.toTurn}</b>${g.manual ? '직접 지운 요약 자리예요' : '어느 요약에도 들어 있지 않아요'}</span><div class="menu_button memoria-gap-fill" title="이 구간의 턴 기록으로 요약을 만들어 제자리에 끼워요 (호출 1회)">${gapFilling.has(`${g.fromTurn}-${g.toTurn}`) ? '채우는 중…' : '채우기'}</div></div>`).join('');
+        sh += list.map(i => {
+            const act = i.fix && AUDIT_FIX_LABEL[i.fix]
+                ? `<div class="menu_button memoria-au-fix" data-key="${escapeHtml(i.key)}" title="${AUDIT_FIX_TITLE[i.fix]}">${AUDIT_FIX_LABEL[i.fix]}</div>`
+                : `<small>${i.type === 'date' ? '채점으로 확인해 보세요' : i.type === 'name' ? '세계 탭의 인물에서 확인해 보세요' : '‘고쳐 달라고 보내기’에 함께 실려요'}</small>`;
+            return `<div class="memoria-au-issue"><p>${escapeHtml(auditIssueText(i))}</p><div class="memoria-au-acts">${i.type === 'order' ? '' : auditSpan(i.from, i.to)}${act}<div class="menu_button memoria-au-skip" data-key="${escapeHtml(i.key)}" title="이 건은 넘겨요">괜찮아요</div></div></div>`;
+        }).join('');
+    } else sh += `<p class="memoria__hint">${all.length ? `범위·날짜·이름이 모두 맞아요 — 요약 ${all.length}개 확인` : '아직 요약이 없어요'}</p>`;
+    if (skipped) sh += `<p class="memoria__hint">괜찮다고 넘긴 항목 ${skipped}개 <span class="memoria-au-link" id="memoria_audit_unskip">다시 보기</span></p>`;
+    sh += `<h5 class="memoria-au-sub">채점</h5><div class="memoria-au-row">
+        <div class="menu_button${settings.enabled && all.length ? '' : ' disabled'}" id="memoria_audit_grade" data-force="${plan.length ? 0 : 1}" title="요약과 그 요약이 덮는 원문 발췌를 함께 보내 틀린 곳·빠진 곳·지어낸 곳을 물어요 (호출 1회)"><i class="fa-solid fa-list-check"></i><span>${plan.length ? '채점' : '다시 채점'}</span></div>
+        <label class="memoria-au-num">자동<select class="text_pole" id="memoria_audit_grade_mode">${[['manual', '직접 누를 때만'], ['flagged', '점검에 걸렸을 때만'], ['every', '새 요약이 쌓일 때마다']].map(([v, t]) => `<option value="${v}"${(settings.gradeMode || 'manual') === v ? ' selected' : ''}>${t}</option>`).join('')}</select></label>
+        ${settings.gradeMode === 'every' ? `<label class="memoria-au-num">요약<input type="number" class="text_pole" id="memoria_audit_grade_every" min="1" max="20" step="1" value="${gradeEveryOf(settings)}" aria-label="새 요약 몇 개마다 채점할지">개마다</label>` : ''}</div>
+        <p class="memoria__hint">${all.length ? (plan.length ? `아직 채점하지 않은 요약 ${plan.length}개를 봐요 · 호출 1회` : '요약을 모두 채점했어요 — 다시 채점하면 최근 요약부터 봐요') : '채점할 요약이 아직 없어요'}</p>`;
+    if (grade) {
+        sh += `<article class="memoria-au-card"><header><b>채점 · 참고용</b><small>${auditWhen(grade.at)} · 요약 ${grade.sums.length}개 · 약 ${(grade.tokIn + grade.tokOut).toLocaleString()}토큰</small></header>`
+            + (grade.items.length ? grade.items.map(g => {
+                const x = secOf.get(g.sum), done = grade.fixed?.includes(g.sum);
+                return `<div class="memoria-au-issue${done ? ' is-done' : ''}"><p><span class="memoria__badge">${{ wrong: '틀림', missing: '빠짐', invented: '지어냄' }[g.kind] || g.kind}</span>${done ? ' <span class="memoria__badge memoria__badge--arc">고침</span>' : ''} ${escapeHtml(g.text)}</p><div class="memoria-au-acts">${x ? `<small>요약</small>${auditSpan(x.from, x.to)}` : ''}${g.refs.length ? '<small>원문</small>' : ''}${g.refs.map(auditJump).join('')}</div></div>`;
+            }).join('') : '<p class="memoria__hint">걸린 곳이 없어요</p>')
+            + '<p class="memoria__hint">모델의 의견이에요. 번호를 눌러 원문을 직접 확인해 보세요.</p></article>';
+    }
+    if (fixes.length) sh += `<div class="memoria-au-row"><div class="menu_button${settings.enabled ? '' : ' disabled'}" id="memoria_audit_repair" title="걸린 요약만 턴 기록과 원문 발췌를 함께 보내 다시 쓰게 해요 (호출 1회). 훨씬 짧아지거나 칸이 빠지면 한 번 더 시키고, 그래도 그러면 옛 글을 둬요."><i class="fa-solid fa-pen-to-square"></i><span>고쳐 달라고 보내기</span></div><span class="memoria__hint">요약 ${fixes.length}개 · 호출 1회 · 이전 글은 남겨 둬요</span></div>`;
+    if (restorable.length) sh += restorable.map(x => `<div class="memoria-au-issue"><p>고친 요약 · ${escapeHtml(whenOf(x.s) || (x.level === 'arc' ? '연대기' : '요약'))}</p><div class="memoria-au-acts">${auditSpan(x.from, x.to)}<div class="menu_button memoria-au-restore" data-id="${x.s.id}" title="고치기 전 글과 고친 글을 서로 바꿔요 (호출 없음)">${x.s.fixedAt && x.s.was?.at === x.s.fixedAt ? '이전 요약으로 되돌리기' : '고친 요약으로 다시'}</div></div></div>`).join('');
+    $('#memoria_audit_sums').html(sh);
+}
+
+function setCheckMode(mode, every) {
+    const settings = getSettings();
+    settings.checkMode = mode;
+    settings.replyCheck = mode === 'each';
+    if (every) settings.checkEvery = Math.max(2, Math.min(30, Math.round(every)));
+    // 묶어서 검사를 켜면 지금부터 센다
+    if (mode === 'batch') { const st = auditState(); if (!Number.isInteger(st.driftAt)) { st.driftAt = lastAuditable(1)[0] ?? -1; persistStore(); } }
+    $('#memoria_reply_check').prop('checked', settings.replyCheck === true);
+    saveSettingsDebounced();
+    renderAuditPanel();
+}
+
+function bindAuditPanel() {
+    const $root = $('#memoria_settings');
+    $root.on('click', '.memoria-au-mode', function () { setCheckMode(String($(this).data('mode')), checkEveryOf(getSettings())); });
+    $root.on('change', '#memoria_audit_every', function () { const n = Math.round(Number($(this).val())); if (n >= 2 && n <= 30) setCheckMode('batch', n); });
+    $root.on('change', '#memoria_audit_note', function () { getSettings().driftNote = $(this).prop('checked'); saveSettingsDebounced(); updateInjection({ quiet: true }); renderAuditPanel(); });
+    $root.on('click', '#memoria_audit_drift_now', async function () {
+        if ($(this).hasClass('disabled') || auditBusy) return;
+        try {
+            const r = await queueDrift({ manual: true });
+            if (r) { const n = r.findings.filter(f => f.ok).length; toastr[n ? 'warning' : 'success'](n ? `어긋난 곳 ${n}개를 찾았어요` : `검사한 ${r.checked}개 모두 기록과 맞아요`, 'Memoria'); }
+        } catch (e) { toastr.error(`검사하지 못했어요: ${e?.message || e}`, 'Memoria'); }
+        renderAuditPanel();
+    });
+    $root.on('click', '.memoria-au-fine', function () { dismissDrift(String($(this).data('id')), true); renderAuditPanel(); });
+    $root.on('click', '.memoria-au-unfine', function () { dismissDrift(String($(this).data('id')), false); renderAuditPanel(); });
+    $root.on('click', '#memoria_audit_recheck', function () { renderAuditPanel(); });
+    $root.on('click', '.memoria-au-fix', function () {
+        const store = getStore(), key = String($(this).data('key')), issue = summaryIssues(store).list.find(i => i.key === key);
+        const ok = !!issue && applySumFix(store, issue);
+        if (ok) { persistStore(); renderSummariesPanel(); updateInjection({ quiet: true }); logActivity('summary', `요약 점검: ${AUDIT_FIX_LABEL[issue.fix]}`); }
+        toastr[ok ? 'success' : 'info'](ok ? '고쳤어요' : '고칠 것이 없었어요', 'Memoria');
+        renderAuditPanel();
+    });
+    $root.on('click', '.memoria-au-skip', function () {
+        const st = auditState();
+        st.skip = [...new Set([...(st.skip || []), String($(this).data('key'))])].slice(-60);
+        persistStore(); renderAuditPanel();
+    });
+    $root.on('click', '#memoria_audit_unskip', function () { delete auditState().skip; persistStore(); renderAuditPanel(); });
+    $root.on('change', '#memoria_audit_grade_mode', function () { getSettings().gradeMode = String($(this).val() || 'manual'); saveSettingsDebounced(); renderAuditPanel(); });
+    $root.on('change', '#memoria_audit_grade_every', function () { const n = Math.round(Number($(this).val())); if (n >= 1 && n <= 20) { getSettings().gradeEvery = n; saveSettingsDebounced(); } });
+    $root.on('click', '#memoria_audit_grade', async function () {
+        if ($(this).hasClass('disabled') || auditBusy) return;
+        try {
+            const r = await gradeSummaries({ force: Number($(this).data('force')) === 1 });
+            toastr[r ? (r.items.length ? 'warning' : 'success') : 'info'](!r ? '채점할 요약이 없어요' : r.items.length ? `확인할 곳 ${r.items.length}개를 찾았어요` : '걸린 곳이 없어요', 'Memoria');
+        } catch (e) { toastr.error(`채점하지 못했어요: ${e?.message || e}`, 'Memoria'); }
+        renderAuditPanel();
+    });
+    $root.on('click', '#memoria_audit_repair', async function () {
+        if ($(this).hasClass('disabled') || auditBusy) return;
+        try {
+            const r = await repairSummaries();
+            toastr[r?.fixed.length ? 'success' : 'info'](!r ? '고칠 요약이 없어요' : `요약 ${r.fixed.length}개를 고쳤어요 · ${r.kept.length}개는 그대로 뒀어요`, 'Memoria');
+        } catch (e) { toastr.error(`요약을 고치지 못했어요: ${e?.message || e}`, 'Memoria'); }
+        renderAuditPanel();
+    });
+    $root.on('click', '.memoria-au-restore', function () {
+        if (restoreRepairedSummary(String($(this).data('id')))) toastr.success('요약을 바꿔 놓았어요', 'Memoria');
+        renderAuditPanel();
+    });
 }
 
 /* ============================================================
@@ -4092,7 +4600,10 @@ async function commitTurns(mesIds, { silent = true, force = false, retry = 1 } =
         }
     }
     if (slept) logActivity('summary', `오래 진전 없는 떡밥 ${slept}개를 잠재웠어요 (세계 탭에서 깨울 수 있어요)`);
-    if (store.chunkSummaries.length + store.arcSummaries.length !== chunksBefore) logActivity('summary', '지금까지의 이야기 요약을 갱신했어요');
+    if (store.chunkSummaries.length + store.arcSummaries.length !== chunksBefore) {
+        logActivity('summary', '지금까지의 이야기 요약을 갱신했어요');
+        await afterSummariesAudit(store).catch(e => console.warn(`[${MODULE_NAME}] 요약 점검`, e));
+    }
     persistStore();
     updateStatusUI();
     refreshOverviewUI();
@@ -6223,7 +6734,9 @@ async function buildPacketSections(query, supervisorPlan) {
     }
     const trackerLine = store.trackers?.length ? trackerLine0(store, [...inSceneCast.map(c => c.name), meName].filter(Boolean)) : '';
 
-    return { recordLag, returning, bonds, plans, nowIds, address, deadlines, cards, minds, transcript, trackerLine, voice: String(settings.recallVoice || 'natural'), voices, banned, styleGuard: settings.styleGuard !== false, recallQuotes: settings.recallQuotes !== false, banTell: settings.banTell === true,
+    // 검사가 찾은 어긋남 — 기록 쪽 문장과 함께 다음 답 몇 개 동안만 (보고서가 없으면 한 줄도 싣지 않는다)
+    const driftNotes = driftNoteLines(store.audit, chat, mesHashOf, settings.driftNote !== false);
+    return { driftNotes, recordLag, returning, bonds, plans, nowIds, address, deadlines, cards, minds, transcript, trackerLine, voice: String(settings.recallVoice || 'natural'), voices, banned, styleGuard: settings.styleGuard !== false, recallQuotes: settings.recallQuotes !== false, banTell: settings.banTell === true,
         publicRecall: publicRecallDeduped, protectedRecall, hiddenProtected, locks, rules, scene, states, characters, milestones, items, summaries, supervisorPlan, narratorMode, turnNow: store.turnCounter, storyAges, storyTotalDays, nowNote, sources: await pickDossierExcerpts(query, recallContext), recallCandidates, trace };
 }
 
@@ -6543,6 +7056,7 @@ function renderPacket(parts, { withExcerpts = true, excerptLimit = Infinity, rec
         lines.push('## Voices (lines these characters really said earlier — match how they sound; never repeat or paraphrase the lines themselves)');
         for (const v of parts.voices) lines.push(`- ${v.name}: ${v.lines.map(l => `"${l}"`).join(' / ')}`);
     }
+    if (parts.driftNotes?.length && stateLimit > 0) lines.push(...parts.driftNotes); // 검사가 찾은 어긋남 — 최근 대화 가까이에 둔다
     if (parts.supervisorPlan) {
         const p = parts.supervisorPlan;
         lines.push('## Direction (staging notes for this reply)');
@@ -9345,6 +9859,7 @@ function renderAllPanels() {
     renderCheckpoints();
     renderBundleBar();
     renderActivityLog();
+    renderAuditPanel();
 }
 
 /* ============================================================
@@ -9819,6 +10334,7 @@ function bindUI() {
         const tab = $(this).data('tab');
         $('#memoria_settings .memoria__tab').removeClass('is-active');
         $(this).addClass('is-active');
+        try { this.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'smooth' }); } catch { /* 오래된 브라우저 */ }
         $('#memoria_settings .memoria__panel').removeClass('is-active');
         $(`#memoria_settings .memoria__panel[data-panel="${tab}"]`).addClass('is-active');
         if (tab === 'tools') renderActivityLog();
@@ -10412,6 +10928,7 @@ function bindUI() {
         if (getStore() !== store) return;
         if (filled) { persistStore(); updateInjection(); await applyAutoHide(); }
         renderSummariesPanel();
+        renderAuditPanel();
         if (filled) toastr.success(`t${range.fromTurn}–t${range.toTurn} 요약을 채웠습니다.`, 'Memoria');
         else toastr.error('요약을 만들지 못했습니다. (모델 응답 오류) 잠시 뒤 다시 눌러 주세요.', 'Memoria');
     });
@@ -10813,6 +11330,7 @@ function bindUI() {
     });
     $('#memoria_side_sort').on('click', () => openSideSorter().catch(e => toastr.error(e.message, 'Memoria')));
     bindStoryView();
+    bindAuditPanel();
     // 맥박의 막대를 누르면 그 턴의 기록을 보여준다
     $('#memoria_settings').on('click', '.mmv-pulse-bar', function () {
         const t = getStore().turns.find(x => x.turnIndex === Number($(this).attr('data-turn')));
@@ -11972,6 +12490,7 @@ function bindEvents() {
         if (tagSideMessage(id, type) || isSideMessage(mes)) return; // 막간은 기록도 점검도 하지 않는다
         auditRecallEcho(mes, id); // 직전 주입 기억의 반영 여부 채점 (기록보다 먼저, 원본 감사표 기준)
         if (settings.replyCheck && type !== 'first_message' && type !== 'command') queueCheck(id);
+        else if (checkModeOf(settings) === 'batch' && type !== 'first_message' && type !== 'command') noteReplyForDrift(id); // 답 N개마다 한 번 (그때만 호출 1회)
         if (recordBatchSize() === 1 && type !== 'first_message' && requiredStepsFor(id) === 0) {
             queueCommit(id).then(() => updateInjection({ quiet: true }));
         } else {
