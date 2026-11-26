@@ -2210,3 +2210,536 @@ select.mm-yn-whof { width: 100%; min-height: 36px; max-width: none; }
 }
 /* 입력칸 · 고르기 칸도 각지게 */
 #memoria_settings .inline-drawer-content :is(.text_pole, select, textarea, input[type="text"], input[type="number"], input[type="search"]) { border-radius: 2px; }
+
+/* ════ 테마가 탭 · 숫자 칸 · 단추 · 입력칸에 입히는 모양(회색 바탕 · 칸막이 선 · 둥근 모서리 · 그림자)을 받지 않는다 (v2.16.1) ════
+   실리태번 테마 가운데 button · .menu_button · input 에 !important 로 모양을 입히는 것이 있어, 서고의 얼굴을 지키는 칸만 같은 세기로 정한다 */
+/* 탭: 밑줄 줄 */
+#memoria_settings .memoria__tabs {
+    gap: 20px !important; margin: 16px 0 0 !important; padding: 0 !important;
+    border: 0 !important; border-bottom: 1px solid var(--ink-line) !important; border-radius: 0 !important; background: none !important; box-shadow: none !important;
+}
+#memoria_settings .memoria__tab {
+    flex: none !important; width: auto !important; min-width: 0 !important; height: auto !important; min-height: 0 !important; margin: 0 0 -1px !important; padding: 10px 2px !important;
+    border: 0 !important; border-bottom: 2px solid transparent !important; border-radius: 0 !important; background: none !important; box-shadow: none !important;
+    color: var(--dim) !important; font: 600 .93em var(--font) !important; filter: none !important; opacity: 1 !important; text-shadow: none !important; transform: none !important;
+}
+#memoria_settings .memoria__tab::before, #memoria_settings .memoria__tab::after { content: none !important; display: none !important; }
+#memoria_settings .memoria__tab :is(i, span) { color: inherit !important; background: none !important; }
+#memoria_settings .memoria__tab:hover { color: var(--text) !important; }
+#memoria_settings .memoria__tab.is-active, #memoria_settings .memoria__tab.is-active:hover { color: var(--text) !important; border-bottom-color: var(--accent) !important; }
+@media (max-width: 600px) { #memoria_settings .memoria__tabs { gap: 16px !important; } }
+
+/* 숫자 칸: 칸 사이에 옅은 줄 하나 */
+#memoria_settings .memoria__stats > button {
+    margin: 0 !important; min-height: 0 !important; height: auto !important; width: auto !important;
+    border: 0 !important; border-right: 1px solid var(--ink-line) !important; border-bottom: 1px solid var(--ink-line) !important; border-radius: 0 !important;
+    background: none !important; box-shadow: none !important; color: var(--text) !important; filter: none !important; text-shadow: none !important;
+}
+#memoria_settings .memoria__stats > button:hover { background: var(--soft) !important; }
+#memoria_settings .memoria__stats .is-bad :is(b, span) { color: var(--bad-ink) !important; }
+
+/* 단추: 각진 모서리 · 잉크 테두리 · 흰 바탕 */
+#memoria_settings .inline-drawer-content .menu_button, .memoria__bundle-dialog .menu_button, .memoria__repeat-dialog .menu_button {
+    border: 1px solid var(--ink) !important; border-radius: 2px !important; background: var(--surface) !important; box-shadow: none !important;
+    color: var(--text) !important; filter: none !important; text-shadow: none !important;
+}
+#memoria_settings .inline-drawer-content .menu_button:hover, .memoria__bundle-dialog .menu_button:hover, .memoria__repeat-dialog .menu_button:hover { background: var(--surface2) !important; }
+#memoria_settings .inline-drawer-content .menu_button span { color: inherit !important; }
+#memoria_settings .memoria__status .memoria__status-actions .menu_button { border-color: var(--ink-line) !important; }
+#memoria_settings .memoria__status .memoria__status-actions .menu_button:hover { border-color: var(--ink) !important; }
+#memoria_settings .inline-drawer-content .memoria__filt-btn.menu_button.is-on { border-color: var(--accent) !important; color: var(--accent-ink) !important; }
+
+/* 검색칸 · 회상하지 않을 말: 바깥 칸 하나만 (안쪽 입력칸에 테마의 회색 상자가 또 생기지 않게) */
+#memoria_settings .inline-drawer-content .memoria__search input, #memoria_settings .inline-drawer-content .memoria__search input:focus {
+    background: none !important; border: 0 !important; border-radius: 0 !important; box-shadow: none !important; outline: none;
+}
+/* 종류 칩 */
+#memoria_settings .memoria__kindchip { border-radius: 0 !important; box-shadow: none !important; }
+
+/* 기억 카드의 아이콘 줄: 테두리 없는 작은 단추, 오른쪽으로 모아 */
+#memoria_settings .memoria__mem-actions .memoria__source-button {
+    width: 34px !important; height: 34px !important; min-width: 0 !important; min-height: 0 !important; margin: 0 !important; padding: 0 !important;
+    border: 0 !important; border-radius: 50% !important; background: none !important; box-shadow: none !important; color: var(--dim) !important;
+}
+#memoria_settings .memoria__mem-actions .memoria__source-button:hover { background: var(--surface2) !important; color: var(--text) !important; }
+#memoria_settings .memoria__mem-actions i, #memoria_settings .memoria__mem-actions .memoria__source-button { width: 34px; height: 34px; font-size: .86em; }
+@media (max-width: 600px) {
+    #memoria_settings .memoria__mem-card > .memoria__mem-head > .memoria__mem-actions { flex: 1 1 100%; margin: 0 -6px 0 0; justify-content: flex-end; }
+}
+
+/* ════ 인물 도감 카드 — 드림랜드 서고의 인물 카드와 같은 생김새 (v2.16.1) ════
+   첫 글자 네모 · 이름과 하는 일 · 밑줄 / 생김새 · 바탕(닻) · 말투(말풍선) · 변화(새싹) · 대사(따옴표) / 특성 칩 · 관계 칩 / 점선 아래 오른쪽의 단추 */
+#memoria_settings #memoria_characters_list { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 10px; }
+#memoria_settings .memoria__char-card.mm-person { display: flex; flex-direction: column; gap: 6px; padding: 12px; border: 1px solid var(--ink-line); border-radius: 0; background: var(--surface); font-size: .9em; min-width: 0; position: relative; }
+#memoria_settings .memoria__char-card.mm-person.is-locked { border-color: var(--ink); }
+#memoria_settings .mm-person > .mm-person-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding-bottom: 8px; border-bottom: 1px solid var(--ink-line); }
+#memoria_settings .mm-initial { width: 38px; height: 38px; flex: none; display: grid; place-items: center; font: 800 1.1em var(--display); font-style: normal; border: 1px solid var(--ink); background: var(--surface2); color: var(--text); }
+#memoria_settings .mm-person-name { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+#memoria_settings .mm-person-name b { font: 800 1.05em var(--display); color: var(--text); overflow-wrap: anywhere; }
+#memoria_settings .mm-person-name small, #memoria_settings .mm-person .mm-meta { color: var(--dim); font-size: .84em; }
+#memoria_settings .mm-person p { margin: 0; }
+#memoria_settings .mm-person .mm-plain { line-height: 1.55; overflow-wrap: anywhere; }
+#memoria_settings .mm-pline { display: flex; gap: 7px; align-items: baseline; margin: 0; line-height: 1.55; overflow-wrap: anywhere; }
+#memoria_settings .mm-pline > i, #memoria_settings .mm-voice > i { flex: none; color: var(--dim); font-size: .86em; position: relative; top: 1px; }
+#memoria_settings .mm-pline > span, #memoria_settings .mm-voice > span { min-width: 0; }
+#memoria_settings .mm-voice { display: flex; gap: 7px; align-items: baseline; color: var(--dim); font-style: italic; line-height: 1.55; }
+#memoria_settings .mm-said { color: var(--dim); font-style: italic; }
+#memoria_settings .mm-said .mm-line { margin-right: 10px; }
+#memoria_settings .mm-said q { quotes: "“" "”"; }
+#memoria_settings .mm-chips { display: flex; flex-wrap: wrap; gap: 5px; align-items: center; }
+#memoria_settings .mm-chip { display: inline-flex; align-items: center; gap: 5px; min-height: 22px; max-width: 100%; padding: 2px 8px; border: 1px solid var(--ink-line); border-radius: 0; background: var(--surface); color: var(--dim); font-size: 12px; line-height: 1.35; white-space: normal; overflow-wrap: anywhere; text-align: left; }
+#memoria_settings .mm-chip.rel { color: var(--text); border-color: color-mix(in srgb, var(--accent) 60%, transparent); }
+#memoria_settings .mm-chip.rel > i { flex: none; color: var(--accent-ink); font-size: .9em; }
+#memoria_settings .mm-person > .mm-person-foot { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 0; margin: auto 0 0; padding-top: 4px; border-top: 1px dashed var(--ink-line); }
+#memoria_settings .mm-person-foot > i { color: var(--dim); }
+#memoria_settings .mm-person-foot > i.is-on { color: var(--accent-ink); }
+@media (max-width: 600px) {
+    #memoria_settings #memoria_characters_list { grid-template-columns: 1fr; }
+    #memoria_settings .mm-chip { min-height: 24px; padding: 2px 9px; font-size: 12.5px; }
+}
+
+
+
+/* 관계선 카드: 지금 단계는 짙게 채운 딱지 (드림랜드 서고와 같이) */
+#memoria_settings .memoria__bond-card .memoria__char-head > .memoria__badge { background: var(--text); border-color: var(--text); color: var(--bg); font-weight: 700; }
+
+/* ⟦icons:start⟧ — tools/icons.mjs 가 짓는 덩어리입니다. 손으로 고치지 말고 node tools/icons.mjs 를 돌리세요. */
+#memoria_settings .fa-trash::before,
+#memoria_settings .fa-pen::before,
+#memoria_settings .fa-pen-to-square::before,
+#memoria_settings .fa-signature::before,
+#memoria_settings .fa-eye::before,
+#memoria_settings .fa-eye-slash::before,
+#memoria_settings .fa-magnifying-glass::before,
+#memoria_settings .fa-thumbtack::before,
+#memoria_settings .fa-thumbtack-slash::before,
+#memoria_settings .fa-plus::before,
+#memoria_settings .fa-file-circle-plus::before,
+#memoria_settings .fa-heart-circle-plus::before,
+#memoria_settings .fa-user-plus::before,
+#memoria_settings .fa-undo::before,
+#memoria_settings .fa-rotate-left::before,
+#memoria_settings .fa-rotate::before,
+#memoria_settings .fa-arrows-rotate::before,
+#memoria_settings .fa-repeat::before,
+#memoria_settings .fa-clock-rotate-left::before,
+#memoria_settings .fa-clock::before,
+#memoria_settings .fa-link::before,
+#memoria_settings .fa-wand-magic-sparkles::before,
+#memoria_settings .fa-lock::before,
+#memoria_settings .fa-lock-open::before,
+#memoria_settings .fa-comment-dots::before,
+#memoria_settings .fa-sliders::before,
+#memoria_settings .fa-feather::before,
+#memoria_settings .fa-globe::before,
+#memoria_settings .fa-language::before,
+#memoria_settings .fa-book-open::before,
+#memoria_settings .fa-book::before,
+#memoria_settings .fa-book-bookmark::before,
+#memoria_settings .fa-bookmark::before,
+#memoria_settings .fa-star::before,
+#memoria_settings .fa-seedling::before,
+#memoria_settings .fa-anchor::before,
+#memoria_settings .fa-quote-left::before,
+#memoria_settings .fa-code-merge::before,
+#memoria_settings .fa-user-group::before,
+#memoria_settings .fa-people-arrows::before,
+#memoria_settings .fa-user-secret::before,
+#memoria_settings .fa-mask::before,
+#memoria_settings .fa-id-card::before,
+#memoria_settings .fa-hourglass-half::before,
+#memoria_settings .fa-hourglass-end::before,
+#memoria_settings .fa-copy::before,
+#memoria_settings .fa-download::before,
+#memoria_settings .fa-file-import::before,
+#memoria_settings .fa-file-export::before,
+#memoria_settings .fa-floppy-disk::before,
+#memoria_settings .fa-check::before,
+#memoria_settings .fa-circle-check::before,
+#memoria_settings .fa-list-check::before,
+#memoria_settings .fa-spell-check::before,
+#memoria_settings .fa-ellipsis::before,
+#memoria_settings .fa-stop::before,
+#memoria_settings .fa-paper-plane::before,
+#memoria_settings .fa-gauge-high::before,
+#memoria_settings .fa-brain::before,
+#memoria_settings .fa-scroll::before,
+#memoria_settings .fa-scale-balanced::before,
+#memoria_settings .fa-screwdriver-wrench::before,
+#memoria_settings .fa-triangle-exclamation::before,
+#memoria_settings .fa-circle-info::before,
+#memoria_settings .fa-location-dot::before,
+#memoria_settings .fa-calendar-day::before,
+#memoria_settings .fa-volume-xmark::before,
+#memoria_settings .fa-snowflake::before,
+#memoria_settings .fa-shuffle::before,
+#memoria_settings .fa-layer-group::before,
+#memoria_settings .fa-broom::before,
+#memoria_settings .fa-eraser::before,
+#memoria_settings .fa-coins::before,
+#memoria_settings .fa-plug-circle-check::before,
+#memoria_settings .fa-diagram-project::before,
+#memoria_settings .fa-folder-open::before,
+#memoria_settings .fa-heart::before,
+#memoria_settings .fa-circle-xmark::before,
+#memoria_settings .fa-xmark::before,
+#memoria_tie_picker .fa-trash::before,
+#memoria_tie_picker .fa-pen::before,
+#memoria_tie_picker .fa-pen-to-square::before,
+#memoria_tie_picker .fa-signature::before,
+#memoria_tie_picker .fa-eye::before,
+#memoria_tie_picker .fa-eye-slash::before,
+#memoria_tie_picker .fa-magnifying-glass::before,
+#memoria_tie_picker .fa-thumbtack::before,
+#memoria_tie_picker .fa-thumbtack-slash::before,
+#memoria_tie_picker .fa-plus::before,
+#memoria_tie_picker .fa-file-circle-plus::before,
+#memoria_tie_picker .fa-heart-circle-plus::before,
+#memoria_tie_picker .fa-user-plus::before,
+#memoria_tie_picker .fa-undo::before,
+#memoria_tie_picker .fa-rotate-left::before,
+#memoria_tie_picker .fa-rotate::before,
+#memoria_tie_picker .fa-arrows-rotate::before,
+#memoria_tie_picker .fa-repeat::before,
+#memoria_tie_picker .fa-clock-rotate-left::before,
+#memoria_tie_picker .fa-clock::before,
+#memoria_tie_picker .fa-link::before,
+#memoria_tie_picker .fa-wand-magic-sparkles::before,
+#memoria_tie_picker .fa-lock::before,
+#memoria_tie_picker .fa-lock-open::before,
+#memoria_tie_picker .fa-comment-dots::before,
+#memoria_tie_picker .fa-sliders::before,
+#memoria_tie_picker .fa-feather::before,
+#memoria_tie_picker .fa-globe::before,
+#memoria_tie_picker .fa-language::before,
+#memoria_tie_picker .fa-book-open::before,
+#memoria_tie_picker .fa-book::before,
+#memoria_tie_picker .fa-book-bookmark::before,
+#memoria_tie_picker .fa-bookmark::before,
+#memoria_tie_picker .fa-star::before,
+#memoria_tie_picker .fa-seedling::before,
+#memoria_tie_picker .fa-anchor::before,
+#memoria_tie_picker .fa-quote-left::before,
+#memoria_tie_picker .fa-code-merge::before,
+#memoria_tie_picker .fa-user-group::before,
+#memoria_tie_picker .fa-people-arrows::before,
+#memoria_tie_picker .fa-user-secret::before,
+#memoria_tie_picker .fa-mask::before,
+#memoria_tie_picker .fa-id-card::before,
+#memoria_tie_picker .fa-hourglass-half::before,
+#memoria_tie_picker .fa-hourglass-end::before,
+#memoria_tie_picker .fa-copy::before,
+#memoria_tie_picker .fa-download::before,
+#memoria_tie_picker .fa-file-import::before,
+#memoria_tie_picker .fa-file-export::before,
+#memoria_tie_picker .fa-floppy-disk::before,
+#memoria_tie_picker .fa-check::before,
+#memoria_tie_picker .fa-circle-check::before,
+#memoria_tie_picker .fa-list-check::before,
+#memoria_tie_picker .fa-spell-check::before,
+#memoria_tie_picker .fa-ellipsis::before,
+#memoria_tie_picker .fa-stop::before,
+#memoria_tie_picker .fa-paper-plane::before,
+#memoria_tie_picker .fa-gauge-high::before,
+#memoria_tie_picker .fa-brain::before,
+#memoria_tie_picker .fa-scroll::before,
+#memoria_tie_picker .fa-scale-balanced::before,
+#memoria_tie_picker .fa-screwdriver-wrench::before,
+#memoria_tie_picker .fa-triangle-exclamation::before,
+#memoria_tie_picker .fa-circle-info::before,
+#memoria_tie_picker .fa-location-dot::before,
+#memoria_tie_picker .fa-calendar-day::before,
+#memoria_tie_picker .fa-volume-xmark::before,
+#memoria_tie_picker .fa-snowflake::before,
+#memoria_tie_picker .fa-shuffle::before,
+#memoria_tie_picker .fa-layer-group::before,
+#memoria_tie_picker .fa-broom::before,
+#memoria_tie_picker .fa-eraser::before,
+#memoria_tie_picker .fa-coins::before,
+#memoria_tie_picker .fa-plug-circle-check::before,
+#memoria_tie_picker .fa-diagram-project::before,
+#memoria_tie_picker .fa-folder-open::before,
+#memoria_tie_picker .fa-heart::before,
+#memoria_tie_picker .fa-circle-xmark::before,
+#memoria_tie_picker .fa-xmark::before {
+    content: "" !important; display: inline-block; width: 1.12em; height: 1.12em; vertical-align: -0.2em;
+    background: currentColor; -webkit-mask: var(--mm-ico) center / contain no-repeat; mask: var(--mm-ico) center / contain no-repeat;
+}
+#memoria_settings .fa-trash, #memoria_tie_picker .fa-trash { --mm-ico: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13'/%3E%3C/svg%3E"); }
+#memoria_settings .fa-pen, #memoria_tie_picker .fa-pen { --mm-ico: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4 20h4L19 9l-4-4L4 16zM14 6l4 4'/%3E%3C/svg%3E"); }
+#memoria_settings .fa-pen-to-square, #memoria_tie_picker .fa-pen-to-square { --mm-ico: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4 20h4L19 9l-4-4L4 16zM14 6l4 4'/%3E%3C/svg%3E"); }
+#memoria_settings .fa-signature, #memoria_tie_picker .fa-signature { --mm-ico: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4 20h4L19 9l-4-4L4 16zM14 6l4 4'/%3E%3C/svg%3E"); }
+#memoria_settings .fa-eye, #memoria_tie_picker .fa-eye { --mm-ico: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12zM12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z'/%3E%3C/svg%3E"); }
+#memoria_settings .fa-eye-slash, #memoria_tie_picker .fa-eye-slash { --mm-ico: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3 3l18 18M10.6 5.1A10 10 0 0 1 12 5c6 0 10 7 10 7a17 17 0 0 1-3.2 3.9M6.6 6.6C3.8 8.4 2 12 2 12s4 7 10 7a9.7 9.7 0 0 0 4.4-1.1M9.9 9.9a3 3 0 0 0 4.2 4.2'/%3E%3C/svg%3E"); }
+#memoria_settings .fa-magnifying-glass, #memoria_tie_picker .fa-magnifying-glass { --mm-ico: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M11 18a7 7 0 1 0 0-14 7 7 0 0 0 0 14zM20 20l-4-4'/%3E%3C/svg%3E"); }
+#memoria_settings .fa-thumbtack, #memoria_tie_picker .fa-thumbtack { --mm-ico: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M9 4h6l-1 6 3 3H7l3-3zM12 13v7'/%3E%3C/svg%3E"); }
+#memoria_settings .fa-thumbtack-slash, #memoria_tie_picker .fa-thumbtack-slash { --mm-ico: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M9 4h6l-1 6 3 3H7l3-3zM12 13v7'/%3E%3C/svg%3E"); }
+#memoria_settings .fa-plus, #memoria_tie_picker .fa-plus { --mm-ico: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 5v14M5 12h14'/%3E%3C/svg%3E"); }
+#memoria_settings .fa-file-circle-plus, #memoria_tie_picker .fa-file-circle-plus { --mm-ico: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 5v14M5 12h14'/%3E%3C/svg%3E"); }
+#memoria_settings .fa-heart-circle-plus, #memoria_tie_picker .fa-heart-circle-plus { --mm-ico: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 5v14M5 12h14'/%3E%3C/svg%3E"); }
+#memoria_settings .fa-user-plus, #memoria_tie_picker .fa-user-plus { --mm-ico: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 5v14M5 12h14'/%3E%3C/svg%3E"); }
+#memoria_settings .fa-undo, #memoria_tie_picker .fa-undo { --mm-ico: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M20 11a8 8 0 1 0-2.3 6.3M20 4v7h-7'/%3E%3C/svg%3E"); }
+#memoria_settings .fa-rotate-left, #memoria_tie_picker .fa-rotate-left { --mm-ico: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M20 11a8 8 0 1 0-2.3 6.3M20 4v7h-7'/%3E%3C/svg%3E"); }
+#memoria_settings .fa-rotate, #memoria_tie_picker .fa-rotate { --mm-ico: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M20 11a8 8 0 1 0-2.3 6.3M20 4v7h-7'/%3E%3C/svg%3E"); }
+#memoria_settings .fa-arrows-rotate, #memoria_tie_picker .fa-arrows-rotate { --mm-ico: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M20 11a8 8 0 1 0-2.3 6.3M20 4v7h-7'/%3E%3C/svg%3E"); }
+#memoria_settings .fa-repeat, #memoria_tie_picker .fa-repeat { --mm-ico: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M20 11a8 8 0 1 0-2.3 6.3M20 4v7h-7'/%3E%3C/svg%3E"); }
+#memoria_settings .fa-clock-rotate-left, #memoria_tie_picker .fa-clock-rotate-left { --mm-ico: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM12 7v5l3 2'/%3E%3C/svg%3E"); }
+#memoria_settings .fa-clock, #memoria_tie_picker .fa-clock { --mm-ico: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM12 7v5l3 2'/%3E%3C/svg%3E"); }
+#memoria_settings .fa-link, #memoria_tie_picker .fa-link { --mm-ico: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M10 14a4 4 0 0 0 6 0l3-3a4 4 0 0 0-6-6l-1 1M14 10a4 4 0 0 0-6 0l-3 3a4 4 0 0 0 6 6l1-1'/%3E%3C/svg%3E"); }
+#memoria_settings .fa-wand-magic-sparkles, #memoria_tie_picker .fa-wand-magic-sparkles { --mm-ico: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 3l1.9 5.6L19.5 10.5l-5.6 1.9L12 18l-1.9-5.6L4.5 10.5l5.6-1.9zM19 16l.7 2.3L22 19l-2.3.7L19 22l-.7-2.3L16 19l2.3-.7z'/%3E%3C/svg%3E"); }
+#memoria_settings .fa-lock, #memoria_tie_picker .fa-lock { --mm-ico: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 11h12v9H6zM8 11V8a4 4 0 0 1 8 0v3'/%3E%3C/svg%3E"); }
+#memoria_settings .fa-lock-open, #memoria_tie_picker .fa-lock-open { --mm-ico: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 11h12v9H6zM8 11V8a4 4 0 0 1 7.5-2'/%3E%3C/svg%3E"); }
+#memoria_settings .fa-comment-dots, #memoria_tie_picker .fa-comment-dots { --mm-ico: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12z'/%3E%3C/svg%3E"); }
+#memoria_settings .fa-sliders, #memoria_tie_picker .fa-sliders { --mm-ico: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12M16 4v4M10 10v4M18 16v4'/%3E%3C/svg%3E"); }
+#memoria_settings .fa-feather, #memoria_tie_picker .fa-feather { --mm-ico: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M20 4c-7 0-13 6-13 13v3h3c7 0 13-6 13-13V4zM4 20L14 10M9 15h5'/%3E%3C/svg%3E"); }
+#memoria_settings .fa-globe, #memoria_tie_picker .fa-globe { --mm-ico: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM3 12h18M12 3c3 3 3 15 0 18M12 3c-3 3-3 15 0 18'/%3E%3C/svg%3E"); }
+#memoria_settings .fa-language, #memoria_tie_picker .fa-language { --mm-ico: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM3 12h18M12 3c3 3 3 15 0 18M12 3c-3 3-3 15 0 18'/%3E%3C/svg%3E"); }
+#memoria_settings .fa-book-open, #memoria_tie_picker .fa-book-open { --mm-ico: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4 5a2 2 0 0 1 2-2h13v16H6a2 2 0 0 0-2 2zM4 21V5M8 8h7'/%3E%3C/svg%3E"); }
+#memoria_settings .fa-book, #memoria_tie_picker .fa-book { --mm-ico: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4 5a2 2 0 0 1 2-2h13v16H6a2 2 0 0 0-2 2zM4 21V5M8 8h7'/%3E%3C/svg%3E"); }
+#memoria_settings .fa-book-bookmark, #memoria_tie_picker .fa-book-bookmark { --mm-ico: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4 5a2 2 0 0 1 2-2h13v16H6a2 2 0 0 0-2 2zM4 21V5M8 8h7'/%3E%3C/svg%3E"); }
+#memoria_settings .fa-bookmark, #memoria_tie_picker .fa-bookmark { --mm-ico: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M7 3h10v18l-5-4-5 4z'/%3E%3C/svg%3E"); }
+#memoria_settings .fa-star, #memoria_tie_picker .fa-star { --mm-ico: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 3l2.8 5.7 6.2.9-4.5 4.4 1.1 6.2L12 17.3 6.4 20.2l1.1-6.2L3 9.6l6.2-.9z'/%3E%3C/svg%3E"); }
+#memoria_settings .fa-seedling, #memoria_tie_picker .fa-seedling { --mm-ico: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 21v-9M12 12c0-4-3-6-7-6 0 4 3 6 7 6zM12 15c0-3 2.5-5 6.5-5 0 3-2.5 5-6.5 5z'/%3E%3C/svg%3E"); }
+#memoria_settings .fa-anchor, #memoria_tie_picker .fa-anchor { --mm-ico: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 8a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5zM12 8v13M8 12h8M4 13a8 8 0 0 0 16 0'/%3E%3C/svg%3E"); }
+#memoria_settings .fa-quote-left, #memoria_tie_picker .fa-quote-left { --mm-ico: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 17c2-1 3-3 3-5H5V7h5v5c0 3-2 5-4 6zM14 17c2-1 3-3 3-5h-3V7h5v5c0 3-2 5-4 6z'/%3E%3C/svg%3E"); }
+#memoria_settings .fa-code-merge, #memoria_tie_picker .fa-code-merge { --mm-ico: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 4v16M6 12c6 0 6-6 12-6M15 3l3 3-3 3'/%3E%3C/svg%3E"); }
+#memoria_settings .fa-user-group, #memoria_tie_picker .fa-user-group { --mm-ico: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM2 21a7 7 0 0 1 14 0M16 3.5a4 4 0 0 1 0 7M22 21a7 7 0 0 0-4-6.3'/%3E%3C/svg%3E"); }
+#memoria_settings .fa-people-arrows, #memoria_tie_picker .fa-people-arrows { --mm-ico: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM2 21a7 7 0 0 1 14 0M16 3.5a4 4 0 0 1 0 7M22 21a7 7 0 0 0-4-6.3'/%3E%3C/svg%3E"); }
+#memoria_settings .fa-user-secret, #memoria_tie_picker .fa-user-secret { --mm-ico: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3 8c3-2 6-2 9 0 3-2 6-2 9 0 0 6-3 9-6 9-1.5 0-2-1-3-1s-1.5 1-3 1c-3 0-6-3-6-9z'/%3E%3C/svg%3E"); }
+#memoria_settings .fa-mask, #memoria_tie_picker .fa-mask { --mm-ico: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3 8c3-2 6-2 9 0 3-2 6-2 9 0 0 6-3 9-6 9-1.5 0-2-1-3-1s-1.5 1-3 1c-3 0-6-3-6-9z'/%3E%3C/svg%3E"); }
+#memoria_settings .fa-id-card, #memoria_tie_picker .fa-id-card { --mm-ico: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM4 21a8 8 0 0 1 16 0'/%3E%3C/svg%3E"); }
+#memoria_settings .fa-hourglass-half, #memoria_tie_picker .fa-hourglass-half { --mm-ico: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M7 3h10M7 21h10M8 3c0 5 8 5 8 9s-8 4-8 9M16 3c0 5-8 5-8 9s8 4 8 9'/%3E%3C/svg%3E"); }
+#memoria_settings .fa-hourglass-end, #memoria_tie_picker .fa-hourglass-end { --mm-ico: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M7 3h10M7 21h10M8 3c0 5 8 5 8 9s-8 4-8 9M16 3c0 5-8 5-8 9s8 4 8 9'/%3E%3C/svg%3E"); }
+#memoria_settings .fa-copy, #memoria_tie_picker .fa-copy { --mm-ico: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M9 9h11v11H9zM5 15V4h11'/%3E%3C/svg%3E"); }
+#memoria_settings .fa-download, #memoria_tie_picker .fa-download { --mm-ico: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 3v12M7 10l5 5 5-5M4 21h16'/%3E%3C/svg%3E"); }
+#memoria_settings .fa-file-import, #memoria_tie_picker .fa-file-import { --mm-ico: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 3v12M7 10l5 5 5-5M4 21h16'/%3E%3C/svg%3E"); }
+#memoria_settings .fa-file-export, #memoria_tie_picker .fa-file-export { --mm-ico: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 15V3M7 8l5-5 5 5M4 21h16'/%3E%3C/svg%3E"); }
+#memoria_settings .fa-floppy-disk, #memoria_tie_picker .fa-floppy-disk { --mm-ico: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 3v12M7 10l5 5 5-5M4 21h16'/%3E%3C/svg%3E"); }
+#memoria_settings .fa-check, #memoria_tie_picker .fa-check { --mm-ico: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 12l5 5L20 7'/%3E%3C/svg%3E"); }
+#memoria_settings .fa-circle-check, #memoria_tie_picker .fa-circle-check { --mm-ico: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 12l5 5L20 7'/%3E%3C/svg%3E"); }
+#memoria_settings .fa-list-check, #memoria_tie_picker .fa-list-check { --mm-ico: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 12l5 5L20 7'/%3E%3C/svg%3E"); }
+#memoria_settings .fa-spell-check, #memoria_tie_picker .fa-spell-check { --mm-ico: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 12l5 5L20 7'/%3E%3C/svg%3E"); }
+#memoria_settings .fa-ellipsis, #memoria_tie_picker .fa-ellipsis { --mm-ico: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 12h.01M12 12h.01M19 12h.01'/%3E%3C/svg%3E"); }
+#memoria_settings .fa-stop, #memoria_tie_picker .fa-stop { --mm-ico: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M7 7h10v10H7z'/%3E%3C/svg%3E"); }
+#memoria_settings .fa-paper-plane, #memoria_tie_picker .fa-paper-plane { --mm-ico: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4 12l16-8-6 16-3-7z'/%3E%3C/svg%3E"); }
+#memoria_settings .fa-gauge-high, #memoria_tie_picker .fa-gauge-high { --mm-ico: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4 4h16v16H4zM9 4v16'/%3E%3C/svg%3E"); }
+#memoria_settings .fa-brain, #memoria_tie_picker .fa-brain { --mm-ico: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 3l1.9 5.6L19.5 10.5l-5.6 1.9L12 18l-1.9-5.6L4.5 10.5l5.6-1.9zM19 16l.7 2.3L22 19l-2.3.7L19 22l-.7-2.3L16 19l2.3-.7z'/%3E%3C/svg%3E"); }
+#memoria_settings .fa-scroll, #memoria_tie_picker .fa-scroll { --mm-ico: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 3h9l4 4v14H6zM14 3v5h5M9 12h7M9 16h7'/%3E%3C/svg%3E"); }
+#memoria_settings .fa-scale-balanced, #memoria_tie_picker .fa-scale-balanced { --mm-ico: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 12l5 5L20 7'/%3E%3C/svg%3E"); }
+#memoria_settings .fa-screwdriver-wrench, #memoria_tie_picker .fa-screwdriver-wrench { --mm-ico: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1L7 17M17 7l2.1-2.1'/%3E%3C/svg%3E"); }
+#memoria_settings .fa-triangle-exclamation, #memoria_tie_picker .fa-triangle-exclamation { --mm-ico: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 3l10 18H2zM12 10v5M12 18v.5'/%3E%3C/svg%3E"); }
+#memoria_settings .fa-circle-info, #memoria_tie_picker .fa-circle-info { --mm-ico: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 16v-5a6 6 0 0 1 12 0v5l2 2H4zM10 21h4'/%3E%3C/svg%3E"); }
+#memoria_settings .fa-location-dot, #memoria_tie_picker .fa-location-dot { --mm-ico: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 21s7-6 7-11a7 7 0 0 0-14 0c0 5 7 11 7 11zM12 12a2 2 0 1 0 0-4 2 2 0 0 0 0 4z'/%3E%3C/svg%3E"); }
+#memoria_settings .fa-calendar-day, #memoria_tie_picker .fa-calendar-day { --mm-ico: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4 6h16v14H4zM4 10h16M8 3v4M16 3v4'/%3E%3C/svg%3E"); }
+#memoria_settings .fa-volume-xmark, #memoria_tie_picker .fa-volume-xmark { --mm-ico: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4 9h4l5-4v14l-5-4H4zM17 9l4 6M21 9l-4 6'/%3E%3C/svg%3E"); }
+#memoria_settings .fa-snowflake, #memoria_tie_picker .fa-snowflake { --mm-ico: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 2v20M3.5 7l17 10M20.5 7l-17 10M9 4l3 3 3-3M9 20l3-3 3 3'/%3E%3C/svg%3E"); }
+#memoria_settings .fa-shuffle, #memoria_tie_picker .fa-shuffle { --mm-ico: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3 7h4l10 10h4M3 17h4l3-3M14 10l3-3h4M18 4l3 3-3 3M18 14l3 3-3 3'/%3E%3C/svg%3E"); }
+#memoria_settings .fa-layer-group, #memoria_tie_picker .fa-layer-group { --mm-ico: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 3l9 5-9 5-9-5zM3 13l9 5 9-5M3 17l9 5 9-5'/%3E%3C/svg%3E"); }
+#memoria_settings .fa-broom, #memoria_tie_picker .fa-broom { --mm-ico: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 3l1.9 5.6L19.5 10.5l-5.6 1.9L12 18l-1.9-5.6L4.5 10.5l5.6-1.9zM19 16l.7 2.3L22 19l-2.3.7L19 22l-.7-2.3L16 19l2.3-.7z'/%3E%3C/svg%3E"); }
+#memoria_settings .fa-eraser, #memoria_tie_picker .fa-eraser { --mm-ico: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 6l12 12M18 6L6 18'/%3E%3C/svg%3E"); }
+#memoria_settings .fa-coins, #memoria_tie_picker .fa-coins { --mm-ico: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 3l2.8 5.7 6.2.9-4.5 4.4 1.1 6.2L12 17.3 6.4 20.2l1.1-6.2L3 9.6l6.2-.9z'/%3E%3C/svg%3E"); }
+#memoria_settings .fa-plug-circle-check, #memoria_tie_picker .fa-plug-circle-check { --mm-ico: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M9 2v6M15 2v6M6 8h12v4a6 6 0 0 1-12 0zM12 18v4'/%3E%3C/svg%3E"); }
+#memoria_settings .fa-diagram-project, #memoria_tie_picker .fa-diagram-project { --mm-ico: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6.2 16.8l3.9-3.4M12.4 12.9l4.4 1.6M11.6 10.4l1.1-3.9M5 16.3a1.4 1.4 0 1 1 0 2.8 1.4 1.4 0 0 1 0-2.8zM11 9.4a1.4 1.4 0 1 1 0 2.8 1.4 1.4 0 0 1 0-2.8zM18.2 13.4a1.4 1.4 0 1 1 0 2.8 1.4 1.4 0 0 1 0-2.8zM13.2 3.4a1.4 1.4 0 1 1 0 2.8 1.4 1.4 0 0 1 0-2.8z'/%3E%3C/svg%3E"); }
+#memoria_settings .fa-folder-open, #memoria_tie_picker .fa-folder-open { --mm-ico: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3 6h6l2 2h10v11H3z'/%3E%3C/svg%3E"); }
+#memoria_settings .fa-heart, #memoria_tie_picker .fa-heart { --mm-ico: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 20s-8-5-8-11a4.5 4.5 0 0 1 8-2.8A4.5 4.5 0 0 1 20 9c0 6-8 11-8 11z'/%3E%3C/svg%3E"); }
+#memoria_settings .fa-circle-xmark, #memoria_tie_picker .fa-circle-xmark { --mm-ico: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 6l12 12M18 6L6 18'/%3E%3C/svg%3E"); }
+#memoria_settings .fa-xmark, #memoria_tie_picker .fa-xmark { --mm-ico: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 6l12 12M18 6L6 18'/%3E%3C/svg%3E"); }
+/* ⟦icons:end⟧ */
+
+/* ⟦armor:start⟧ — tools/armor.mjs 가 짓는 덩어리입니다. 손으로 고치지 말고 위쪽 규칙을 고친 뒤 node tools/armor.mjs 를 돌리세요. */
+#memoria_settings .inline-drawer-content :where(button, .menu_button, select, textarea, input:not([type="checkbox"]):not([type="radio"]):not([type="range"])), #memoria_tie_picker :where(button, select, input) { box-shadow: none !important; text-shadow: none !important; filter: none !important; text-transform: none !important; border-radius: 0 !important; margin: 0 !important; }
+:is(#memoria_settings, #memoria_tie_picker) .memoria__perspective select { width: 100% !important; min-width: 0 !important; }
+:is(#memoria_settings, #memoria_tie_picker) .memoria__source-button { border: 0 !important; background: none !important; color: inherit !important; padding: 0 3px !important; cursor: pointer !important; }
+#memoria_settings .menu_button, .memoria__bundle-dialog .menu_button, .memoria__repeat-dialog .menu_button { width: auto !important; white-space: nowrap !important; padding: 5px 11px !important; font-size: 0.84em !important; margin: 0 !important; }
+:is(#memoria_settings, #memoria_tie_picker) .memoria__tab { min-width: 0 !important; padding: 8px 12px !important; border: 1px solid var(--mm-border) !important; border-radius: var(--mm-r) var(--mm-r) 0 0 !important; background: var(--mm-card) !important; color: var(--mm-muted) !important; font-size: 0.86em !important; white-space: nowrap !important; cursor: pointer !important; }
+:is(#memoria_settings, #memoria_tie_picker) .memoria__tab:hover { background: color-mix(in srgb, var(--mm-accent) 25%, var(--mm-card)) !important; color: var(--mm-text) !important; }
+:is(#memoria_settings, #memoria_tie_picker) .memoria__tab.is-active, :is(#memoria_settings, #memoria_tie_picker) .memoria__tab.is-active:hover { background: var(--mm-panel) !important; border-bottom-color: transparent !important; border-top: 2px solid var(--mm-accent) !important; color: var(--mm-text) !important; font-weight: 600 !important; }
+:is(#memoria_settings, #memoria_tie_picker) .memoria__search input { min-width: 0 !important; border: 0 !important; outline: none !important; background: transparent !important; color: var(--mm-text) !important; font-size: 0.88em !important; }
+:is(#memoria_settings, #memoria_tie_picker) .memoria__kind-select { width: auto !important; max-width: 90px !important; padding: 4px 6px !important; font-size: 0.85em !important; background: var(--mm-panel) !important; color: var(--mm-text) !important; border: 1px solid var(--mm-border) !important; border-radius: 6px !important; cursor: pointer !important; }
+:is(#memoria_settings, #memoria_tie_picker) #memoria_custom_api_block input[type="text"], :is(#memoria_settings, #memoria_tie_picker) #memoria_custom_api_block input[type="password"] { width: 100% !important; padding: 5px 8px !important; background: var(--mm-panel) !important; color: var(--mm-text) !important; border: 1px solid var(--mm-border) !important; border-radius: 6px !important; font-size: 0.88em !important; }
+:is(#memoria_settings, #memoria_tie_picker) .memoria__toggle-row input[type="checkbox"] { margin-top: 2px !important; }
+:is(#memoria_settings, #memoria_tie_picker) .memoria__field select, :is(#memoria_settings, #memoria_tie_picker) .memoria__field input[type="number"] { width: 100% !important; padding: 5px 8px !important; background: var(--mm-panel) !important; color: var(--mm-text) !important; border: 1px solid var(--mm-border) !important; border-radius: 6px !important; font-size: 0.88em !important; }
+:is(#memoria_settings, #memoria_tie_picker) .memoria__details textarea { width: 100% !important; margin: 8px 0 6px !important; font-family: var(--monoFontFamily, monospace) !important; font-size: 0.8em !important; line-height: 1.4 !important; background: var(--mm-soft) !important; color: var(--mm-text) !important; border: 1px solid var(--mm-border) !important; border-radius: 6px !important; padding: 8px !important; }
+:is(#memoria_settings, #memoria_tie_picker) .memoria__details .menu_button { width: fit-content !important; }
+:is(#memoria_settings, #memoria_tie_picker) .memoria__range input[type="number"] { width: 74px !important; padding: 5px 8px !important; background: var(--mm-panel) !important; color: var(--mm-text) !important; border: 1px solid var(--mm-border) !important; border-radius: 6px !important; font-size: 0.9em !important; }
+:is(#memoria_settings, #memoria_tie_picker) .memoria__ask-row input[type="text"] { min-width: 0 !important; padding: 7px 10px !important; background: var(--mm-panel) !important; color: var(--mm-text) !important; border: 1px solid var(--mm-border) !important; border-radius: 6px !important; font-size: 0.9em !important; }
+:is(#memoria_settings, #memoria_tie_picker) .memoria__lock-add .text_pole { width: 100% !important; margin: 0 !important; }
+#memoria_settings .memoria__library-launcher { width: 100% !important; padding: 16px !important; margin-bottom: 16px !important; border: 1px solid var(--mm-border) !important; border-radius: 12px !important; background: var(--mm-soft) !important; color: var(--mm-text) !important; text-align: left !important; cursor: pointer !important; }
+#memoria_settings .memoria__library-launcher:hover { background: var(--mm-hover) !important; }
+.memoria-library :is(button, input, select) { font: inherit !important; color: inherit !important; }
+.memoria-library button { height: 34px !important; min-height: 34px !important; margin: 0 !important; padding: 0 14px !important; border: 1px solid var(--ink-line) !important; border-radius: 4px !important; background: var(--surface) !important; box-shadow: none !important; color: var(--text) !important; font-size: .82em !important; font-weight: 600 !important; line-height: 1 !important; white-space: nowrap !important; cursor: pointer !important; }
+.memoria-library button:hover:enabled { border-color: var(--ink) !important; }
+.memoria-library button:disabled { cursor: default !important; }
+:is(#memoria_settings, #memoria_tie_picker) .memoria__library-launcher:focus-visible { outline: 2px solid var(--mm-accent) !important; outline-offset: 2px !important; }
+.memoria-library :is(.ml-clear, .ml-back, .ml-selection button) { border-color: transparent !important; background: none !important; padding: 0 4px !important; color: var(--dim) !important; text-decoration: underline !important; text-underline-offset: 3px !important; text-decoration-color: var(--ink-line) !important; }
+.memoria-library :is(.ml-clear, .ml-back, .ml-selection button):hover:enabled { border-color: transparent !important; color: var(--text) !important; }
+:is(#memoria_settings, #memoria_tie_picker) .ml-filters input, :is(#memoria_settings, #memoria_tie_picker) .ml-filters select, :is(#memoria_settings, #memoria_tie_picker) .ml-pagination select { width: 100% !important; min-width: 0 !important; height: 38px !important; min-height: 38px !important; margin: 0 !important; padding: 0 10px !important; border: 1px solid var(--ink-line) !important; border-radius: 4px !important; background: var(--surface) !important; box-shadow: none !important; font-size: .86em !important; }
+:is(#memoria_settings, #memoria_tie_picker) .ml-filters input:focus, :is(#memoria_settings, #memoria_tie_picker) .ml-filters select:focus { border-color: var(--ink) !important; }
+.memoria-library button.ml-owner-open { min-width: 0 !important; height: auto !important; min-height: 64px !important; padding: 10px 4px 10px 2px !important; border: 0 !important; border-radius: 0 !important; background: none !important; text-align: left !important; font-weight: 400 !important; font-size: 1em !important; line-height: 1.4 !important; white-space: normal !important; }
+.memoria-library button.ml-owner-open:hover:enabled { background: none !important; }
+.memoria-library input.ml-check[type="checkbox"] { appearance: none !important; -webkit-appearance: none !important; width: 18px !important; height: 18px !important; min-width: 18px !important; min-height: 18px !important; margin: 0 !important; padding: 0 !important; border: 1.5px solid var(--ink) !important; border-radius: 3px !important; background: var(--surface) !important; box-shadow: none !important; cursor: pointer !important; }
+.memoria-library input.ml-check[type="checkbox"]:checked, .memoria-library input.ml-check[type="checkbox"]:indeterminate { background: var(--ink) !important; }
+.memoria-library input.ml-check[type="checkbox"]::before { width: 8px !important; height: 4px !important; border: 0 !important; border-left: 2px solid transparent !important; border-bottom: 2px solid transparent !important; background: none !important; }
+.memoria-library input.ml-check[type="checkbox"]:checked::before { border-color: var(--surface) !important; }
+.memoria-library input.ml-check[type="checkbox"]:indeterminate::before { width: 9px !important; height: 0 !important; border-left: 0 !important; border-bottom: 2px solid var(--surface) !important; }
+.memoria-library input.ml-check[type="checkbox"]:disabled { cursor: default !important; }
+:is(#memoria_settings, #memoria_tie_picker) .ml-pagination select { text-align: center !important; }
+#memoria_settings .memoria__search input { min-width: 0 !important; border: 0 !important; background: none !important; padding: 8px 0 !important; margin: 0 !important; box-shadow: none !important; }
+:is(#memoria_settings, #memoria_tie_picker) .memoria__bundle-bar .menu_button { margin: 0 !important; white-space: nowrap !important; }
+#memoria_settings .memoria__setting-block textarea { width: 100% !important; min-width: 0 !important; margin: 0 !important; }
+.memoria__bundle-dialog select { width: 100% !important; min-width: 0 !important; }
+.memoria__repeat-dialog .memoria__row input { margin: 0 !important; }
+:is(#memoria_settings, #memoria_tie_picker) .mmv-views button { font: inherit !important; color: var(--mmv-muted) !important; background: none !important; border: 0 !important; border-radius: 9px !important; padding: 9px 0 !important; cursor: pointer !important; white-space: nowrap !important; }
+:is(#memoria_settings, #memoria_tie_picker) .mmv-views button.is-active { background: var(--mm-panel, #222) !important; color: var(--mmv-ink) !important; font-weight: 600 !important; box-shadow: 0 1px 3px #0004 !important; }
+:is(#memoria_settings, #memoria_tie_picker) .mmv-bar .menu_button { margin: 0 !important; min-width: 40px !important; border-radius: 12px !important; }
+#memoria_settings .mmv-tools select { width: auto !important; margin: 0 !important; }
+:is(#memoria_settings, #memoria_tie_picker) .mmv-seg button, :is(#memoria_settings, #memoria_tie_picker) .mmv-export, :is(#memoria_settings, #memoria_tie_picker) .mmv-jump { font: inherit !important; color: inherit !important; cursor: pointer !important; border: 1px solid var(--mmv-line) !important; background: none !important; padding: 7px 12px !important; }
+:is(#memoria_settings, #memoria_tie_picker) .mmv-seg button:first-child { border-radius: 9px 0 0 9px !important; }
+:is(#memoria_settings, #memoria_tie_picker) .mmv-seg button:last-child { border-radius: 0 9px 9px 0 !important; border-left: 0 !important; }
+:is(#memoria_settings, #memoria_tie_picker) .mmv-seg button.is-active { background: color-mix(in srgb, var(--mmv-a) 24%, transparent) !important; border-color: var(--mmv-a) !important; }
+:is(#memoria_settings, #memoria_tie_picker) .mmv-export { border-radius: 9px !important; font-size: .85em !important; padding: 7px 10px !important; }
+:is(#memoria_settings, #memoria_tie_picker) .mmv-jump { padding: 2px 8px !important; font-size: .8em !important; border-radius: 999px !important; color: var(--accent-ink, var(--mmv-a)) !important; }
+:is(#memoria_settings, #memoria_tie_picker) .mmv-gap button { font: inherit !important; font-size: .84em !important; color: var(--accent-ink, var(--mmv-a)) !important; background: none !important; border: 1px solid var(--mmv-line) !important; border-radius: 999px !important; padding: 5px 12px !important; cursor: pointer !important; white-space: nowrap !important; }
+:is(#memoria_settings, #memoria_tie_picker) .mmv-gap button:hover, :is(#memoria_settings, #memoria_tie_picker) .mmv-gap button:focus-visible { border-color: var(--mmv-a) !important; }
+:is(#memoria_settings, #memoria_tie_picker) .mmv-gap.is-busy button { color: var(--mmv-muted) !important; cursor: default !important; }
+:is(#memoria_settings, #memoria_tie_picker) .mmv-stars-cell .mmv-jump { margin: 4px 0 0 auto !important; }
+:is(#memoria_settings, #memoria_tie_picker) .mmv-person-chip { font: inherit !important; font-size: .86em !important; color: inherit !important; background: none !important; border: 1px solid var(--mmv-line) !important; border-radius: 999px !important; padding: 5px 11px !important; cursor: pointer !important; white-space: nowrap !important; }
+:is(#memoria_settings, #memoria_tie_picker) .mmv-person-chip.is-active { border-color: var(--mmv-a) !important; color: var(--accent-ink, var(--mmv-a)) !important; }
+:is(#memoria_settings, #memoria_tie_picker) .mmv-zoom button { font: inherit !important; font-size: .86em !important; color: inherit !important; background: none !important; border: 0 !important; padding: 5px 11px !important; min-width: 34px !important; cursor: pointer !important; white-space: nowrap !important; }
+:is(#memoria_settings, #memoria_tie_picker) .mmv-zoom button + button { border-left: 1px solid var(--mmv-line) !important; }
+:is(#memoria_settings, #memoria_tie_picker) .mmv-zoom button:disabled { cursor: default !important; }
+:is(#memoria_settings, #memoria_tie_picker) .mmv-change-kind { font: inherit !important; font-size: .86em !important; color: inherit !important; background: none !important; border: 1px solid var(--mmv-line) !important; border-radius: 999px !important; padding: 5px 11px !important; cursor: pointer !important; white-space: nowrap !important; }
+:is(#memoria_settings, #memoria_tie_picker) .mmv-change-kind.is-active { border-color: var(--mmv-a) !important; color: var(--accent-ink, var(--mmv-a)) !important; }
+:is(#memoria_settings, #memoria_tie_picker) .mmv-change-kind:disabled { cursor: default !important; }
+:is(#memoria_settings, #memoria_tie_picker) .mmv-change-who { min-width: 0 !important; max-width: 100% !important; }
+.memoria__repeat-dialog .memoria__row select { width: auto !important; margin: 0 !important; }
+#memoria_settings .memoria__field-inline select { min-width: 0 !important; margin: 0 !important; }
+#memoria_settings .memoria__field-inline .menu_button { padding: 0 12px !important; }
+#memoria_settings .memoria__stats > button { min-width: 0 !important; padding: 10px 4px 9px !important; margin: 0 !important; border: 0 !important; border-right: 1px solid var(--ink-line) !important; border-radius: 0 !important; background: none !important; color: var(--text) !important; font: inherit !important; cursor: pointer !important; }
+#memoria_settings .memoria__stats > button { border-bottom: 1px solid var(--ink-line) !important; }
+#memoria_settings .memoria__stats > button:hover { background: var(--soft) !important; color: var(--text) !important; }
+#memoria_settings .inline-drawer-content .menu_button, .memoria__bundle-dialog .menu_button, .memoria__repeat-dialog .menu_button { width: auto !important; min-height: 38px !important; margin: 0 !important; padding: 7px 16px !important; border: 1px solid var(--line) !important; border-radius: 999px !important; background: var(--surface) !important; color: var(--text) !important; font: 600 .93em var(--font) !important; white-space: nowrap !important; filter: none !important; cursor: pointer !important; }
+#memoria_settings .inline-drawer-content .menu_button:hover, .memoria__bundle-dialog .menu_button:hover, .memoria__repeat-dialog .menu_button:hover { background: var(--surface2) !important; }
+#memoria_settings .memoria__section .menu_button, #memoria_settings .memoria__status .menu_button { min-height: 34px !important; padding: 5px 12px !important; font-size: .86em !important; }
+#memoria_settings .memoria__tab { min-width: 0 !important; padding: 7px 14px !important; border: 0 !important; border-radius: 999px !important; background: none !important; color: var(--dim) !important; font: 600 .93em var(--font) !important; white-space: nowrap !important; cursor: pointer !important; }
+#memoria_settings .memoria__tab:hover { background: none !important; color: var(--text) !important; }
+#memoria_settings .memoria__tab.is-active, #memoria_settings .memoria__tab.is-active:hover { border: 0 !important; background: var(--surface) !important; color: var(--accent-ink, var(--accent)) !important; box-shadow: var(--shadow-sm) !important; font-weight: 600 !important; }
+#memoria_settings .inline-drawer-content :is(input[type="text"], input[type="search"], input[type="number"], input[type="password"], select, textarea) { min-height: 40px !important; padding: 8px 13px !important; border: 1px solid var(--line) !important; border-radius: var(--r-sm) !important; background-color: var(--surface) !important; color: var(--text) !important; font: inherit !important; box-shadow: none !important; outline: none !important; }
+#memoria_settings .inline-drawer-content :is(input, textarea)::placeholder { color: var(--faint) !important; }
+#memoria_settings .inline-drawer-content :is(input[type="text"], input[type="search"], input[type="number"], input[type="password"], select, textarea):focus { border-color: var(--accent) !important; box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 20%, transparent) !important; }
+#memoria_settings .inline-drawer-content select { appearance: none !important; -webkit-appearance: none !important; padding-right: 34px !important; background-image: linear-gradient(45deg, transparent 50%, var(--dim) 50%), linear-gradient(135deg, var(--dim) 50%, transparent 50%) !important; background-position: calc(100% - 18px) 50%, calc(100% - 13px) 50% !important; background-size: 5px 5px, 5px 5px !important; background-repeat: no-repeat !important; }
+#memoria_settings .inline-drawer-content .memoria__search input, #memoria_settings .inline-drawer-content .memoria__search input:focus { min-width: 0 !important; min-height: 40px !important; padding: 0 !important; border: 0 !important; border-radius: 0 !important; background: none !important; box-shadow: none !important; }
+#memoria_settings .memoria__kindchip { margin: 0 !important; padding: 3px 10px !important; min-height: 30px !important; border: 1px solid var(--ink-line) !important; border-radius: 0 !important; background: none !important; font: inherit !important; font-size: .8em !important; color: var(--dim) !important; cursor: pointer !important; }
+#memoria_settings .memoria__kindchip:hover { border-color: var(--ink) !important; color: var(--text) !important; }
+#memoria_settings .memoria__kindchip[aria-pressed="true"] { background: var(--ink) !important; border-color: var(--ink) !important; color: var(--bg) !important; }
+#memoria_settings .memoria__toggle-row input[type="checkbox"] { -webkit-appearance: none !important; appearance: none !important; width: 21px !important; height: 21px !important; margin: 1px 0 0 !important; border: 1.5px solid var(--faint) !important; border-radius: 7px !important; background: var(--surface) center / 13px 13px no-repeat !important; cursor: pointer !important; box-shadow: none !important; filter: none !important; }
+#memoria_settings .memoria__toggle-row input[type="checkbox"]:checked { background-color: var(--accent) !important; border-color: transparent !important; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 13 13' fill='none' stroke='%23fff' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M2.5 6.8 5.3 9.5 10.5 3.8'/%3E%3C/svg%3E") !important; }
+#memoria_settings .memoria__mem-actions .memoria__source-button { width: 36px !important; height: 36px !important; padding: 0 !important; border: 0 !important; border-radius: 50% !important; background: none !important; color: var(--dim) !important; font-size: .92em !important; cursor: pointer !important; }
+#memoria_settings .memoria__mem-actions .memoria__source-button:hover { color: var(--text) !important; background: var(--surface2) !important; }
+#memoria_settings .mmv-views button { border-radius: 999px !important; background: none !important; color: var(--dim) !important; font: 600 .93em var(--font) !important; }
+#memoria_settings .mmv-views button.is-active { background: var(--surface) !important; color: var(--accent-ink, var(--accent)) !important; box-shadow: var(--shadow-sm) !important; }
+#memoria_settings .mmv-bar .menu_button { border-radius: 999px !important; }
+#memoria_settings :is(.mmv-person-chip, .mmv-change-kind).is-active { border-color: var(--accent) !important; color: var(--accent-ink, var(--accent)) !important; }
+#memoria_settings .mmv-zoom button + button { border-left-color: var(--ink-line) !important; }
+#memoria_settings .mmv-gap button { border-radius: 0 !important; border-color: var(--ink-line) !important; color: var(--accent-ink, var(--accent)) !important; font-weight: 600 !important; }
+#memoria_settings .mmv-gap button:hover, #memoria_settings .mmv-gap button:focus-visible { border-color: var(--accent) !important; }
+@media (max-width: 600px) { #memoria_settings .inline-drawer-content :is(input[type="text"], input[type="search"], input[type="number"], input[type="password"], select, textarea):not(.memoria__preview) { font-size: 16px !important; } }
+@media (max-width: 600px) { #memoria_settings .memoria__tab { padding: 8px 10px !important; } }
+#memoria_settings .mmv-views button { border: 0 !important; margin: 0 !important; min-height: 36px !important; }
+#memoria_settings .inline-drawer-content textarea.memoria__preview { font: 400 12.5px/1.55 ui-monospace, "SF Mono", Consolas, monospace !important; }
+#memoria_settings .memoria__kindchip, #memoria_settings .memoria__stats > button { box-shadow: none !important; }
+.memoria-pop__person { padding: 7px 10px !important; border: 1px solid color-mix(in srgb, currentColor 15%, transparent) !important; border-radius: 8px !important; background: none !important; color: inherit !important; font: inherit !important; text-align: left !important; cursor: pointer !important; min-width: 0 !important; }
+.memoria-pop__person.is-here { border-color: color-mix(in srgb, currentColor 40%, transparent) !important; }
+.memoria-pop .menu_button { width: auto !important; white-space: nowrap !important; margin: 0 !important; padding: 3px 10px !important; }
+.memoria-pop__bar select { width: auto !important; margin: 0 !important; }
+#memoria_settings .memoria-au-mode { min-height: 40px !important; margin: 0 !important; padding: 0 6px !important; border: 0 !important; border-right: 1px solid var(--ink-line) !important; border-radius: 0 !important; background: var(--surface) !important; color: var(--text) !important; font: 600 .92em var(--font) !important; cursor: pointer !important; }
+#memoria_settings .memoria-au-mode:last-child { border-right: 0 !important; }
+#memoria_settings .memoria-au-mode:hover { background: var(--surface2) !important; }
+#memoria_settings .memoria-au-mode.is-on { background: var(--ink) !important; color: var(--surface) !important; }
+#memoria_settings .inline-drawer-content .memoria-au-every input, #memoria_settings .inline-drawer-content .memoria-au-every select { width: auto !important; min-width: 0 !important; height: 36px !important; min-height: 36px !important; margin: 0 !important; padding: 0 10px !important; border: 1px solid var(--ink-line) !important; border-radius: 4px !important; background: var(--surface) !important; box-shadow: none !important; color: var(--text) !important; font-size: 1em !important; }
+#memoria_settings .inline-drawer-content .memoria-au-every input { width: 64px !important; text-align: center !important; }
+#memoria_settings .memoria-au-link.mmv-jump { min-height: 0 !important; padding: 2px 1px !important; margin: 0 !important; border: 0 !important; border-radius: 0 !important; background: none !important; color: var(--accent-ink, var(--accent)) !important; font: 600 .9em var(--font) !important; text-decoration: underline !important; text-underline-offset: 3px !important; cursor: pointer !important; }
+#memoria_settings .memoria-au-textbtn { min-height: 0 !important; padding: 0 !important; margin: 0 !important; border: 0 !important; background: none !important; color: var(--accent-ink, var(--accent)) !important; font: inherit !important; text-decoration: underline !important; text-underline-offset: 3px !important; cursor: pointer !important; }
+#memoria_settings #memoria_audit_drift .menu_button, #memoria_settings #memoria_audit_sums .menu_button { min-height: 36px !important; padding: 0 14px !important; border: 1px solid var(--ink-line) !important; border-radius: 4px !important; background: var(--surface) !important; font-size: .88em !important; }
+#memoria_settings #memoria_audit_drift .menu_button:hover, #memoria_settings #memoria_audit_sums .menu_button:hover { border-color: var(--ink) !important; background: var(--surface) !important; }
+@media (max-width: 480px) { #memoria_settings .memoria__tab { padding: 7px 8px !important; } }
+#memoria_settings button.memoria-au-btn { width: auto !important; height: 40px !important; min-height: 40px !important; margin: 0 !important; padding: 0 16px !important; border: 1px solid var(--ink-line) !important; border-radius: 4px !important; background: var(--surface) !important; box-shadow: none !important; filter: none !important; text-shadow: none !important; color: var(--text) !important; font: 600 14px/1 var(--font) !important; letter-spacing: 0 !important; white-space: nowrap !important; cursor: pointer !important; }
+#memoria_settings button.memoria-au-btn:hover:enabled { border-color: var(--ink) !important; }
+#memoria_settings button.memoria-au-btn.is-primary { background: var(--ink) !important; border-color: var(--ink) !important; color: var(--surface) !important; }
+#memoria_settings button.memoria-au-btn:disabled { cursor: default !important; }
+#memoria_settings .memoria-au-input { height: 40px !important; min-height: 40px !important; margin: 0 !important; padding: 0 10px !important; border: 1px solid var(--ink-line) !important; border-radius: 4px !important; background: var(--surface) !important; box-shadow: none !important; color: var(--text) !important; font: 500 15px var(--font) !important; }
+#memoria_settings input.memoria-au-input { width: 64px !important; text-align: center !important; }
+#memoria_settings select.memoria-au-input { width: auto !important; min-width: 170px !important; }
+#memoria_settings button.memoria-au-link.mmv-jump { height: auto !important; min-height: 0 !important; padding: 2px 1px !important; margin: 0 !important; border: 0 !important; border-radius: 0 !important; background: none !important; box-shadow: none !important; color: var(--accent-ink, var(--accent)) !important; font: 600 14px var(--font) !important; text-decoration: underline !important; text-underline-offset: 3px !important; }
+#memoria_settings button.memoria-au-textbtn { border: 0 !important; background: none !important; box-shadow: none !important; padding: 0 !important; min-height: 0 !important; height: auto !important; color: var(--accent-ink, var(--accent)) !important; }
+#memoria_settings button.memoria-au-mode { height: 44px !important; min-height: 44px !important; margin: 0 !important; padding: 0 6px !important; border: 0 !important; border-right: 1px solid var(--ink-line) !important; border-radius: 0 !important; background: var(--surface) !important; box-shadow: none !important; color: var(--text) !important; font: 600 15px var(--font) !important; }
+#memoria_settings button.memoria-au-mode:last-child { border-right: 0 !important; }
+#memoria_settings button.memoria-au-mode.is-on { background: var(--ink) !important; color: var(--surface) !important; }
+#memoria_settings :is(.memoria__badge:not(.memoria__char-head > .memoria__badge), .mmv-tag, .memoria__mem-turn, .mmv-jump:not(.memoria-au-link)) { height: 22px !important; min-height: 22px !important; max-width: 100% !important; padding: 0 8px !important; margin-top: 0 !important; font-family: inherit !important; font-size: 12px !important; font-weight: 600 !important; font-style: normal !important; line-height: 1 !important; letter-spacing: .02em !important; white-space: nowrap !important; }
+@media (max-width: 600px) { #memoria_settings :is(.memoria__badge:not(.memoria__char-head > .memoria__badge), .mmv-tag, .memoria__mem-turn, .mmv-jump:not(.memoria-au-link)) { height: 24px !important; min-height: 24px !important; padding: 0 9px !important; font-size: 12.5px !important; } }
+#memoria_settings .mmv-stars-cell .mmv-jump { width: fit-content !important; margin: 4px 0 0 auto !important; }
+#memoria_settings .inline-drawer-content .memoria__filt-btn.menu_button { min-height: 42px !important; }
+#memoria_settings .inline-drawer-content .memoria__filt-btn.menu_button.is-on { border-color: var(--accent) !important; color: var(--accent-ink) !important; }
+.memoria-library .ml-selection button.ml-pick { border: 1px solid var(--ink-line) !important; background: var(--surface) !important; color: var(--text) !important; padding: 0 14px !important; text-decoration: none !important; font-size: .92em !important; }
+.memoria-library.is-picking .ml-selection button.ml-pick { border-color: var(--accent) !important; background: var(--soft) !important; color: var(--accent-ink) !important; }
+:is(#memoria_settings, #memoria_tie_picker) .mm-ti-chip { min-height: 34px !important; max-width: 100% !important; padding: 4px 12px !important; border: 1px solid var(--line-2) !important; background: transparent !important; color: var(--text) !important; font: inherit !important; font-size: .86em !important; line-height: 1.3 !important; text-align: left !important; cursor: pointer !important; }
+:is(#memoria_settings, #memoria_tie_picker) .mm-ti-chip.on { background: var(--text) !important; color: var(--bg) !important; border-color: var(--text) !important; }
+:is(#memoria_settings, #memoria_tie_picker) .mm-ti-chip.all { border-style: dashed !important; color: var(--accent-ink) !important; border-color: color-mix(in srgb, var(--accent) 60%, transparent) !important; }
+:is(#memoria_settings, #memoria_tie_picker) .mm-ti-btn { min-width: 34px !important; min-height: 34px !important; padding: 0 8px !important; border: 1px solid var(--line-2) !important; background: transparent !important; color: var(--text) !important; font: inherit !important; cursor: pointer !important; }
+:is(#memoria_settings, #memoria_tie_picker) .mm-ti-btn.wide { padding: 0 12px !important; font-size: .84em !important; }
+:is(#memoria_settings, #memoria_tie_picker) .mm-ti-btn:disabled { cursor: default !important; }
+:is(#memoria_settings, #memoria_tie_picker) .mm-ti-btn.del { border-color: transparent !important; color: var(--dim) !important; }
+:is(#memoria_settings, #memoria_tie_picker) .mm-ti-btn.del:hover { color: var(--bad-ink) !important; }
+:is(#memoria_settings, #memoria_tie_picker) .mm-ti-chip:focus-visible, :is(#memoria_settings, #memoria_tie_picker) .mm-ti-btn:focus-visible { outline: 2px solid var(--accent) !important; outline-offset: 1px !important; }
+:is(#memoria_settings, #memoria_tie_picker) .mm-yn-focus .mm-link { min-height: 34px !important; font-size: .84em !important; background: none !important; border: 0 !important; padding: 0 !important; cursor: pointer !important; }
+:is(#memoria_settings, #memoria_tie_picker) .mm-yn-who { min-height: 34px !important; max-width: 46% !important; padding: 0 !important; border: 0 !important; background: none !important; color: var(--text) !important; font: inherit !important; cursor: pointer !important; text-align: left !important; }
+:is(#memoria_settings, #memoria_tie_picker) .mm-yn-btn { width: 34px !important; height: 34px !important; padding: 0 !important; border: 1px solid var(--line-2) !important; background: transparent !important; color: var(--text) !important; cursor: pointer !important; }
+:is(#memoria_settings, #memoria_tie_picker) .mm-yn-btn.ghost { width: 32px !important; height: 32px !important; margin: -4px -8px -4px 0 !important; border-color: transparent !important; color: var(--dim) !important; }
+:is(#memoria_settings, #memoria_tie_picker) .mm-yn-btn.ghost:hover { color: var(--text) !important; background: color-mix(in srgb, var(--text) 6%, transparent) !important; }
+:is(#memoria_settings, #memoria_tie_picker) .mm-yn-btn.del { border-color: transparent !important; color: var(--dim) !important; }
+:is(#memoria_settings, #memoria_tie_picker) .mm-yn-btn.del:hover { color: var(--bad-ink, var(--bad)) !important; }
+:is(#memoria_settings, #memoria_tie_picker) .mm-yn-btn:focus-visible, :is(#memoria_settings, #memoria_tie_picker) .mm-yn-who:focus-visible, :is(#memoria_settings, #memoria_tie_picker) .mm-yn-hrow:focus-visible, :is(#memoria_settings, #memoria_tie_picker) .mm-yn-wf:focus-visible { outline: 2px solid var(--accent) !important; outline-offset: 1px !important; }
+#memoria_settings .mm-yn .mmv-jump.mm-yn-jump { padding: 3px 0 !important; border: 0 !important; background: none !important; color: var(--accent-ink) !important; font-size: 1em !important; text-decoration: underline !important; text-decoration-color: color-mix(in srgb, var(--accent) 40%, transparent) !important; text-underline-offset: 3px !important; cursor: pointer !important; }
+#memoria_settings .mm-yn .mmv-jump.mm-yn-jump:hover { color: var(--text) !important; }
+:is(#memoria_settings, #memoria_tie_picker) .mm-yn-hrow { width: 100% !important; min-height: 44px !important; padding: 8px 2px !important; border: 0 !important; background: none !important; color: inherit !important; font: inherit !important; text-align: left !important; cursor: pointer !important; }
+:is(#memoria_settings, #memoria_tie_picker) .mm-yn-wf { min-height: 34px !important; padding: 0 9px 0 7px !important; border: 1px solid var(--line-2) !important; background: transparent !important; color: var(--text) !important; font: inherit !important; font-size: .84em !important; cursor: pointer !important; }
+:is(#memoria_settings, #memoria_tie_picker) .mm-yn-wf.on { border-color: var(--way) !important; color: var(--way) !important; background: color-mix(in srgb, var(--way) 10%, transparent) !important; font-weight: 600 !important; }
+:is(#memoria_settings, #memoria_tie_picker) select.mm-yn-whof { width: 100% !important; min-height: 36px !important; max-width: none !important; }
+:is(#memoria_settings, #memoria_tie_picker) .mm-yn-ttop .mm-yn-btn { margin-left: auto !important; }
+:is(#memoria_settings, #memoria_tie_picker) .mm-yn-mini { min-width: 30px !important; min-height: 30px !important; padding: 0 !important; border: 0 !important; background: none !important; color: inherit !important; font: inherit !important; font-size: 15px !important; cursor: pointer !important; }
+:is(#memoria_settings, #memoria_tie_picker) .mm-yn-own select { min-height: 36px !important; }
+:is(#memoria_settings, #memoria_tie_picker) .mm-yn-pick { min-height: 34px !important; padding: 0 11px !important; border: 1px solid var(--line-2) !important; background: transparent !important; color: var(--text) !important; font: inherit !important; font-size: .88em !important; cursor: pointer !important; }
+:is(#memoria_settings, #memoria_tie_picker) .mm-yn-pick.on { border-color: var(--tk) !important; background: color-mix(in srgb, var(--tk) 16%, transparent) !important; color: color-mix(in srgb, var(--tk) 70%, var(--text)) !important; font-weight: 700 !important; }
+:is(#memoria_settings, #memoria_tie_picker) .mm-yn-pick:focus-visible, :is(#memoria_settings, #memoria_tie_picker) .mm-yn-mini:focus-visible { outline: 2px solid var(--accent) !important; outline-offset: 1px !important; }
+:is(#memoria_settings, #memoria_tie_picker) .mm-yn-hint .mm-link { background: none !important; border: 0 !important; padding: 0 !important; cursor: pointer !important; font-size: 1em !important; }
+@media (min-width: 720px) { :is(#memoria_settings, #memoria_tie_picker) select.mm-yn-whof { width: auto !important; min-width: 180px !important; max-width: 260px !important; } }
+#memoria_settings .mm-yn .mmv-jump.mm-yn-jump { height: auto !important; min-height: 0 !important; padding: 3px 0 !important; border-radius: 0 !important; font-weight: 500 !important; letter-spacing: 0 !important; }
+:is(#memoria_settings, #memoria_tie_picker) .mm-yn .mm-link, :is(#memoria_settings, #memoria_tie_picker) .mm-yn-hint .mm-link { color: var(--accent-ink) !important; text-decoration: underline !important; text-underline-offset: 3px !important; font-weight: 600 !important; }
+#memoria_tie_picker .text_pole { width: 100% !important; min-height: 40px !important; margin: 0 !important; border: 1px solid var(--line-2) !important; border-radius: 0 !important; background: var(--surface) !important; color: var(--text) !important; }
+:is(#memoria_settings, #memoria_tie_picker) .mm-yn-ownbtn { min-height: 36px !important; padding: 0 12px !important; border: 1px dashed var(--line-2) !important; background: transparent !important; color: var(--text) !important; font: inherit !important; font-size: .88em !important; cursor: pointer !important; }
+#memoria_settings .memoria__tab { padding: 10px 2px !important; margin-bottom: -1px !important; border: 0 !important; border-bottom: 2px solid transparent !important; border-radius: 0 !important; background: none !important; color: var(--dim) !important; font: 600 .93em var(--font) !important; box-shadow: none !important; }
+#memoria_settings .memoria__tab:hover { background: none !important; color: var(--text) !important; }
+#memoria_settings .memoria__tab.is-active, #memoria_settings .memoria__tab.is-active:hover { border: 0 !important; border-bottom: 2px solid var(--accent) !important; background: none !important; box-shadow: none !important; color: var(--text) !important; font-weight: 600 !important; }
+@media (max-width: 600px) { #memoria_settings .memoria__tab { padding: 10px 2px !important; } }
+#memoria_settings .inline-drawer-content .menu_button, .memoria__bundle-dialog .menu_button, .memoria__repeat-dialog .menu_button { border-radius: 2px !important; border-color: var(--ink) !important; }
+#memoria_settings .inline-drawer-content .menu_button:hover, .memoria__bundle-dialog .menu_button:hover, .memoria__repeat-dialog .menu_button:hover { background: var(--surface2) !important; border-color: var(--ink) !important; }
+#memoria_settings .memoria__status .memoria__status-actions .menu_button { min-height: 40px !important; padding: 6px 14px !important; border-color: var(--ink-line) !important; background: var(--surface) !important; font-size: .9em !important; font-weight: 600 !important; }
+#memoria_settings .memoria__status .memoria__status-actions .menu_button:hover { border-color: var(--ink) !important; }
+@media (max-width: 600px) { #memoria_settings .memoria__status .memoria__status-actions .menu_button { min-width: 0 !important; padding: 6px 8px !important; } }
+#memoria_settings .inline-drawer-content :is(.text_pole, select, textarea, input[type="text"], input[type="number"], input[type="search"]) { border-radius: 2px !important; }
+#memoria_settings .memoria__tab { width: auto !important; min-width: 0 !important; height: auto !important; min-height: 0 !important; margin: 0 0 -1px !important; padding: 10px 2px !important; border: 0 !important; border-bottom: 2px solid transparent !important; border-radius: 0 !important; background: none !important; box-shadow: none !important; color: var(--dim) !important; font: 600 .93em var(--font) !important; filter: none !important; text-shadow: none !important; }
+#memoria_settings .memoria__tab:hover { color: var(--text) !important; }
+#memoria_settings .memoria__tab.is-active, #memoria_settings .memoria__tab.is-active:hover { color: var(--text) !important; border-bottom-color: var(--accent) !important; }
+#memoria_settings .memoria__stats > button { margin: 0 !important; min-height: 0 !important; height: auto !important; width: auto !important; border: 0 !important; border-right: 1px solid var(--ink-line) !important; border-bottom: 1px solid var(--ink-line) !important; border-radius: 0 !important; background: none !important; box-shadow: none !important; color: var(--text) !important; filter: none !important; text-shadow: none !important; }
+#memoria_settings .memoria__stats > button:hover { background: var(--soft) !important; }
+#memoria_settings .inline-drawer-content .menu_button, .memoria__bundle-dialog .menu_button, .memoria__repeat-dialog .menu_button { border: 1px solid var(--ink) !important; border-radius: 2px !important; background: var(--surface) !important; box-shadow: none !important; color: var(--text) !important; filter: none !important; text-shadow: none !important; }
+#memoria_settings .inline-drawer-content .menu_button:hover, .memoria__bundle-dialog .menu_button:hover, .memoria__repeat-dialog .menu_button:hover { background: var(--surface2) !important; }
+#memoria_settings .memoria__status .memoria__status-actions .menu_button { border-color: var(--ink-line) !important; }
+#memoria_settings .memoria__status .memoria__status-actions .menu_button:hover { border-color: var(--ink) !important; }
+#memoria_settings .inline-drawer-content .memoria__filt-btn.menu_button.is-on { border-color: var(--accent) !important; color: var(--accent-ink) !important; }
+#memoria_settings .inline-drawer-content .memoria__search input, #memoria_settings .inline-drawer-content .memoria__search input:focus { background: none !important; border: 0 !important; border-radius: 0 !important; box-shadow: none !important; outline: none !important; }
+#memoria_settings .memoria__kindchip { border-radius: 0 !important; box-shadow: none !important; }
+#memoria_settings .memoria__mem-actions .memoria__source-button { width: 34px !important; height: 34px !important; min-width: 0 !important; min-height: 0 !important; margin: 0 !important; padding: 0 !important; border: 0 !important; border-radius: 50% !important; background: none !important; box-shadow: none !important; color: var(--dim) !important; }
+#memoria_settings .memoria__mem-actions .memoria__source-button:hover { background: var(--surface2) !important; color: var(--text) !important; }
+#memoria_settings .memoria__mem-actions .memoria__source-button { width: 34px !important; height: 34px !important; font-size: .86em !important; }
+/* ⟦armor:end⟧ */

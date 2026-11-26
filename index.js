@@ -9725,28 +9725,28 @@ function renderCharactersPanel() {
     for (const c of chars) {
         const meta = [c.role, c.age, c.occupation].filter(Boolean).map(escapeHtml).join(' · ');
         list.append($(`
-            <div class="memoria__char-card${c.disabled ? ' is-disabled' : ''}${c.locked ? ' is-locked' : ''}" data-id="${c.id}">
-                <div class="memoria__char-head">
-                    <strong class="memoria__char-name">${escapeHtml(c.name)}</strong>
+            <div class="memoria__char-card mm-person${c.disabled ? ' is-disabled' : ''}${c.locked ? ' is-locked' : ''}" data-id="${c.id}">
+                <header class="mm-person-head">
+                    <i class="mm-initial" aria-hidden="true">${escapeHtml([...String(c.name || '?').trim()][0] || '?')}</i>
+                    <div class="mm-person-name"><b class="memoria__char-name">${escapeHtml(c.name)}</b>${meta ? `<small>${meta}</small>` : ''}</div>
                     ${c.provisional ? '<span class="memoria__badge memoria__badge--provisional" title="아직 이름이 밝혀지지 않은 인물 — 정체가 드러나면 자동 병합됩니다">미확인</span>' : ''}
-                    ${c.locked ? '<span class="memoria__badge memoria__badge--locked" title="프로필 고정 — 사서가 이 카드의 이름·나이·외모·말투·특성을 바꾸지 못합니다 (관계만 계속 갱신)"><i class="fa-solid fa-lock"></i> 고정</span>' : ''}
-                    <span class="memoria__mem-actions">
-                        <i class="fa-solid ${c.locked ? 'fa-lock' : 'fa-lock-open'} memoria-char-lock" title="${c.locked ? '프로필 고정 해제 — 사서가 다시 갱신합니다' : '프로필 고정 — 사서가 이 카드의 프로필을 바꾸지 못하게 잠급니다 (관계는 계속 갱신)'}"></i>
-                        <i class="fa-solid ${c.disabled ? 'fa-eye-slash' : 'fa-eye'} memoria-char-toggle" title="${c.disabled ? '주입에 포함' : '주입·기록에서 제외 (사서가 이 인물을 다시 등록하지 않음)'}"></i>
-                        <i class="fa-solid fa-code-merge memoria-char-merge" title="다른 카드를 이 카드로 병합"></i>
-                        <i class="fa-solid fa-pen memoria-char-edit" title="편집"></i>
-                        <i class="fa-solid fa-trash memoria-char-delete" title="삭제"></i>
-                    </span>
-                </div>
-                ${(c.aliases || []).length ? `<div class="memoria__char-meta">별칭: ${c.aliases.map(escapeHtml).join(', ')}</div>` : ''}
-                ${meta ? `<div class="memoria__char-meta">${meta}</div>` : ''}
-                ${c.appearance ? `<div class="memoria__char-line">${escapeHtml(c.appearance)}</div>` : ''}
-                ${c.core ? `<div class="memoria__char-line memoria__char-core" title="바탕 — 한 번 적히면 사서가 다시 쓰지 못합니다. ✏️로만 고칠 수 있어요"><i class="fa-solid fa-anchor"></i> ${escapeHtml(c.core)}</div>` : ''}
-                ${c.voice ? `<div class="memoria__char-line memoria__char-voice"><i class="fa-solid fa-comment-dots"></i> ${escapeHtml(c.voice)}</div>` : ''}
-                ${(c.growth || []).length ? `<div class="memoria__char-line memoria__char-growth" title="이야기 속에서 생긴 변화 — 바탕 위에 천천히 얹힙니다"><i class="fa-solid fa-seedling"></i> ${c.growth.map(g => escapeHtml(g.text)).join(' · ')}</div>` : ''}
-                ${(c.lines || []).length ? `<div class="memoria__char-line memoria__char-lines" title="실제로 한 대사 — 장면에 있을 때 말투 견본으로 실립니다"><i class="fa-solid fa-quote-left"></i> ${c.lines.map(l => `“${escapeHtml(l.text)}”`).join(' ')}</div>` : ''}
-                ${(c.traits || []).length ? `<div class="memoria__mem-meta">${c.traits.map(t => `<span class="memoria__chip">${escapeHtml(t)}</span>`).join('')}</div>` : ''}
-                ${(c.relationships || []).length ? `<div class="memoria__mem-meta">${c.relationships.map(r => `<span class="memoria__chip memoria__chip--rel"><i class="fa-solid fa-link"></i> ${escapeHtml(r.target)}: ${escapeHtml(r.relation)}</span>`).join('')}</div>` : ''}
+                    ${c.locked ? '<span class="memoria__badge memoria__badge--locked" title="프로필 고정 — 사서가 이 카드의 이름·나이·외모·말투·특성을 바꾸지 못합니다 (관계만 계속 갱신)">고정</span>' : ''}
+                </header>
+                ${(c.aliases || []).length ? `<p class="mm-meta">별칭: ${c.aliases.map(escapeHtml).join(', ')}</p>` : ''}
+                ${c.appearance ? `<p class="mm-plain">${escapeHtml(c.appearance)}</p>` : ''}
+                ${c.core ? `<p class="mm-pline" title="바탕 — 한 번 적히면 사서가 다시 쓰지 못합니다. 연필로만 고칠 수 있어요"><i class="fa-solid fa-anchor"></i><span>${escapeHtml(c.core)}</span></p>` : ''}
+                ${c.voice ? `<p class="mm-voice" title="말투"><i class="fa-solid fa-comment-dots"></i><span>${escapeHtml(c.voice)}</span></p>` : ''}
+                ${(c.growth || []).length ? `<p class="mm-pline" title="이야기 속에서 생긴 변화 — 바탕 위에 천천히 얹힙니다"><i class="fa-solid fa-seedling"></i><span>${c.growth.map(g => escapeHtml(g.text)).join(' · ')}</span></p>` : ''}
+                ${(c.lines || []).length ? `<div class="mm-pline mm-said" title="실제로 한 대사 — 장면에 있을 때 말투 견본으로 실립니다"><i class="fa-solid fa-quote-left"></i><span>${c.lines.map(l => `<span class="mm-line"><q>${escapeHtml(l.text)}</q></span>`).join('')}</span></div>` : ''}
+                ${(c.traits || []).length ? `<div class="mm-chips">${c.traits.map(t => `<span class="mm-chip">${escapeHtml(t)}</span>`).join('')}</div>` : ''}
+                ${(c.relationships || []).length ? `<div class="mm-chips">${c.relationships.map(r => `<span class="mm-chip rel"><i class="fa-solid fa-link"></i>${escapeHtml(r.target)}: ${escapeHtml(r.relation)}</span>`).join('')}</div>` : ''}
+                <footer class="mm-person-foot memoria__mem-actions">
+                    <i class="fa-solid ${c.locked ? 'fa-lock' : 'fa-lock-open'} memoria-char-lock${c.locked ? ' is-on' : ''}" title="${c.locked ? '프로필 고정 해제 — 사서가 다시 갱신합니다' : '프로필 고정 — 사서가 이 카드의 프로필을 바꾸지 못하게 잠급니다 (관계는 계속 갱신)'}"></i>
+                    <i class="fa-solid ${c.disabled ? 'fa-eye-slash' : 'fa-eye'} memoria-char-toggle" title="${c.disabled ? '주입에 포함' : '주입·기록에서 제외 (사서가 이 인물을 다시 등록하지 않음)'}"></i>
+                    <i class="fa-solid fa-code-merge memoria-char-merge" title="다른 카드를 이 카드로 병합"></i>
+                    <i class="fa-solid fa-pen memoria-char-edit" title="편집"></i>
+                    <i class="fa-solid fa-trash memoria-char-delete" title="삭제"></i>
+                </footer>
             </div>
         `));
     }
@@ -10509,7 +10509,7 @@ const rememberTies = (picked) => { try { const list = [...picked, ...tieRecent()
 async function editTieDialog(b) {
     const r = Ties.tieOf(b), draft = { word: r.word || '', types: (r.types || []).map(x => ({ ...x })) };
     const st = { query: '', ownGroup: 'other', full: false };
-    const $dlg = $(`<div class="mm-yn-picker">
+    const $dlg = $(`<div class="mm-yn-picker" id="memoria_tie_picker">
         <h3 class="mm-yn-title"></h3>
         <label class="mm-yn-field"><span class="mm-yn-label">인연 한마디</span><input type="text" class="text_pole mm-yn-word" placeholder="예: 말없이 곁을 지킴" autocomplete="off">
             <small class="mm-yn-hint">이 사이를 열두 자 안쪽으로. 직접 고친 인연은 사서가 바꾸지 않아요 — 한마디와 갈래를 모두 비우면 다시 사서에게 맡겨요.</small></label>
