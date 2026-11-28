@@ -42,7 +42,7 @@ import { NARRATOR_PERSPECTIVE, isSharedPerspective, hasChatPerspective, resolveP
 import { showArchiveLibrary } from './library-ui.mjs';
 import * as Ties from './ties-engine.mjs';
 import { yeonHtml, yeonView, tiePickerHtml, typeChipsHtml, typeName, clampZoom } from './yeon-view.mjs';
-import { withDeadline, parsePhraseList, stripPhrases, hasPhrase, findRepeatedPhrases, wordStem, commonGrams, pickBundleValues, resolveBundleName, switchBundle, saveBundle, deleteBundle, renameBundle, exportBundle, parseBundleFile, diffStableEntries, shouldRefreeze, createActivityLog, findRivalExtensions, splitClosedLine, sleepStaleThreads, pickPledges, stripOpenLines, THREAD_KINDS, recallCooldown, pushRecallHistory, isEndedValue, ungroundedFigures, roughTokens, noteUsage, usageTotals, groundedIn, soundsHedged, noteThreadSightings, threadTouched, rareQueryWords, findConflicts, looksRefused, looksBlocked, strayHidden, pickTranscript, transcriptTerms, crossScriptPairs, crossScriptSame, pickPledgesToCheck, ensembleLabel, firstOf, listOf, joinValue, clampScore, splitPair, jsonRepairVariants, normalizeRecordLabels, BOND_KINDS, bondKindOf, summaryGaps, spanWindows, TIC_TYPES, readTicPicks, keptMilestones, sameTrait, mergeTraits, startsWithFieldLabel, looksLikeAlias, looksLikeAge, storyOnly, endsMidSentence, mergeLoss, sameText, cardVoicesMany } from './craft-engine.mjs';
+import { withDeadline, parsePhraseList, stripPhrases, hasPhrase, findRepeatedPhrases, wordStem, looseStem, pickBundleValues, resolveBundleName, switchBundle, saveBundle, deleteBundle, renameBundle, exportBundle, parseBundleFile, diffStableEntries, shouldRefreeze, createActivityLog, findRivalExtensions, splitClosedLine, sleepStaleThreads, pickPledges, stripOpenLines, THREAD_KINDS, recallCooldown, pushRecallHistory, isEndedValue, ungroundedFigures, roughTokens, noteUsage, usageTotals, groundedIn, soundsHedged, noteThreadSightings, threadTouched, rareQueryWords, findConflicts, looksRefused, looksBlocked, strayHidden, pickTranscript, transcriptTerms, crossScriptPairs, crossScriptSame, pickPledgesToCheck, ensembleLabel, firstOf, listOf, joinValue, clampScore, splitPair, jsonRepairVariants, normalizeRecordLabels, BOND_KINDS, bondKindOf, summaryGaps, spanWindows, TIC_TYPES, readTicPicks, keptMilestones, sameTrait, mergeTraits, startsWithFieldLabel, looksLikeAlias, looksLikeAge, storyOnly, endsMidSentence, mergeLoss, sameText, cardVoicesMany } from './craft-engine.mjs';
 import { isOocText, looksOocReply, attributeQuote, addressTermsIn, tallyAddress, pickAddressLines, personNowLine } from './stage-engine.mjs';
 import { parseStoryDate, storyDatesOf, isIsoDate, trackerText, trackerLineOf, pickBeats, beatLines, veilLeaks } from './calendar-engine.mjs';
 import { peopleList, matchPerson, personPage, nameSuggestions, planMerge, pairKey, WIPE_KINDS, wipeCounts, NOW_ORDER, strayPeople, mentions } from './people-engine.mjs';
@@ -661,6 +661,9 @@ function getStore() {
         s.entityStates = keep;
         s.lexiconRev = 5;
     }
+    // 내장 벡터에 줄기 조각이 생겼다 (v2.17) — 저장된 기억 벡터를 한 번 다시 만든다 (모델 호출 없음)
+    if ((s.vecRev || 0) < 1 && s.memories.length) { rebuildLocalVectors(s); s.vecRev = 1; }
+    else if (!s.vecRev) s.vecRev = 1;
     return s;
 }
 
@@ -1954,6 +1957,9 @@ function tokenizeForEmbedding(text) {
     const words = lower.match(/[\p{L}\p{N}]+/gu) || [];
     for (const w of words) {
         out.push([`w:${w}`, 1.0]);
+        // 조사 · 어미를 뗀 줄기도 한 조각 더 — "그림은"과 "그림을", "보리는"과 "보리다"가 여기서 만난다 (낱말 그대로의 조각은 그대로)
+        const st = looseStem(w);
+        if (st !== w) out.push([`s:${st}`, 0.7]);
         if (w.length >= 3) {
             for (let i = 0; i <= w.length - 3; i++) {
                 out.push([`t:${w.slice(i, i + 3)}`, 0.32]);
@@ -2287,6 +2293,140 @@ function lexicalOverlap(queryTokens, text) {
     let hit = 0;
     for (const t of queryTokens) if (words.has(t) || stems.has(wordStem(t))) hit++;
     return hit / Math.sqrt(queryTokens.size * words.size);
+}
+
+/* ------------------------------------------------------------
+ * 회상의 낱말 축 — 맞은 낱말 · 글자 조각을 그 채팅에서 얼마나 드문지로 무게 매겨 견준다.
+ * "었다 · 에서 · 그녀"처럼 어디에나 있는 것은 무게가 저절로 0에 가깝고, "나침반 · 등대 열쇠"처럼 드문 말은 크게 친다.
+ * 목록을 박지 않으니 이야기마다, 말마다 맞는다. 서고 기억에 채팅 원문(최근 300개)을 더해 세므로 기억이 몇 개 없는 짧은 채팅도 첫 턴부터 맞다.
+ * ------------------------------------------------------------ */
+const lexCache = new WeakMap();
+const LEX_BACKGROUND = 300;
+/** 글 하나를 쪼갠 결과 — 기억은 id로, 대화는 메시지로 기억해 두고 글이 바뀐 것만 다시 쪼갠다 (긴 채팅에서 턴마다 전부 다시 세지 않게) */
+const lexDocCache = new Map();
+const lexMesCache = new WeakMap();
+function lexPieces(text) {
+    const raw = String(text || '').toLowerCase().match(/[\p{L}\p{N}]+/gu) || [];
+    return { words: stemSet(text), raw: new Set(raw), grams: toCharGrams(text), tris: wordTrigrams(text) };
+}
+
+/** 낱말 축의 낱말들 — 낱말 그대로와, 끝의 조사 · '-야 · -이랑'을 뗀 꼴을 함께 넣는다 ("봄에"와 "봄이"가 "봄"에서 만난다).
+ * 한 글자로 남는 엉뚱한 꼴("아이" → "아")이 생겨도 흔하면 무게가 0에 가까워 해가 없다 */
+function stemSet(text) {
+    const out = new Set();
+    for (const w of (String(text || '').toLowerCase().match(/[\p{L}\p{N}]+/gu) || [])) {
+        out.add(w);
+        const st = looseStem(w);
+        if (st !== w) out.add(st);
+    }
+    return out;
+}
+
+function lexStats(store, active) {
+    const sig = `${getCurrentChatId()}|${Math.floor(chat.length / 8)}|${active.length}|${active.reduce((n, m) => n + String(m.summary || '').length + (m.entities || []).length, 0)}`;
+    const old = lexCache.get(store);
+    if (old?.sig === sig) return old;
+    const wordDf = new Map(), gramDf = new Map(), triDf = new Map(), docs = new Map();
+    const count = (d) => {
+        for (const w of d.words) wordDf.set(w, (wordDf.get(w) || 0) + 1);
+        for (const g of d.grams) gramDf.set(g, (gramDf.get(g) || 0) + 1);
+        for (const t of d.tris) triDf.set(t, (triDf.get(t) || 0) + 1);
+    };
+    const alive = new Set();
+    for (const m of active) {
+        const text = memoryIndexText(m);
+        let d = lexDocCache.get(m.id);
+        if (!d || d.text !== text) { d = { text, ...lexPieces(text) }; lexDocCache.set(m.id, d); }
+        alive.add(m.id);
+        docs.set(m.id, d);
+        count(d);
+    }
+    if (lexDocCache.size > alive.size * 2 + 200) for (const id of lexDocCache.keys()) if (!alive.has(id)) lexDocCache.delete(id);
+    let bg = 0;
+    for (let i = chat.length - 1; i >= 0 && bg < LEX_BACKGROUND; i--) {
+        const c = chat[i];
+        if (!c?.mes || isSideMessage(c)) continue;
+        let d = lexMesCache.get(c);
+        if (!d || d.src !== c.mes) {
+            const text = visibleProse(c.mes);
+            d = { src: c.mes, empty: !text.trim(), ...lexPieces(text) };
+            lexMesCache.set(c, d);
+        }
+        if (d.empty) continue;
+        count(d);
+        bg++;
+    }
+    const n = active.length + bg;
+    const idfOf = new Map();
+    const idf = (df) => { let v = idfOf.get(df); if (v === undefined) { v = Math.log((n + 1) / (df + 0.5)); idfOf.set(df, v); } return v; };
+    const norm = (set, df) => { let s2 = 0; for (const t of set) { const w = idf(df.get(t) || 0); s2 += w * w; } return Math.sqrt(s2) || 1; };
+    const norms = new Map();
+    for (const [id, d] of docs) norms.set(id, { wn: norm(d.words, wordDf), gn: norm(d.grams, gramDf) });
+    const out = { sig, n, wordDf, gramDf, triDf, docs, norms, idf };
+    lexCache.set(store, out);
+    return out;
+}
+
+/** 무게 매긴 겹침 (0~1). 채팅 어디에도 없는 질문 낱말은 셈에서 뺀다 (맞을 데가 없는 낱말이 모든 점수를 고르게 깎지 않게) */
+function weightedOverlap(q, docSet, df, idf, docNorm) {
+    let num = 0, qq = 0;
+    for (const t of q) {
+        const f = df.get(t) || 0;
+        if (!f) continue;
+        const w = idf(f);
+        qq += w * w;
+        if (docSet.has(t)) num += w * w;
+    }
+    return qq ? num / (Math.sqrt(qq) * docNorm) : 0;
+}
+/** 무게 없이 센 예전 겹침 (낱말 일치 · 두 글자 조각 일치) — 쪼개 둔 것으로 */
+function plainOverlap(qRaw, qGrams, d) {
+    let w = 0, g = 0;
+    if (qRaw.size && d.raw.size) { let hit = 0; for (const t of qRaw) if (d.raw.has(t) || d.words.has(wordStem(t))) hit++; w = hit / Math.sqrt(qRaw.size * d.raw.size); }
+    if (qGrams.size >= 6 && d.grams.size >= 6) { let hit = 0; for (const t of qGrams) if (d.grams.has(t)) hit++; g = (hit / Math.sqrt(qGrams.size * d.grams.size)) * 0.9; }
+    return Math.max(w, g);
+}
+
+/**
+ * 낱말 축 점수. 드문 말이 맞으면 크게, 흔한 말만 겹치면 예전 셈의 절반까지만 —
+ * 다른 단서가 없을 때 주인공 이름 정도로도 후보에는 남는다. q: { stems, grams, raw }, t: 짧은 입력일 때 장면 끝 (같은 꼴, 없으면 null)
+ */
+function lexScore(L, id, q, t) {
+    const d = L.docs.get(id), nm = L.norms.get(id);
+    if (!d) return 0;
+    const weighted = (x) => Math.max(weightedOverlap(x.stems, d.words, L.wordDf, L.idf, nm.wn), x.grams.size >= 2 ? weightedOverlap(x.grams, d.grams, L.gramDf, L.idf, nm.gn) * 0.9 : 0);
+    const one = (x) => Math.max(weighted(x), plainOverlap(x.raw, x.grams, d) * 0.5);
+    return Math.max(one(q), t ? one(t) * 0.8 : 0);
+}
+
+/** 낱말 안의 세 글자 조각들 (내장 문장 벡터의 조각과 같은 꼴) */
+function wordTrigrams(text) {
+    const out = new Set();
+    for (const w of (String(text || '').toLowerCase().match(/[\p{L}\p{N}]+/gu) || [])) for (let i = 0; i <= w.length - 3; i++) out.add(w.slice(i, i + 3));
+    return out;
+}
+
+/**
+ * 질문 쪽 내장 문장 벡터 — embedText 와 같은 조각을 쓰되, 낱말 · 세 글자 조각마다 그 채팅에서 드문 정도(0~1)를 곱한다.
+ * 모든 기억 · 대사에 흔한 것은 0에 가깝고, 몇 군데에만 나오는 것은 1에 가깝다. 기억 쪽 벡터는 그대로라 다시 색인할 것이 없다.
+ */
+function embedQuery(text, L) {
+    if (!L || L.n < 4) return embedText(text);
+    const top = Math.log((L.n + 1) / 0.5);
+    const rare = (df) => (df ? Math.max(0.05, L.idf(df) / top) : 1);
+    const v = new Float32Array(EMB_DIM);
+    for (const [tok, w0] of tokenizeForEmbedding(text)) {
+        const kind = tok[0], body = tok.slice(2);
+        const w = kind === 'w' || kind === 's' ? w0 * rare(L.wordDf.get(body) || 0) : kind === 't' ? w0 * rare(L.triDf.get(body) || 0) : w0;
+        const h1 = getStringHash(tok) >>> 0;
+        const h2 = getStringHash(tok, 1337) >>> 0;
+        v[h1 % EMB_DIM] += ((h2 & 1) ? 1 : -1) * w;
+    }
+    let norm = 0;
+    for (let i = 0; i < EMB_DIM; i++) norm += v[i] * v[i];
+    norm = Math.sqrt(norm) || 1;
+    for (let i = 0; i < EMB_DIM; i++) v[i] /= norm;
+    return v;
 }
 
 /** 질의를 2글자 조각 집합으로 (charGramOverlap용 — 회상 한 번에 한 번만 만든다) */
@@ -6505,10 +6645,13 @@ async function retrieveMemories(queryText, recentUserTexts, sceneText = '') {
     const trace = new Map();
     const eligible = [];
 
-    const queryVec = embedText(queryText);
+    // 내장 문장 벡터도 질문 쪽은 그 채팅에서 드문 정도로 무게를 단다 — "받은 · 했던"이 "나침반"과 같은 무게로 맞던 것
+    const lexW = lexStats(store, active);
+    const queryVec = embedQuery(queryText, lexW);
     const auxTexts = (recentUserTexts || []).slice(0, settings.multiQueryRecent);
-    const auxVecs = auxTexts.map(embedText);
+    const auxVecs = auxTexts.map(t => embedQuery(t, lexW));
     // 장면 연속 보정: 유저 입력이 짧아도 직전 본문이 담고 있는 장면으로 회상을 이어간다
+    // (장면 글은 흐름을 잇는 몫이라 무게를 매기지 않는다 — 늘 나오는 이름 · 말까지 빠지면 입력 없이 이어 받을 때 회상이 비었다)
     const sceneVec = String(sceneText || '').trim() ? embedText(String(sceneText).slice(0, 2400)) : null;
     const queryTokens = new Set((String(queryText).toLowerCase().match(/[\p{L}\p{N}]+/gu) || []));
     const queryGrams = toCharGrams(queryText);
@@ -6576,13 +6719,11 @@ async function retrieveMemories(queryText, recentUserTexts, sceneText = '') {
 
     // 드문 낱말: 입력의 낱말 가운데 서고 전체에서 몇 기억에만 나오는 것 — 그 기억을 가리키는 강한 단서
     const indexLower = new Map(active.map(m => [m.id, memoryIndexText(m).toLowerCase()]));
-    const rareWords = rareQueryWords(queryText, [...indexLower.values()]);
-    // 이 서고에서 너무 흔한 조각(어미 · 조사)은 글자 조각 축에서 뺀다 — 아무 기억에나 조금씩 닿아 엉뚱한 옛 장면을 끌어올렸다
-    if (active.length >= 30) {
-        const squashed = [...indexLower.values()].map(t => t.replace(/[^\p{L}\p{N}]+/gu, ''));
-        for (const g of commonGrams(queryGrams, squashed)) queryGrams.delete(g);
-        if (tailGrams) for (const g of commonGrams(tailGrams, squashed)) tailGrams.delete(g);
-    }
+    // 드문 낱말: 기억 글에서도, 대화 원문에서도 드물어야 한다 — 기억 한 곳에만 적힌 "받은 · 했던"이 직접 가리킨 것으로 잡혀 엉뚱한 기억을 밀어 올렸다
+    const rareWords = rareQueryWords(queryText, [...indexLower.values()]).filter(r => (lexW.wordDf.get(r.word) || 0) <= Math.max(2, lexW.n * 0.02));
+    // 낱말 축의 무게: 그 채팅에서 드문 낱말 · 조각일수록 무겁다 (서고 기억과 채팅 원문으로 센다)
+    const qLex = { stems: stemSet(queryText), grams: queryGrams, raw: queryTokens };
+    const tLex = tailTokens ? { stems: stemSet(tail), grams: tailGrams, raw: tailTokens } : null;
 
     // 이 채팅에서 회상하지 않을 말 — 그 말이 든 기억은 후보에서 뺀다 (지우지 않는다. 고정한 기억은 사용자의 뜻이라 그대로)
     const mute = (store.recallMute || []).map(w => String(w).toLowerCase()).filter(w => w.length >= 2);
@@ -6647,9 +6788,7 @@ async function retrieveMemories(queryText, recentUserTexts, sceneText = '') {
         }
         // 어휘 축: 단어 일치와 글자 조각 일치 중 더 강하게 닿는 쪽 —
         // 한국어는 조사·어미 변형 때문에 단어 축만으로는 절반이 샌다
-        const idxText = memoryIndexText(m);
-        const lex = Math.max(lexicalOverlap(queryTokens, idxText), charGramOverlap(queryGrams, idxText) * 0.9,
-            tailTokens ? Math.max(lexicalOverlap(tailTokens, idxText), charGramOverlap(tailGrams, idxText) * 0.9) * 0.8 : 0);
+        const lex = lexScore(lexW, m.id, qLex, tLex);
         const matchedEntities = (m.entities || []).filter(e => queryLower.includes(String(e).toLowerCase()));
         const entityHit = matchedEntities.length > 0;
         // 단서 가림: 이미 맞은 개체 이름에 통째로 포함되는 단서는 같은 매치의 중복 가산이므로 제외

@@ -119,21 +119,17 @@ export function wordStem(word) {
     return w;
 }
 
-/**
- * 이 서고에서 너무 흔해 아무것도 가리키지 못하는 두 글자 조각 (기억의 share 넘게에 들어 있는 것).
- * "었다" · "했다" · "에서" 같은 어미 · 조사 조각이 질문과 기억을 엉뚱하게 이어 붙이던 것 — 목록을 박아 두지 않고 서고에서 센다 (말이 달라도 맞는다).
- * grams: 질문의 조각, docs: 띄어쓰기 · 문장부호를 지운 기억 글. 기억이 minDocs 개보다 적으면 거르지 않는다.
- */
-export function commonGrams(grams, docs, { share = 0.2, minDocs = 30 } = {}) {
-    const out = new Set();
-    const n = docs.length;
-    if (n < minDocs) return out;
-    const limit = Math.ceil(n * share);
-    for (const g of grams) {
-        let df = 0;
-        for (const d of docs) if (d.includes(g) && ++df >= limit) { out.add(g); break; }
+/** 회상 낱말 축용 느슨한 줄기 — 조사와 체언에 붙는 '-야 · -이야 · -이랑 · -하고'를 한 글자가 남을 때까지 뗀다 (낱말 그대로와 함께 쓴다) */
+const LOOSE_TAILS = ['이었지', '이었어', '이에요', '에게서', '한테서', '으로부터', '이라고', '이랑', '하고', '이야', '예요', '였지', '였어', '이다', ...KO_PARTICLES, '랑', '야', '다'];
+export function looseStem(word) {
+    let w = String(word || '').toLowerCase();
+    if (!/^[가-힣]{2,}$/.test(w)) return w;
+    for (let guard = 0; guard < 3; guard++) {
+        const p = LOOSE_TAILS.find(x => w.endsWith(x) && [...w].length - x.length >= 1);
+        if (!p) break;
+        w = w.slice(0, -p.length);
     }
-    return out;
+    return w;
 }
 
 // 표현의 처음이나 끝에 오면 안 되는 말 — 그 자체로는 아무 버릇도 아닌 대명사·접속어·흔한 서술어
