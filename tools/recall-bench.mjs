@@ -3,7 +3,7 @@
 //   node tools/recall-bench.mjs <다른 폴더>  다른 판(예: git worktree)과 견줄 때
 //   node tools/recall-bench.mjs . -v        물음마다 1~3등까지
 // 한국어 세 묶음: A는 회상을 다듬으며 본 물음, B는 다듬는 데 쓰지 않은 물음, C는 바깥에서 만든 물음(유형별 넷씩).
-// 다른 말 세 묶음: D 영어 · E 일본어 · F 중국어 (같은 이야기 틀, 유형별 셋씩). 모두 직전 장면 없이 / 함께 각각 잰다.
+// 다른 말 세 묶음: D 영어 · E 일본어 · F 중국어 (같은 이야기 틀, 유형별 셋씩), 바깥에서 만든 D2 · E2 · F2 (유형별 넷씩). 모두 직전 장면 없이 / 함께 각각 잰다.
 import { fileURLToPath } from 'node:url';
 import { resolve } from 'node:path';
 const root = resolve(process.argv[2] && !process.argv[2].startsWith('-') ? process.argv[2] : fileURLToPath(new URL('..', import.meta.url)));
@@ -223,4 +223,72 @@ await langSet('F (중국어)', {
         ['芳芳把戒指藏在哪里了？', 'hide', '별명·호칭'], ['师兄借给我的是什么？', 'umbrella', '별명·호칭'], ['小雪在药柜里放了什么？', 'herb', '별명·호칭'],
     ],
     scene: '港口的风很冷。王芳靠在栏杆上看着船，旅人站在她身边。',
+});
+
+// 바깥에서 만든 다국어 묶음 — 회상을 다듬는 데 쓰지 않는다 (유형별 넷: 그대로 · 활용 · 같은 뜻 · 별명/호칭)
+await langSet('D2 (영어, 바깥에서 만든 물음)', {
+    chars: [{ id: 'c1', name: 'Clara', aliases: ['Clary'] }, { id: 'c2', name: 'Gideon', aliases: [] }, { id: 'c3', name: 'Nora', aliases: ['Red'] }, { id: 'c4', name: 'Bram', aliases: [] }],
+    bonds: [{ id: 'b1', from: 'Traveler', to: 'Gideon', log: [{ turn: 2, stage: 'stern captain', calls: 'Cap' }], disabled: false }, { id: 'b2', from: 'Traveler', to: 'Nora', log: [{ turn: 3, stage: 'protective sister', calls: 'Sis' }], disabled: false }],
+    facts: [
+        ['locket', 'Clara wears a brass locket shaped like a crescent moon', ['Clara'], 4], ['map2', 'Gideon keeps a rolled sea map inside his coat pocket', ['Gideon'], 8],
+        ['scar2', 'Bram got a burn scar on his shoulder during the mill fire', ['Bram'], 12], ['owl', 'Nora feeds a snowy owl on the bell tower roof', ['Nora'], 16],
+        ['forge', 'Bram forged a silver dagger for the winter expedition', ['Bram'], 20], ['oath2', 'Gideon swore to protect the northern gate until dawn', ['Gideon'], 24],
+        ['steal2', "A pickpocket stole Clara's brass compass at the square", ['Clara'], 28], ['teach', 'Nora taught the traveler how to brew bitter willow tea', ['Nora'], 32],
+        ['apology2', 'Bram finally apologized to Clara after the harsh quarrel', ['Bram', 'Clara'], 36], ['fear2', 'Clara is terrified of deep underground caves', ['Clara'], 40],
+        ['poison2', 'Gideon was struck by a venom dart in the canyon', ['Gideon'], 44], ['weep', 'Nora sat by the stone bridge weeping silently in the rain', ['Nora'], 48],
+        ['diary2', 'Clara wrote the vault code inside a red leather journal', ['Clara'], 52], ['horse2', 'Gideon rides a black mare named Cinder across the ridge', ['Gideon'], 56],
+        ['debt2', 'Nora still owes the tavern keeper forty silver coins', ['Nora'], 60], ['violin', 'Nora plays a cracked wooden violin whenever snow falls', ['Nora'], 64],
+    ],
+    filler: (t) => `Clara and the traveler walked along the stone wall chatting about the ${t}`, fillTopics: ['clouds', 'lanterns', 'autumn', 'bread', 'river'],
+    qs: [
+        ['What locket does Clara wear?', 'locket', '그대로'], ['Where does Gideon keep the sea map?', 'map2', '그대로'], ['How did Bram get the burn scar?', 'scar2', '그대로'], ['What bird does Nora feed on the bell tower?', 'owl', '그대로'],
+        ['What weapon was Bram forging for the expedition?', 'forge', '활용'], ['What did Gideon swear to guard?', 'oath2', '활용'], ["Who was stealing Clara's compass at the square?", 'steal2', '활용'], ['What tea did Nora teach me to brew?', 'teach', '활용'],
+        ['Did Bram ask Clara to forgive him?', 'apology2', '같은 뜻'], ['Why is Clara afraid of underground caves?', 'fear2', '같은 뜻'], ['When was Gideon poisoned in the canyon?', 'poison2', '같은 뜻'], ['Why was Nora crying on the bridge?', 'weep', '같은 뜻'],
+        ['Where did Clary write the vault code?', 'diary2', '별명·호칭'], ["What is the name of Cap's black mare?", 'horse2', '별명·호칭'], ['How much does Red owe the tavern keeper?', 'debt2', '별명·호칭'], ['What instrument does Sis play when it snows?', 'violin', '별명·호칭'],
+    ],
+    scene: 'Cold mist drifted over the courtyard. Clara adjusted her scarf along the stone wall while the traveler walked quietly beside her.',
+});
+await langSet('E2 (일본어, 바깥에서 만든 물음)', {
+    chars: [{ id: 'c1', name: '詩織', aliases: ['しおり'] }, { id: 'c2', name: '拓海', aliases: [] }, { id: 'c3', name: '葵', aliases: [] }, { id: 'c4', name: '蒼真', aliases: ['ソウマ'] }],
+    bonds: [{ id: 'b1', from: '旅人', to: '拓海', log: [{ turn: 2, stage: '尊敬する師匠', calls: '先生' }], disabled: false }, { id: 'b2', from: '旅人', to: '葵', log: [{ turn: 3, stage: '頼れる姉貴分', calls: '姉さん' }], disabled: false }],
+    facts: [
+        ['watch', '詩織は祖父の形見の懐中時計を大切にしている', ['詩織'], 4], ['violin2', '拓海は古い木造の書斎で毎晩バイオリンを弾く', ['拓海'], 8],
+        ['scar2', '葵の左肩には幼い頃の火傷の跡が残っている', ['葵'], 12], ['cat2', '蒼真は黒猫のクロに毎朝ミルクをあげている', ['蒼真'], 16],
+        ['pie', '詩織は祭りの前夜に胡桃のパイを焼いた', ['詩織'], 20], ['branch', '拓海は嵐の夜に折れた松の枝を片付けた', ['拓海'], 24],
+        ['parcel2', '蒼真が王都からの小包を旅人に届けた', ['蒼真'], 28], ['oath2', '葵は初雪の日に岬の灯台で会おうと約束した', ['葵'], 32],
+        ['apology2', '蒼真は頭を下げて詩織に謝罪した', ['蒼真', '詩織'], 36], ['betray2', '門番が密告して旅人たちの居場所を裏切った', ['拓海'], 40],
+        ['heal2', '葵は負傷した蒼真の腕に包帯を巻いて治療した', ['葵', '蒼真'], 44], ['prison2', '拓海は冤罪で城の地下牢に閉じ込められた', ['拓海'], 48],
+        ['key2', '詩織は温室の合鍵を本棚の裏に隠した', ['詩織'], 52], ['map2', '拓海は古い海図を机の引き出しにしまっている', ['拓海'], 56],
+        ['tea2', '葵は苦い抹茶より甘い梅酒を好む', ['葵'], 60], ['sword2', '蒼真は夜明けに裏庭で木剣の稽古をする', ['蒼真'], 64],
+    ],
+    filler: (t) => `詩織と旅人は石畳の通りを歩きながら${t}の話をした`, fillTopics: ['雨音', '季節', '雲', '夕焼け', '鐘の音'],
+    qs: [
+        ['詩織が大切にしている懐中時計は誰の形見？', 'watch', '그대로'], ['拓海は書斎で何を弾くの？', 'violin2', '그대로'], ['葵の左肩にある跡は何？', 'scar2', '그대로'], ['蒼真が黒猫にあげているものは？', 'cat2', '그대로'],
+        ['詩織が祭りの前に焼くパイは何のパイ？', 'pie', '활용'], ['拓海が片付けた枝は嵐でどうなったの？', 'branch', '활용'], ['蒼真が王都から届けてくれたものは？', 'parcel2', '활용'], ['葵と初雪の日にした約束って覚えてる？', 'oath2', '활용'],
+        ['蒼真は詩織に許しを乞うたの？', 'apology2', '같은 뜻'], ['旅人の居場所を敵に売った裏切り者は誰？', 'betray2', '같은 뜻'], ['蒼真の怪我の手当をしたのは誰？', 'heal2', '같은 뜻'], ['拓海が監禁されていたのはどこ？', 'prison2', '같은 뜻'],
+        ['しおりが温室の鍵を隠した場所は？', 'key2', '별명·호칭'], ['先生が引き出しに入れている海図は？', 'map2', '별명·호칭'], ['姉さんが好きな飲み物は何？', 'tea2', '별명·호칭'], ['ソウマは朝に裏庭で何の稽古をしてる？', 'sword2', '별명·호칭'],
+    ],
+    scene: '冷たい雨が石畳を濡らしていた。詩織は傘を傾け、旅人と並んで静かに通りを歩いていた。',
+});
+await langSet('F2 (중국어, 바깥에서 만든 물음)', {
+    chars: [{ id: 'c1', name: '苏晴', aliases: ['晴晴'] }, { id: 'c2', name: '周远', aliases: [] }, { id: 'c3', name: '沈墨', aliases: ['阿墨'] }, { id: 'c4', name: '顾安', aliases: [] }],
+    bonds: [{ id: 'b1', from: '旅人', to: '周远', log: [{ turn: 2, stage: '敬重的师傅', calls: '师傅' }], disabled: false }, { id: 'b2', from: '旅人', to: '顾安', log: [{ turn: 3, stage: '可靠的上司', calls: '队长' }], disabled: false }],
+    facts: [
+        ['watch', '苏晴一直戴着外婆留下的银怀表', ['苏晴'], 4], ['flute', '周远每天黄昏都会在屋顶吹竹笛', ['周远'], 8],
+        ['scar2', '顾安的右臂上有一道旧箭伤', ['顾安'], 12], ['dog', '沈墨在院子里养了一只叫阿黄的土狗', ['沈墨'], 16],
+        ['pie', '苏晴在节日前夜亲手烤了核桃派', ['苏晴'], 20], ['clock', '周远通宵修好了大厅里停摆的座钟', ['周远'], 24],
+        ['bury', '沈墨把铜匣子埋在了老槐树下面', ['沈墨'], 28], ['cloak', '顾安在大雪天把红色斗篷借给了旅人', ['顾安'], 32],
+        ['apology2', '沈墨低着头向苏晴正式道歉了', ['沈墨', '苏晴'], 36], ['heal2', '苏晴给受伤的顾安缠上了干净的绷带', ['苏晴', '顾安'], 40],
+        ['prison2', '周远因为冤案被关进了城南地牢', ['周远'], 44], ['steal2', '扒手在集市巷口偷走了沈墨的钱袋', ['沈墨'], 48],
+        ['key2', '苏晴把地窖钥匙藏进了花瓶底下', ['苏晴'], 52], ['sword2', '周远黎明时分总在后院练木剑', ['周远'], 56],
+        ['tea2', '沈墨最讨厌苦茶，只喝加蜜的桂花酿', ['沈墨'], 60], ['letter2', '顾安在桌上留了一封给旅人的密信', ['顾安'], 64],
+    ],
+    filler: (t) => `苏晴和旅人沿着青石街散步，聊着${t}`, fillTopics: ['雨声', '季节', '晚霞', '钟声', '落叶'],
+    qs: [
+        ['苏晴戴的怀表是谁留下的？', 'watch', '그대로'], ['周远黄昏在屋顶吹什么？', 'flute', '그대로'], ['顾安右臂上的伤是怎么来的？', 'scar2', '그대로'], ['沈墨院子里养的狗叫什么？', 'dog', '그대로'],
+        ['苏晴节日前夜烤的是什么派？', 'pie', '활용'], ['周远把大厅的座钟修好了吗？', 'clock', '활용'], ['沈墨在槐树底下埋着什么东西？', 'bury', '활용'], ['下雪那天顾安借了我什么？', 'cloak', '활용'],
+        ['沈墨请求苏晴原谅了吗？', 'apology2', '같은 뜻'], ['是谁帮顾安治疗臂伤的？', 'heal2', '같은 뜻'], ['周远为什么进了监狱？', 'prison2', '같은 뜻'], ['小偷在巷口拿走了沈墨什么？', 'steal2', '같은 뜻'],
+        ['晴晴把地窖钥匙放哪儿了？', 'key2', '별명·호칭'], ['师傅早上在后院练什么？', 'sword2', '별명·호칭'], ['阿墨喜欢喝什么酒？', 'tea2', '별명·호칭'], ['队长在桌上留了什么信？', 'letter2', '별명·호칭'],
+    ],
+    scene: '细雨打湿了青石街。苏晴撑着油纸伞，和旅人并肩安静地走着。',
 });

@@ -42,7 +42,7 @@ import { NARRATOR_PERSPECTIVE, isSharedPerspective, hasChatPerspective, resolveP
 import { showArchiveLibrary } from './library-ui.mjs';
 import * as Ties from './ties-engine.mjs';
 import { yeonHtml, yeonView, tiePickerHtml, typeChipsHtml, typeName, clampZoom } from './yeon-view.mjs';
-import { withDeadline, parsePhraseList, stripPhrases, hasPhrase, findRepeatedPhrases, wordStem, looseStem, pickBundleValues, resolveBundleName, switchBundle, saveBundle, deleteBundle, renameBundle, exportBundle, parseBundleFile, diffStableEntries, shouldRefreeze, createActivityLog, findRivalExtensions, splitClosedLine, sleepStaleThreads, pickPledges, stripOpenLines, THREAD_KINDS, recallCooldown, pushRecallHistory, isEndedValue, ungroundedFigures, roughTokens, noteUsage, usageTotals, groundedIn, soundsHedged, noteThreadSightings, threadTouched, rareQueryWords, findConflicts, looksRefused, looksBlocked, strayHidden, pickTranscript, transcriptTerms, crossScriptPairs, crossScriptSame, pickPledgesToCheck, ensembleLabel, firstOf, listOf, joinValue, clampScore, splitPair, jsonRepairVariants, normalizeRecordLabels, BOND_KINDS, bondKindOf, summaryGaps, spanWindows, TIC_TYPES, readTicPicks, keptMilestones, sameTrait, mergeTraits, startsWithFieldLabel, looksLikeAlias, looksLikeAge, storyOnly, endsMidSentence, mergeLoss, sameText, cardVoicesMany, contentWords, verbStems, conceptTags } from './craft-engine.mjs';
+import { withDeadline, parsePhraseList, stripPhrases, hasPhrase, findRepeatedPhrases, wordStem, looseStem, pickBundleValues, resolveBundleName, switchBundle, saveBundle, deleteBundle, renameBundle, exportBundle, parseBundleFile, diffStableEntries, shouldRefreeze, createActivityLog, findRivalExtensions, splitClosedLine, sleepStaleThreads, pickPledges, stripOpenLines, THREAD_KINDS, recallCooldown, pushRecallHistory, isEndedValue, ungroundedFigures, roughTokens, noteUsage, usageTotals, groundedIn, soundsHedged, noteThreadSightings, threadTouched, rareQueryWords, findConflicts, looksRefused, looksBlocked, strayHidden, pickTranscript, transcriptTerms, crossScriptPairs, crossScriptSame, pickPledgesToCheck, ensembleLabel, firstOf, listOf, joinValue, clampScore, splitPair, jsonRepairVariants, normalizeRecordLabels, BOND_KINDS, bondKindOf, summaryGaps, spanWindows, TIC_TYPES, readTicPicks, keptMilestones, sameTrait, mergeTraits, startsWithFieldLabel, looksLikeAlias, looksLikeAge, storyOnly, endsMidSentence, mergeLoss, sameText, cardVoicesMany, contentWords, verbStems, conceptTags, wordsOf, jaStems, cjkStop, enStems, enStop } from './craft-engine.mjs';
 import { isOocText, looksOocReply, attributeQuote, addressTermsIn, tallyAddress, pickAddressLines, personNowLine } from './stage-engine.mjs';
 import { parseStoryDate, storyDatesOf, isIsoDate, trackerText, trackerLineOf, pickBeats, beatLines, veilLeaks } from './calendar-engine.mjs';
 import { peopleList, matchPerson, personPage, nameSuggestions, planMerge, pairKey, WIPE_KINDS, wipeCounts, NOW_ORDER, strayPeople, mentions } from './people-engine.mjs';
@@ -293,10 +293,11 @@ const PAST_DEFAULT_PROMPT_HASHES = {
 
 const LANG_DIRECTIVES = {
     auto: 'LANGUAGE: Write the output in the same language as the chat.',
-    ko: 'LANGUAGE (MANDATORY): Write ALL output in Korean (한국어). Keep quoted dialogue in its original language.',
-    en: 'LANGUAGE (MANDATORY): Write ALL output in English. Translate everything, including dialogue. NAMES ARE NOT TRANSLATED: every proper name — people, places, factions — stays in the exact spelling already on file, in its original script. Never romanize or transliterate a name.',
-    ja: 'LANGUAGE (MANDATORY): Write ALL output in Japanese (日本語). Keep quoted dialogue in its original language. NAMES ARE NOT TRANSLATED: every proper name stays in the exact spelling already on file, in its original script.',
-    hybrid: 'LANGUAGE (MANDATORY, HYBRID MODE): Write narrative/summary text in English, but keep ALL quoted dialogue verbatim in its ORIGINAL language — never translate quotes. NAMES ARE NOT TRANSLATED EITHER: every proper name — people, places, factions — stays in the exact spelling the story and the cast list use, in its original script. Romanizing a name splits one character into two records that then drift apart; the English is for sentences, never for names.',
+    ko: 'LANGUAGE (MANDATORY): Write ALL output in Korean (한국어). Quoted dialogue ("quote", "line") and the "said" snippets stay copied character for character in their original language — they are checked against the source text, and a translated one is thrown away.',
+    en: 'LANGUAGE (MANDATORY): Write ALL output in English. Quoted dialogue ("quote", "line") and the "said" snippets stay copied character for character in their original language — they are checked against the source text, and a translated one is thrown away. NAMES ARE NOT TRANSLATED: every proper name — people, places, factions — stays in the exact spelling already on file, in its original script. Never romanize or transliterate a name.',
+    ja: 'LANGUAGE (MANDATORY): Write ALL output in Japanese (日本語). Quoted dialogue ("quote", "line") and the "said" snippets stay copied character for character in their original language — they are checked against the source text, and a translated one is thrown away. NAMES ARE NOT TRANSLATED: every proper name stays in the exact spelling already on file, in its original script.',
+    zh: 'LANGUAGE (MANDATORY): Write ALL output in Chinese (中文), in the same script as the chat (Simplified or Traditional). Quoted dialogue ("quote", "line") and the "said" snippets stay copied character for character in their original language — they are checked against the source text, and a translated one is thrown away. NAMES ARE NOT TRANSLATED: every proper name stays in the exact spelling already on file, in its original script.',
+    hybrid: 'LANGUAGE (MANDATORY, HYBRID MODE): Write narrative/summary text in English, but keep ALL quoted dialogue and the "said" snippets verbatim in their ORIGINAL language — never translate them. NAMES ARE NOT TRANSLATED EITHER: every proper name — people, places, factions — stays in the exact spelling the story and the cast list use, in its original script. Romanizing a name splits one character into two records that then drift apart; the English is for sentences, never for names.',
 };
 
 /* ============================================================
@@ -330,7 +331,7 @@ const DEFAULT_SETTINGS = Object.freeze({
     supervisorEnabled: false,
     authorizeCharPrivate: true,
     defaultPerspective: null, // 첫 실제 채팅의 기존 선택을 한 번 이어받은 뒤 계정 공통값으로 유지
-    summaryLanguage: 'auto',  // auto | ko | en | ja | hybrid
+    summaryLanguage: 'auto',  // auto | ko | en | ja | zh | hybrid
     autoHide: false,          // 요약이 커버한 옛 메시지를 채팅에서 숨겨 토큰 절약
     preserveRecent: 6,        // 자동 숨김 시 항상 남길 최근 메시지 수 (아래 단계와 상관없이 이만큼은 늘 보인다)
     keepTurns: 40,            // 자동 숨김 — 최근 답변은 늘 이만큼 원문으로 보이게 두고,
@@ -500,7 +501,7 @@ function languageDirective() {
  */
 function languageTail() {
     const lang = getSettings().summaryLanguage;
-    return lang && lang !== 'auto' && LANG_DIRECTIVES[lang] ? `\n\n(${LANG_DIRECTIVES[lang]} This holds even where the material above is in another language: translate it, never copy sentences over.)` : '';
+    return lang && lang !== 'auto' && LANG_DIRECTIVES[lang] ? `\n\n(${LANG_DIRECTIVES[lang]} This holds even where the material above is in another language: translate it, never copy sentences over — except the verbatim fields named above and proper names.)` : '';
 }
 
 /** 이벤트/아이템 추적이 켜졌을 때 사서 프롬프트에 덧붙일 지시 */
@@ -662,9 +663,9 @@ function getStore() {
         s.lexiconRev = 5;
     }
     // 내장 벡터에 줄기 조각이 생겼다 (v2.17) — 저장된 기억 벡터를 한 번 다시 만든다 (모델 호출 없음)
-    // v2: 용언 줄기가 내장 문장 벡터의 조각에 들어갔다 · v3: 줄기 규칙을 더했다 — 저장된 벡터를 한 번 다시 만든다 (모델 호출 없음)
-    if ((s.vecRev || 0) < 3 && s.memories.length) { rebuildLocalVectors(s); s.vecRev = 3; }
-    else if (!s.vecRev) s.vecRev = 3;
+    // v2: 용언 줄기가 내장 문장 벡터의 조각에 들어갔다 · v3: 줄기 규칙을 더했다 · v4: 일본어 · 중국어를 낱말로 쪼갠다 — 저장된 벡터를 한 번 다시 만든다 (모델 호출 없음)
+    if ((s.vecRev || 0) < 4 && s.memories.length) { rebuildLocalVectors(s); s.vecRev = 4; }
+    else if (!s.vecRev) s.vecRev = 4;
     return s;
 }
 
@@ -1508,7 +1509,7 @@ Reply with one JSON object and nothing else: {"judgments":[{"id":"A1","held":"ke
 const FORGOT_SCENES = 8;
 /** 한 번 훑는 데 드는 호출 수 (사실 뽑기 다섯 곳씩 · 답 다섯 개씩 · 견주기 한 번) */
 const forgotCalls = (n) => Math.ceil(n / 5) * 2 + 1;
-const forgotNoteLang = () => ({ ko: 'Korean', en: 'English', hybrid: 'English', ja: 'Japanese' }[getSettings().summaryLanguage] || 'the language of the scene');
+const forgotNoteLang = () => ({ ko: 'Korean', en: 'English', hybrid: 'English', ja: 'Japanese', zh: 'Chinese' }[getSettings().summaryLanguage] || 'the language of the scene');
 /** 고른 인물 (''이면 모든 장면) — 탭을 다시 그려도 남는다 */
 let forgotWho = '';
 
@@ -1955,9 +1956,11 @@ function setPerspectivePreference(value, local) {
 function tokenizeForEmbedding(text) {
     const out = [];
     const lower = String(text || '').toLowerCase();
-    const words = lower.match(/[\p{L}\p{N}]+/gu) || [];
+    const words = wordsOf(lower);
     for (const w of words) {
         out.push([`w:${w}`, 1.0]);
+        for (const js of jaStems(w)) out.push([`s:${js}`, 0.6]); // 일본어 활용 차이 ("隠し" · "隠す" → 隠)
+        for (const es of enStems(w)) out.push([`s:${es}`, 0.7]); // 영어 굴절 ("rings" → ring, "lent" → lend)
         // 조사 · 어미를 뗀 줄기도 한 조각 더 — "그림은"과 "그림을", "보리는"과 "보리다"가 여기서 만난다 (낱말 그대로의 조각은 그대로)
         const st = looseStem(w);
         if (st !== w) out.push([`s:${st}`, 0.7]);
@@ -2289,7 +2292,7 @@ async function queryLocalRanks(texts, { topK = 64, weights = null } = {}) {
 
 function lexicalOverlap(queryTokens, text) {
     if (!queryTokens.size) return 0;
-    const words = new Set((String(text || '').toLowerCase().match(/[\p{L}\p{N}]+/gu) || []));
+    const words = new Set(wordsOf(text));
     if (!words.size) return 0;
     // 조사만 다른 같은 낱말도 맞힌다 ("반지를"과 "반지가")
     const stems = new Set([...words].map(wordStem));
@@ -2309,7 +2312,7 @@ const LEX_BACKGROUND = 300;
 const lexDocCache = new Map();
 const lexMesCache = new WeakMap();
 function lexPieces(text) {
-    const raw = String(text || '').toLowerCase().match(/[\p{L}\p{N}]+/gu) || [];
+    const raw = wordsOf(text);
     const words = stemSet(text);
     for (const c of conceptTags(words)) words.add(c); // 개념 묶음 ("싸웠다 ↔ 다투었다") — 낱말 축에만
     return { words, raw: new Set(raw), grams: toCharGrams(text), tris: wordTrigrams(text) };
@@ -2321,8 +2324,10 @@ const lexTermWeight = (t) => (t.startsWith('~c:') ? 0.55 : 1);
  * 한 글자로 남는 엉뚱한 꼴("아이" → "아")이 생겨도 흔하면 무게가 0에 가까워 해가 없다 */
 function stemSet(text) {
     const out = new Set();
-    for (const w of (String(text || '').toLowerCase().match(/[\p{L}\p{N}]+/gu) || [])) {
+    for (const w of wordsOf(text)) {
         out.add(w);
+        for (const js of jaStems(w)) out.add(js);
+        for (const es of enStems(w)) out.add(es);
         const st = looseStem(w);
         if (st !== w) out.add(st);
         for (const vs of verbStems(w)) out.add(vs); // 용언 줄기 ("빚졌다" → 빚지 · 빚)
@@ -2410,7 +2415,7 @@ function lexScore(L, id, q, t) {
 /** 낱말 안의 세 글자 조각들 (내장 문장 벡터의 조각과 같은 꼴) */
 function wordTrigrams(text) {
     const out = new Set();
-    for (const w of (String(text || '').toLowerCase().match(/[\p{L}\p{N}]+/gu) || [])) for (let i = 0; i <= w.length - 3; i++) out.add(w.slice(i, i + 3));
+    for (const w of wordsOf(text)) for (let i = 0; i <= w.length - 3; i++) out.add(w.slice(i, i + 3));
     return out;
 }
 
@@ -2514,7 +2519,7 @@ async function pickDossierExcerpts(query, auxTexts, { max = 3 } = {}) {
     if (!docs.length || !String(query || '').trim()) return [];
     const queryVec = embedText(query);
     const auxVecs = (auxTexts || []).slice(0, 2).map(embedText);
-    const queryTokens = new Set((String(query).toLowerCase().match(/[\p{L}\p{N}]+/gu) || []));
+    const queryTokens = new Set(wordsOf(query));
     const scored = [];
     for (const d of docs) {
         for (let i = 0; i < d.chunks.length; i++) {
@@ -3460,7 +3465,8 @@ function cleanMultiline(s, max = 2000) {
 /** 원문의 첫 문장만 뽑는다 (사서 실패 시 사건 요약 대체용 — 통째 복사 방지) */
 function firstSentence(s, max = 160) {
     const t = cleanStr(s, 600);
-    const m = t.match(/^.*?[.!?。！？…](?=\s|$)/);
+    // 일본어 · 중국어 마침표(。！？) 뒤에는 띄어쓰기가 없다
+    const m = t.match(/^.*?(?:[.!?](?=\s|$)|[。！？…])/);
     return cleanStr(m ? m[0] : t, max);
 }
 
@@ -3561,7 +3567,7 @@ function storyFossilWeight(days) {
 function validExcerpt(excerpt, userText, assistantText) {
     const e = String(excerpt || '').trim();
     if (!e || e.length < 3 || e.length > 160) return null; // 문단 통짜 인용 차단 — 짧은 한 줄만
-    const squash = (s) => String(s || '').replace(/\s+/g, ' ');
+    const squash = (s) => String(s || '').normalize('NFKC').replace(/\s+/g, ' '); // 전각 · 반각 문장부호 차이로 진짜 인용을 버리지 않게
     const en = squash(e);
     if (squash(userText).includes(en) || squash(assistantText).includes(en)) return e;
     return null;
@@ -4048,7 +4054,7 @@ function entityKey(s) {
     let k = entityKeyCache.get(raw);
     if (k === undefined) {
         if (entityKeyCache.size > 4000) entityKeyCache.clear();
-        k = raw.toLowerCase().replace(/[\s._\-'"`]+/g, '').trim();
+        k = raw.normalize('NFKC').toLowerCase().replace(/[\s._\-'"`・·]+/g, '').trim(); // 전각 · 반각을 한 이름으로 (ｱﾘｱ = アリア)
         entityKeyCache.set(raw, k);
     }
     return k;
@@ -4066,9 +4072,14 @@ function fillMacros(text) {
     return s;
 }
 
+/** 일본어 · 중국어 경칭 — 떼어 낸 이름이 이미 카드에 있을 때만 그 사람으로 본다 ("美奈さん" → 美奈, "李明哥" → 李明) */
+const CJK_HONORIFIC_TAIL = /(?:さん|くん|ちゃん|さま|様|殿|どの|氏|せんぱい|先輩|せんせい|先生|哥哥|姐姐|老师|前辈|师兄|师姐|大人|小姐|哥|姐)$/;
 function canonEntityName(store, name) {
-    const raw = fillMacros(String(name || '').trim());
-    if (!raw) return raw;
+    const raw0 = fillMacros(String(name || '').trim());
+    if (!raw0) return raw0;
+    const plain = raw0.replace(CJK_HONORIFIC_TAIL, '');
+    const raw = plain && plain !== raw0 && !store?.characters?.some(c => entityKey(c.name) === entityKey(raw0) || (c.aliases || []).some(a => entityKey(a) === entityKey(raw0)))
+        && store?.characters?.some(c => entityKey(c.name) === entityKey(plain) || (c.aliases || []).some(a => entityKey(a) === entityKey(plain))) ? plain : raw0;
     const k = entityKey(raw);
     if (!k) return raw;
     for (const c of (store.characters || [])) {
@@ -4233,7 +4244,7 @@ function trimWas(rel, depth = 3) {
 }
 
 function upsertCharacter(store, c, turnIndex) {
-    const norm = (s) => String(s || '').toLowerCase();
+    const norm = (s) => entityKey(s); // 다른 칸들과 같은 이름 맞추기 — 전각 · 반각, 띄어쓰기만 다른 이름이 카드를 둘 열지 않게
     const findCard = (n) => store.characters.find(x =>
         norm(x.name) === norm(n) || (x.aliases || []).some(a => norm(a) === norm(n)));
 
@@ -4806,13 +4817,13 @@ const STANDING_KINDS = new Set(['fact', 'preference', 'promise', 'goal', 'item',
 function standingMemoriesNear(store, text, beforeTurn, cap = 8) {
     const hay = String(text || '').toLowerCase();
     if (hay.length < 20) return [];
-    const words = new Set(hay.match(/[\p{L}\p{N}]{2,}/gu) || []);
+    const words = new Set(wordsOf(hay).filter(w => [...w].length >= 2));
     const flat = hay.replace(/[^\p{L}\p{N}]+/gu, '');
     const grams = new Set();
     for (let i = 0; i < flat.length - 1; i++) grams.add(flat.slice(i, i + 2));
     const cover = (t) => {
         const low = String(t || '').toLowerCase();
-        const w = [...new Set(low.match(/[\p{L}\p{N}]{2,}/gu) || [])];
+        const w = [...new Set(wordsOf(low).filter(x => [...x].length >= 2))];
         const f = low.replace(/[^\p{L}\p{N}]+/gu, '');
         const g = new Set();
         for (let i = 0; i < f.length - 1; i++) g.add(f.slice(i, i + 2));
@@ -5817,7 +5828,15 @@ async function maybeFoldEras(store) {
     const span0 = folding[0].fromTurn, span1 = folding[folding.length - 1].toTurn;
     const turning = (store.milestones || []).filter(e => !e.disabled && (e.pinned || e.grade === 'major') && (e.turnIndex ?? -1) >= span0 && (e.turnIndex ?? -1) <= span1)
         .sort((a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0)).slice(0, 4);
-    const pointsLost = (t) => turning.filter(e => textOverlap(`${e.title} ${e.summary || ''}`, t) < 0.2 && textOverlap(e.title, t) < 0.34);
+    // 남았는가: 짧은 제목("고백")은 활용형("고백했다")으로 들어 있어도 남은 것이다
+    const pointKept = (e, t) => {
+        const title = String(e.title || '').trim().toLowerCase();
+        if ([...title].length >= 2 && String(t || '').toLowerCase().includes(title)) return true;
+        return textOverlap(`${e.title} ${e.summary || ''}`, t) >= 0.2 || textOverlap(e.title, t) >= 0.34;
+    };
+    // 전환점 기록과 새 글의 글자가 다르면(요약 언어를 바꿨다) 견줄 수 없으니 묻지 않는다 — 쓸데없는 다시 쓰기를 막는다.
+    // 넣은 글에서 이미 빠졌던 전환점도 묻는다: 전환점 기록은 그렇게 빠진 것을 되찾으려고 있다
+    const pointsLost = (t) => turning.filter(e => mainScript(`${e.title} ${e.summary || ''}`) === mainScript(t) && !pointKept(e, t));
     const worse = (t) => lost(t).length + pointsLost(t).length;
     let text = '';
     try {
@@ -5876,6 +5895,13 @@ function keyFactsBlock(store, fromTurn, toTurn, digests) {
     return lines.length ? `Key facts already filed from these turns — each must survive in the record (PLOT or SHIFTS), in the record's own words:\n${lines.join('\n')}\n` : '';
 }
 
+/** 글의 주된 글자 — 한글 · 로마자 · 한자/가나 (요약 언어가 바뀌었는지 가늠할 때) */
+function mainScript(text) {
+    const s = String(text || '');
+    const n = (rx) => (s.match(rx) || []).length;
+    const counts = [['hangul', n(/[가-힣]/g)], ['latin', n(/[a-z]/gi) / 3], ['cjk', n(/[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}]/gu)]];
+    return counts.sort((a, b) => b[1] - a[1])[0][1] > 0 ? counts[0][0] : '';
+}
 /** 합치기 · 접기로 사라진 사람 — 넣은 글 둘 이상에(또는 기준 글에) 나온 카드 인물이 새 글 어디에도 없으면 (모델 호출 없음) */
 const NAME_TAIL = '(?:은|는|이|가|을|를|의|에|에서|에게서|한테서|도|만|와|과|랑|이랑|하고|에게|한테|께|처럼|보다|까지|부터|로|으로|네|씨|님|군|양|아|야|이야|이가|이는|이를|이의|이와|이도|이하고|이에게|이한테|이처럼|이보다|이네)?';
 /** 글에 그 이름이 나오는가 — 두 글자 이하 이름은 낱말 경계를 본다 ("보라"가 "보라색 · 바라보라"에, "유리"가 "유리창"에 걸리지 않게. 뒤에 붙는 조사는 허용) */
@@ -5884,6 +5910,8 @@ function nameIn(hay, name) {
     const esc = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     // 로마자 이름: 넉 자 이상은 그대로, 짧은 것("al · li")은 낱말 경계로 ("finally · like" 속에 걸리지 않게)
     if (/^[a-z0-9 ]+$/.test(name)) return name.length >= 4 ? hay.includes(name) : new RegExp(`(?:^|[^a-z0-9])${esc}(?![a-z0-9])`).test(hay);
+    // 한 글자 한자 이름("蓮 · 葵")은 다른 한자 낱말 속("睡蓮")이 아닐 때만
+    if (/^\p{Script=Han}$/u.test(name)) return new RegExp(`(?:^|[^\\p{Script=Han}])${esc}(?:$|[^\\p{Script=Han}])`, 'u').test(hay);
     // 한자 · 가나 이름은 띄어 쓰지 않는 글에 붙어 나온다 (「美奈は」 · 「李明笑了」) — 낱말 경계를 볼 수 없어 그대로 찾는다
     if ([...name].length >= 3 || /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}]/u.test(name)) return hay.includes(name);
     // 조사가 둘 겹쳐도 ("보라랑은 · 리아한테도") 그 사람이다
@@ -5891,9 +5919,10 @@ function nameIn(hay, name) {
 }
 /** 인물 카드의 이름 · 별명이 글에 나오는가 — 두 글자 이하는 낱말 경계로, 한 글자 한글 별명도 ("보라"가 "보라색"에, "린"이 "기린"에 걸리지 않게) */
 function cardNamedIn(hay, c) {
-    return [c?.name, ...(c?.aliases || [])].some(n => {
+    return [c?.name, ...(c?.aliases || [])].some((n, i) => {
         const x = String(n || '').toLowerCase();
-        return x && ([...x].length >= 2 || /^[가-힣]$/.test(x)) && nameIn(hay, x);
+        // 한 글자 한자는 카드 본래 이름일 때만 ("蓮") — 별명 한 글자 한자는 너무 흔하게 걸린다
+        return x && ([...x].length >= 2 || /^[가-힣]$/.test(x) || (i === 0 && /^\p{Script=Han}$/u.test(x))) && nameIn(hay, x);
     });
 }
 function peopleLost(store, src, text, anchor = '') {
@@ -6723,7 +6752,7 @@ function raisedDirectly(m, queryLower, names = []) {
     const own = (m.entities || []).map(e => String(e).toLowerCase());
     const isName = (t) => [...names, ...own].some(n => n.includes(t) || t.includes(n));
     let hits = 0;
-    for (const t of new Set(String(m.summary || '').toLowerCase().match(/[\p{L}\p{N}]{2,}/gu) || [])) {
+    for (const t of new Set(wordsOf(m.summary).filter(w => [...w].length >= 2 && !cjkStop(w)))) {
         const latin = /^[a-z0-9]+$/.test(t);
         if ((latin && t.length < 4) || isName(t)) continue;
         const stem = !latin && t.length >= 3 ? t.slice(0, t.length - 1) : t;
@@ -6733,12 +6762,12 @@ function raisedDirectly(m, queryLower, names = []) {
 }
 
 /** "우리 처음 만났을 때", "remember when" 같은 과거 회상형 질의 감지 */
-const PAST_QUERY_RE = /(처음|예전|옛날|그때|그 때|지난번|언제였|언제 였|기억나|기억 나|기억해|기억하|첫날|첫 만남|만났을 때|했었|였었|하던 때|remember when|back then|first met|first time|used to|at first|way back|昔|最初|あの時|あのとき|覚えて)/i;
+const PAST_QUERY_RE = /(처음|예전|옛날|그때|그 때|지난번|언제였|언제 였|기억나|기억 나|기억해|기억하|첫날|첫 만남|만났을 때|했었|였었|하던 때|remember when|back then|first met|first time|used to|at first|way back|as a child|昔|最初|あの時|あのとき|あの頃|あのころ|あの日|前回|幼い頃|小さい頃|覚えて|曾经|当年|当初|那时|那时候|那次|那天|上次|第一次|还记得|记得吗|小时候|从小)/i;
 
 /** 지금 형편을 묻는 말 — 최근 기억에 조금 더 무게를 둔다 (지난 일을 묻는 말이 먼저다) */
-const NOW_QUERY_RE = /(지금|현재|요즘|오늘|방금|아직도|어디야|어디 있|뭐 ?하고 있|뭐 ?해\?|right now|currently|at the moment|these days|nowadays|today|现在|目前|最近|いま|今は|今どこ)/i;
+const NOW_QUERY_RE = /(지금|현재|요즘|오늘|방금|아직도|어디야|어디 있|뭐 ?하고 있|뭐 ?해\?|right now|currently|at the moment|these days|nowadays|today|现在|目前|最近|いま|今は|今どこ|如今|眼下|此刻|刚才|在哪儿|在哪里|在干嘛|在做什么|現在|さっき|どこにいる|何してる)/i;
 /** 자세한 사실을 묻는 말 — 이름 · 수 · 한 말 같은 낱말 일치와 원문 인용에 무게를 둔다 */
-const DETAIL_QUERY_RE = /(정확히|자세히|구체적|몇 ?(?:개|명|살|번|시|일|년|월|층|호|마리|권|잔)|얼마(?:나|였|야|지)|이름이 뭐|이름이 뭐였|뭐라고 ?(?:했|말했|그랬)|무슨 말을|누가 ?(?:그랬|했|줬)|어디서 ?(?:샀|났|봤|만났|받)|exactly|precisely|in detail|how many|how much|how old|what was (?:the|her|his|their) name|what did .{1,24} say|which one|具体|到底|几个|多少|叫什么|正確に|詳しく|何人|いくつ|何て言)/i;
+const DETAIL_QUERY_RE = /(정확히|자세히|구체적|몇 ?(?:개|명|살|번|시|일|년|월|층|호|마리|권|잔)|얼마(?:나|였|야|지)|이름이 뭐|이름이 뭐였|뭐라고 ?(?:했|말했|그랬)|무슨 말을|누가 ?(?:그랬|했|줬)|어디서 ?(?:샀|났|봤|만났|받)|exactly|precisely|in detail|how many|how much|how old|what was (?:the|her|his|their) name|what did .{1,24} say|which one|具体|到底|几个|多少|叫什么|正確に|詳しく|何人|いくつ|何て言|what(?:'s| is) (?:the|her|his|their) name|名字|多少钱|准确|详细|说了什么|名前|何という|何て名前)/i;
 /** 서고 임베딩의 평균 — 모든 기억에 고루 닮은 결(같은 이야기 · 같은 인물이라 생기는 공통 성분)을 빼고 견주려고 (기억 수 · 모델이 바뀌면 다시 잰다) */
 const embedCenters = new WeakMap();
 const EMBED_CENTER_MIN = 12;
@@ -6801,7 +6830,7 @@ async function retrieveMemories(queryText, recentUserTexts, sceneText = '') {
     // 장면 연속 보정: 유저 입력이 짧아도 직전 본문이 담고 있는 장면으로 회상을 이어간다
     // (장면 글은 흐름을 잇는 몫이라 무게를 매기지 않는다 — 늘 나오는 이름 · 말까지 빠지면 입력 없이 이어 받을 때 회상이 비었다)
     const sceneVec = String(sceneText || '').trim() ? embedText(String(sceneText).slice(0, 2400)) : null;
-    const queryTokens = new Set((String(queryText).toLowerCase().match(/[\p{L}\p{N}]+/gu) || []));
+    const queryTokens = new Set(wordsOf(queryText));
     const queryGrams = toCharGrams(queryText);
     const queryLower = String(queryText).toLowerCase();
 
@@ -6817,13 +6846,18 @@ async function retrieveMemories(queryText, recentUserTexts, sceneText = '') {
     // 장면을 닮은 흔한 기억이 끼어들었다. 무엇을 묻는 말(물음표 · 의문사)에 내용 낱말이 둘 이상이면, 또는 질문 종류가 읽히면 짧은 입력으로 보지 않는다.
     // 맞장구("응", "그래서?") · 행동 한 줄("*고개를 끄덕인다*")은 그대로 장면을 따른다
     const asks = /[?？]|(?:^|[^\p{L}])(?:뭐|뭘|무엇|무슨|왜|어디|언제|누구|누가|얼마|어떻게|어떤|몇)/u.test(queryLower)
-        || /\b(?:what|why|where|when|who|how|which)\b/.test(queryLower) || /(?:何|どこ|いつ|誰|だれ|なぜ|どう|いくら|どれ)/.test(queryLower);
-    // "그래서 뭐야?" · "진짜 왜?"처럼 맞장구 말만 있는 물음은 짧은 입력 그대로 — 내용 낱말이 하나는 있어야 한다
-    const askWords = [...contentWords(queryText)];
-    const pointedAsk = asks && askWords.length >= 2 && askWords.some(w => !ASK_FILLER.has(w));
-    const shortQ = tune && !!String(sceneText || '').trim() && !intent && !pointedAsk && (bare.length < 12 || queryTokens.size < 3);
+        || /\b(?:what|why|where|when|who|how|which)\b/.test(queryLower)
+        || /(?:何|どこ|いつ|誰|だれ|なぜ|なんで|どう|どんな|どの|いくら|どれ|いくつ)/.test(queryLower)
+        || /(?:什么|哪儿|哪里|哪|谁|为什么|为何|怎么|怎样|多少|几|吗|呢)/.test(queryLower);
+    // "그래서 뭐야?" · "진짜 왜?"처럼 맞장구 말만 있는 물음은 짧은 입력 그대로 — 내용 낱말이 하나는 있어야 한다.
+    // 띄어 쓰지 않는 일본어 · 중국어는 "指輪はどこ？" · "戒指在哪里？"처럼 내용 낱말 하나에 의문 표지면 온전한 물음이다
+    const askWords = [...contentWords(queryText)], realAsk = askWords.filter(w => !ASK_FILLER.has(w));
+    const noSpace = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}]/u.test(bare) && !/[가-힣]/.test(bare);
+    const pointedAsk = asks && realAsk.length >= 1 && (noSpace || askWords.length >= 2);
+    // 물음이 아닌 짧은 입력: 일본어 · 중국어는 여섯 자 미만("うん · そうだね · 嗯 · 好的")만, 띄어 쓰는 말은 예전 기준
+    const shortQ = tune && !!String(sceneText || '').trim() && !intent && !pointedAsk && (noSpace ? bare.length < 6 : (bare.length < 12 || queryTokens.size < 3));
     const tail = shortQ ? String(sceneText).slice(-500) : '';
-    const tailTokens = shortQ ? new Set((tail.toLowerCase().match(/[\p{L}\p{N}]+/gu) || [])) : null, tailGrams = shortQ ? toCharGrams(tail) : null;
+    const tailTokens = shortQ ? new Set(wordsOf(tail)) : null, tailGrams = shortQ ? toCharGrams(tail) : null;
     // 직전 장면 문맥의 몫 — 짧은 입력은 장면을 거의 입력만큼 믿고, 제대로 된 질문은 질문 자체가 앞선다 (장면의 흔한 서술어가 질문 점수를 덮지 않게)
     let sW = shortQ ? 0.95 : intent === 'detail' || intent === 'history' ? 0.4 : 0.6;
 
@@ -6862,11 +6896,6 @@ async function retrieveMemories(queryText, recentUserTexts, sceneText = '') {
             { weights: [1, ...auxTexts.slice(0, 1).map(() => 0.92), ...(sceneQuery ? [0.85] : [])] },
         ))
         : null;
-    // 의미 임베딩(API · 로컬)이 없으면 문맥 유사도는 내장 해시 벡터뿐이다 — 낱말 조각을 128칸에 접어 넣은 것이라, 아무 상관 없는 기억도 우연히 0.2~0.3을 받는다.
-    // 그때는 같은 낱말을 겹침 없이 세는 낱말 축에 무게를 옮긴다 (짧은 입력은 장면 문맥이 주 신호라 그대로)
-    if (tune && !apiQueryVec && !apiSceneVec && !localRanks && !shortQ) {
-        W = intent === 'current' ? { c: 0.30, lex: 0.44, imp: 0.10, rec: 0.16 } : intent === 'detail' ? { c: 0.24, lex: 0.56, imp: 0.12, rec: 0.08 } : { c: 0.30, lex: 0.48, imp: 0.12, rec: 0.10 };
-    }
 
     // 장면 개체 사전확률: 지금 장면에 있는 인물(도감 이름·별칭이 최근 본문에 등장)의 목록.
     // 한국어 롤플레잉은 대명사·호칭 생략이 많아 질의에 이름이 없어도, 장면에 있는 인물과
@@ -6897,12 +6926,15 @@ async function retrieveMemories(queryText, recentUserTexts, sceneText = '') {
         .map(x => ({ word: x.c, idf: lexW.idf(x.df) }));
     // 한 글자 이름씨("배 · 검 · 빚")가 붙어 쓴 겹낱말 끝("돛단배 · 장검")에 든 기억 — 드물 때만 드문 낱말처럼 친다
     const oneCharHits = new Map();
-    for (const ch of new Set([...queryTokens].map(looseStem).filter(w => /^[가-힣]$/.test(w) && !ONE_CHAR_SKIP.has(w) && !isNameBit(w)))) {
+    // 한자 한 글자 이름씨도 같다 — 일본어 · 중국어 겹낱말은 뒤 글자가 머리다 ("船" ↔ "帆船", "伞" ↔ "雨伞")
+    const oneCharQuery = [...queryTokens].map(looseStem).filter(w => ((/^[가-힣]$/.test(w) && !ONE_CHAR_SKIP.has(w)) || (/^\p{Script=Han}$/u.test(w) && !cjkStop(w))) && !isNameBit(w));
+    for (const ch of new Set(oneCharQuery)) {
+        const han = /^\p{Script=Han}$/u.test(ch), script = han ? /^\p{Script=Han}+$/u : /^[가-힣]+$/;
         const ids = [];
         for (const m of active) {
             const d = lexW.docs.get(m.id);
             // 조사를 뗀 꼴로 겹낱말 끝을 본다 ("돛단배를"의 끝 글자는 '를'이다)
-            if (d && (d.words.has(ch) || [...d.raw].some(rw => { const w = looseStem(rw); return w.length >= 2 && w.length <= 4 && w.endsWith(ch) && /^[가-힣]+$/.test(w) && !w.endsWith(`${ch}${ch}`); }))) ids.push(m.id);
+            if (d && (d.words.has(ch) || [...d.raw].some(rw => { const w = han ? rw : looseStem(rw); return w.length >= 2 && w.length <= 4 && w.endsWith(ch) && script.test(w) && !w.endsWith(`${ch}${ch}`); }))) ids.push(m.id);
         }
         if (!ids.length || ids.length > Math.max(2, Math.floor(active.length * 0.04))) continue;
         const idf = lexW.idf(ids.length);
@@ -6911,6 +6943,11 @@ async function retrieveMemories(queryText, recentUserTexts, sceneText = '') {
     // 드문 낱말 · 드문 개념 묶음 · 한 글자 이름씨 가운데 하나라도 닿으면 무언가를 콕 집은 입력이다 ("카엘이 부르던 노래") — 장면 쪽(문맥 · 직전 장면 끝의 낱말)을 덜 믿는다. "응", "그래서?"에는 어느 것도 없어 그대로다
     const pointed = rareWords.length > 0 || rareConcepts.length > 0 || oneCharHits.size > 0;
     if (pointed) sW = Math.min(sW, shortQ ? 0.55 : 0.35);
+    // 의미 임베딩(API · 로컬)이 없으면 문맥 유사도는 내장 해시 벡터뿐이다 — 낱말 조각을 128칸에 접어 넣은 것이라, 아무 상관 없는 기억도 우연히 0.2~0.3을 받는다.
+    // 그때는 같은 낱말을 겹침 없이 세는 낱말 축에 무게를 옮긴다. 맞장구("응")처럼 짧고 아무것도 콕 집지 않은 입력만 장면 문맥을 주 신호로 둔다
+    if (tune && !apiQueryVec && !apiSceneVec && !localRanks && (!shortQ || pointed)) {
+        W = intent === 'current' ? { c: 0.30, lex: 0.44, imp: 0.10, rec: 0.16 } : intent === 'detail' ? { c: 0.24, lex: 0.56, imp: 0.12, rec: 0.08 } : { c: 0.30, lex: 0.48, imp: 0.12, rec: 0.10 };
+    }
     const tLex = tailTokens && !pointed ? { stems: stemSet(tail), grams: tailGrams, raw: tailTokens } : null;
 
     // 이 채팅에서 회상하지 않을 말 — 그 말이 든 기억은 후보에서 뺀다 (지우지 않는다. 고정한 기억은 사용자의 뜻이라 그대로)
@@ -6985,7 +7022,7 @@ async function retrieveMemories(queryText, recentUserTexts, sceneText = '') {
             const hl = String(h).toLowerCase().trim();
             if (hl.length < 2 || matchedEntities.some(e => String(e).toLowerCase().includes(hl))) return false;
             if (queryLower.includes(hl)) return true;
-            const words = hl.match(/[\p{L}\p{N}]+/gu) || [];
+            const words = wordsOf(hl);
             // 두 글자 이상, 또는 활용형에서 뽑은 한 글자 용언 줄기("줬다" → 주)
             const formsOf = (w) => [...stemSet(w)].filter(t => [...t].length >= 2 || (t !== w && /^[가-힣]$/.test(t) && !ONE_CHAR_SKIP.has(t)));
             // 한 낱말 단서는 줄기로 ("싸웠다" ↔ "싸웠어"). 의문사 · 지시어는 치지 않는다
@@ -7136,7 +7173,7 @@ async function pickRecalledChapter(store, query, sceneText, shown = null) {
     if (!old.length || q.length < 4) return null;
     const qv = embedText(q);
     const sv = String(sceneText || '').trim() ? embedText(String(sceneText).slice(0, 2400)) : null;
-    const qTokens = new Set((q.toLowerCase().match(/[\p{L}\p{N}]+/gu) || []));
+    const qTokens = new Set(wordsOf(q));
     const qGrams = toCharGrams(q);
     const pastQ = PAST_QUERY_RE.test(q.toLowerCase());
 
@@ -7279,7 +7316,8 @@ function auditRecallEcho(mes, mesId = chat.indexOf(mes)) {
     if (!audit || !audit.ids.length) return;
     if (Date.now() - audit.at > 30 * 60 * 1000) return; // 낡은 감사표는 폐기
     const replyLower = visibleProse(mes?.mes).toLowerCase();
-    if (replyLower.length < 40) return; // 너무 짧은 응답은 판단 근거가 못 됨
+    // 너무 짧은 응답은 판단 근거가 못 됨 — 띄어 쓰지 않는 일본어 · 중국어는 스무 자 남짓이면 두 문장이다
+    if (replyLower.length < (/[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}]/u.test(replyLower) && !/[가-힣]/.test(replyLower) ? 16 : 40)) return;
 
     const store = getStore();
     let touched = false;
@@ -7289,7 +7327,10 @@ function auditRecallEcho(mes, mesId = chat.indexOf(mes)) {
         // 반영 판정: 기억의 고유 토큰(요약·개체)이 응답 본문에 충분히 등장하는가.
         // 조사·어미가 붙는 한국어 특성상 줄기(조사를 뗀 말)로 부분 문자열 매칭한다 — "나침반을"이 답의 "나침반은"과 맞게.
         // 요약은 서술이고 답은 장면이라 같은 낱말을 다 쓰지 않는다: 줄기로 보고 문턱을 낮춘다 (반영된 기억이 "무시됨"으로 식지 않게)
-        const stems = (text) => (String(text || '').toLowerCase().match(/[\p{L}\p{N}]{2,}/gu) || []).map(wordStem).filter(t => [...t].length >= 2);
+        // 일본어 · 중국어는 쪼갠 낱말로, 기능어를 빼고 한자는 한 글자 내용어도 (한국어 · 영어는 예전 그대로 두 글자 이상의 줄기)
+        const stems = (text) => wordsOf(text).flatMap(w => (/[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}]/u.test(w) && !/[가-힣]/.test(w)
+            ? (cjkStop(w) || (!/\p{Script=Han}/u.test(w) && [...w].length < 2) ? [] : [jaStems(w)[0] || w])
+            : [wordStem(w)].filter(t => [...t].length >= 2)));
         const toks = [...new Set(stems(`${m.summary} ${(m.entities || []).join(' ')}`))];
         if (toks.length < 3) continue;
         // 이름만 겹친 것은 반영이 아니다 — 두 주인공 이름은 어느 답에나 나와, 평범한 기억이 "반영됨"으로 쳐져 중요도가 계속 오를 수 있었다
@@ -7497,10 +7538,12 @@ function currentRecallQuery() {
 /** 한 글자 이름씨로 겹낱말 끝을 맞출 때 쓰지 않는 말 (대명사 · 의존명사 · 부사 · 맞장구) */
 const ONE_CHAR_SKIP = new Set(['그', '이', '저', '것', '거', '걸', '게', '건', '수', '때', '데', '줄', '중', '말', '일', '한', '두', '세', '네', '더', '다', '안', '못', '왜', '뭐', '뭘', '날', '널', '난', '넌', '내', '너', '나', '또', '좀', '잘', '곧', '늘', '참', '꽤', '막', '딱', '응', '어', '아', '야', '음', '흠', '예', '채', '척', '듯', '뿐', '쯤', '셈', '바', '곳', '등', '분', '번', '개', '명', '살', '년', '월', '시', '쪽', '편', '측', '앞', '뒤', '위', '밑', '옆', '속', '밖']);
 /** 물음이라도 이것만 있으면 무엇을 콕 집은 물음이 아니다 (맞장구 · 이음말 · 의문사) */
-const ASK_FILLER = new Set(['그래서', '그럼', '그러면', '근데', '그런데', '진짜', '정말', '아니', '그래', '뭐야', '뭔데', '뭐해', '뭐라고', '거야', '건데', '어째서', '왜요', '어떻게', '어디', '언제', '누구', '누가', '무엇', '무슨', '얼마']);
+const ASK_FILLER = new Set(['그래서', '그럼', '그러면', '근데', '그런데', '진짜', '정말', '아니', '그래', '뭐야', '뭔데', '뭐해', '뭐라고', '거야', '건데', '어째서', '왜요', '어떻게', '어디', '언제', '누구', '누가', '무엇', '무슨', '얼마',
+    'really', 'well', 'then', 'okay', 'right', 'what', 'where', 'when', 'who', 'why', 'how', 'that', 'this', 'there',
+    'そう', 'うん', 'ええ', 'まあ', 'ちょっと', '本当', 'ほんと', 'それで', 'だから', 'じゃあ', '嗯', '哦', '好', '好的', '真的', '然后', '所以', '但是', '干嘛', '怎么了', '是吗', '对吗']);
 /** 여러 낱말 회상 단서를 줄기로 견줄 때 내용 낱말로 치지 않는 말 */
 const HINT_FILLER = new Set(['어디', '어디서', '어디로', '언제', '누구', '누가', '무엇', '무슨', '뭐라', '뭐라고', '어떻게', '어떤', '얼마', '그때', '그거', '그건', '이거', '저거', '지금', '아직', '우리', '그날', '그게', '있어', '있지', '했지', '했어', '갔지', '였지', '이었지', 'what', 'where', 'when', 'who', 'how', 'that', 'this', 'did', 'was']);
-const TITLE_SKIP = new Set(['너', '당신', '자네', '그대', '니', '네', 'you', '이름', '반말', '존댓말', 'name', 'casual', 'formal']);
+const TITLE_SKIP = new Set(['너', '당신', '자네', '그대', '니', '네', 'you', '이름', '반말', '존댓말', 'name', 'casual', 'formal', 'あなた', 'きみ', '君', 'お前', 'あんた', '敬語', 'タメ口', '你', '您', '名字', '全名', '本名', '尊称', '昵称']);
 function titleReferred(store, hayLower) {
     const out = new Set();
     if (!hayLower.trim()) return out;
@@ -7519,6 +7562,11 @@ function titleReferred(store, hayLower) {
     const esc = (t) => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     for (const [term, who] of byTerm) {
         if (who.size !== 1) continue;
+        // 일본어 · 중국어 호칭("先輩 · 师兄 · 队长")은 띄어 쓰지 않는 글에 붙어 나온다 — 두 글자 이상은 그대로 찾고, 한 글자는 다른 한자 낱말 속이 아닐 때만
+        if (/[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}]/u.test(term)) {
+            if ([...term].length >= 2 ? hayLower.includes(term) : new RegExp(`(?:^|[^\\p{Script=Han}])${esc(term)}(?:$|[^\\p{Script=Han}])`, 'u').test(hayLower)) out.add([...who][0]);
+            continue;
+        }
         // 이름이 든 부름말은 이름 찾기가 이미 맡는다 — 여기서는 호칭만
         const rx = new RegExp(`(?:^|[^\\p{L}\\p{N}])${esc(term)}(?:아|야|이|가|은|는|을|를|도|의|께|님|한테|에게|이랑|랑|하고)?(?![\\p{L}\\p{N}])`, 'u');
         if (rx.test(hayLower)) out.add([...who][0]);
@@ -13866,7 +13914,7 @@ async function alignRecordLanguage() {
     }
     const settings = getSettings();
     const lang = settings.summaryLanguage;
-    const target = { ko: 'ko', en: 'en', hybrid: 'en', ja: 'ja' }[lang];
+    const target = { ko: 'ko', en: 'en', hybrid: 'en', ja: 'ja', zh: 'zh-CN' }[lang];
     if (!target) return toastr.info('요약 언어를 하나로 정해 두었을 때 쓸 수 있습니다. (설정 → 요약 언어)', 'Memoria');
     if (!getCurrentChatId()) return toastr.warning('열린 채팅이 없습니다.', 'Memoria');
     const store = getStore();
@@ -13882,7 +13930,7 @@ async function alignRecordLanguage() {
     for (const bnd of (store.bonds || [])) for (const e of (bnd.log || [])) { add(e, 'stage'); add(e, 'basis'); add(e, 'unsaid'); }
     for (const it of (store.items || [])) { add(it, 'meaning'); add(it, 'status'); }
     for (const ms of (store.milestones || [])) { add(ms, 'title'); add(ms, 'summary'); }
-    const langName = { ko: '한국어', en: '영어', hybrid: '영어(대사는 원문)', ja: '일본어' }[lang];
+    const langName = { ko: '한국어', en: '영어', hybrid: '영어(대사는 원문)', ja: '일본어', zh: '중국어' }[lang];
     if (!slots.length) return toastr.info(`요약 언어(${langName})와 다른 말로 적힌 기록이 없습니다.`, 'Memoria');
     const texts = [...new Set(slots.map(x => x.obj[x.key]))];
     const batches = packBatches(texts);

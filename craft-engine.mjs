@@ -133,6 +133,99 @@ export function looseStem(word) {
 }
 
 /*
+ * 낱말 쪼개기 (모든 낱말 축이 같은 것을 쓴다 — 기억 쪽과 물음 쪽이 같아야 맞는다).
+ * 한국어 · 영어처럼 띄어 쓰는 말은 예전 그대로 글자 · 숫자 덩어리로. 띄어 쓰지 않는 일본어 · 중국어는 그대로 두면 구절 전체가
+ * 한 낱말이 되어 낱말 축이 꺼지므로, 브라우저 내장 Intl.Segmenter로 쪼갠다 (사전 파일 없음). 없는 브라우저는 글자 종류 경계로.
+ */
+const HAS_KANA = /[\p{Script=Hiragana}\p{Script=Katakana}]/u;
+const HAS_CJK = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}]/u;
+const HAS_HANGUL = /[가-힣]/;
+let segJa = null, segZh = null;
+function segmenter(lang) {
+    if (typeof Intl === 'undefined' || typeof Intl.Segmenter !== 'function') return null;
+    try {
+        if (lang === 'ja') return segJa || (segJa = new Intl.Segmenter('ja', { granularity: 'word' }));
+        return segZh || (segZh = new Intl.Segmenter('zh', { granularity: 'word' }));
+    } catch { return null; }
+}
+const cjkFallback = (s) => s.match(/\p{Script=Han}+|[\p{Script=Katakana}ー]+|\p{Script=Hiragana}+|[가-힣]+|[\p{L}\p{N}]+/gu) || [];
+const wordsCache = new Map();
+export function wordsOf(text) {
+    const lower = String(text ?? '').toLowerCase();
+    // 한글이 든 글(한자가 조금 섞여도)과 띄어 쓰는 말은 예전 그대로 — 한국어 낱말 축은 한 글자도 바뀌지 않는다
+    if (!HAS_CJK.test(lower) || (HAS_HANGUL.test(lower) && !HAS_KANA.test(lower))) return lower.match(/[\p{L}\p{N}]+/gu) || [];
+    const hit = wordsCache.get(lower);
+    if (hit) return hit;
+    const sg = segmenter(HAS_KANA.test(lower) ? 'ja' : 'zh');
+    let out;
+    if (sg) {
+        out = [];
+        for (const seg of sg.segment(lower)) if (seg.isWordLike) out.push(seg.segment);
+    } else out = cjkFallback(lower);
+    if (wordsCache.size > 6000) wordsCache.clear();
+    wordsCache.set(lower, out);
+    return out;
+}
+/** 일본어 한자 + 히라가나 꼴의 한자 뿌리 ("隠し · 隠す" → 隠, "貸し · 貸す" → 貸) — 쪼갠 낱말의 활용 차이를 잇는다 */
+export function jaStems(word) {
+    const m = String(word || '').match(/^(\p{Script=Han}{1,3})\p{Script=Hiragana}{1,2}$/u);
+    return m ? [m[1]] : [];
+}
+// 일본어 · 중국어 기능어 (조사 · 조동사 · 대명사 · 의문사) — 내용 낱말 · 반영 판정에서 뺀다
+const JA_STOP = new Set(['は', 'が', 'を', 'に', 'で', 'と', 'も', 'の', 'へ', 'や', 'か', 'ね', 'よ', 'わ', 'さ', 'な', 'て', 'た', 'だ', 'っ', 'ん', 'し', 'れ', 'ら', 'る', 'う', 'い', 'く', 'す', 'です', 'ます', 'した', 'して', 'する', 'いる', 'ある', 'ない', 'なる', 'れる', 'られる', 'てる', 'てい', 'くれ', 'あげ', 'しま', 'こと', 'もの', 'これ', 'それ', 'あれ', 'ここ', 'そこ', 'どこ', 'いつ', '誰', 'だれ', '何', 'なに', 'なん', 'どう', 'なぜ', 'なんで', 'どんな', 'どれ', '私', '僕', '俺', '彼', '彼女', 'あなた', 'きみ', '自分', 'そして', 'しかし', 'でも', 'から', 'まで', 'より', 'だけ', 'ほど', 'など', 'って', 'という', 'ような', 'みたい']);
+const ZH_STOP = new Set(['的', '了', '在', '是', '把', '被', '给', '着', '过', '吗', '呢', '吧', '啊', '呀', '嘛', '哦', '嗯', '和', '跟', '与', '就', '都', '也', '很', '太', '还', '又', '再', '才', '只', '刚', '从', '向', '对', '到', '于', '为', '而', '但', '却', '或', '并', '我', '你', '您', '他', '她', '它', '们', '我们', '你们', '他们', '自己', '这', '那', '这个', '那个', '这里', '那里', '个', '一', '不', '没', '没有', '有', '会', '能', '要', '想', '去', '来', '说', '让', '叫', '什么', '哪里', '哪儿', '哪', '谁', '怎么', '怎样', '为什么', '为何', '多少', '几', '里', '上', '下', '中', '时候', '东西', '事情', '一直', '一起', '已经', '正在', '曾经', '如果', '因为', '所以', '但是', '然后', '虽然']);
+/** 일본어 · 중국어 기능어인가 */
+export function cjkStop(w) { return JA_STOP.has(w) || ZH_STOP.has(w); }
+
+/*
+ * 영어 줄기 — 굴절(-s · -es · -ies · -ed · -ing)과 롤플에 잦은 불규칙 과거만. 파생 어미(-tion · -ness)는 건드리지 않는다.
+ * 흔한 낱말과 겹치는 불규칙 꼴(rose · bit · born · left · saw)은 넣지 않는다.
+ */
+const EN_IRREG = {
+    lent: 'lend', sent: 'send', spent: 'spend', built: 'build', kept: 'keep', slept: 'sleep', wept: 'weep', dealt: 'deal', meant: 'mean',
+    lost: 'lose', hid: 'hide', hidden: 'hide', bitten: 'bite', broke: 'break', broken: 'break', spoken: 'speak', stole: 'steal', stolen: 'steal',
+    woke: 'wake', woken: 'wake', chose: 'choose', chosen: 'choose', froze: 'freeze', frozen: 'freeze', gave: 'give', given: 'give',
+    forgave: 'forgive', forgiven: 'forgive', took: 'take', taken: 'take', shook: 'shake', shaken: 'shake', knew: 'know', known: 'know',
+    grew: 'grow', grown: 'grow', threw: 'throw', thrown: 'throw', blew: 'blow', blown: 'blow', flew: 'fly', flown: 'fly', drew: 'draw',
+    went: 'go', gone: 'go', came: 'come', ran: 'run', swore: 'swear', sworn: 'swear', wore: 'wear', worn: 'wear', tore: 'tear', torn: 'tear',
+    sang: 'sing', sung: 'sing', rang: 'ring', drank: 'drink', sank: 'sink', fled: 'flee', fed: 'feed', bled: 'bleed', led: 'lead', met: 'meet',
+    held: 'hold', told: 'tell', sold: 'sell', found: 'find', bought: 'buy', brought: 'bring', fought: 'fight', thought: 'think', caught: 'catch',
+    taught: 'teach', paid: 'pay', said: 'say', made: 'make', fell: 'fall', fallen: 'fall', wrote: 'write', written: 'write', rode: 'ride',
+    ridden: 'ride', drove: 'drive', driven: 'drive', forgot: 'forget', forgotten: 'forget', forbade: 'forbid', forbidden: 'forbid', sat: 'sit',
+    stood: 'stand', understood: 'understand', hung: 'hang', dug: 'dig', stuck: 'stick', struck: 'strike', won: 'win', swam: 'swim', began: 'begin', begun: 'begin', forged: 'forge',
+};
+const EN_SKIP = new Set(['this', 'thus', 'plus', 'news', 'lens', 'chaos', 'series', 'species', 'always', 'sometimes', 'perhaps', 'across', 'almost', 'does', 'goes', 'yes', 'ours', 'yours', 'hers', 'theirs',
+    'nothing', 'something', 'anything', 'everything', 'morning', 'evening', 'during', 'ceiling', 'wedding', 'pudding', 'speed', 'breed', 'greed', 'indeed', 'sacred', 'hundred', 'naked', 'wicked', 'beloved']);
+export function enStems(word) {
+    const w = String(word || '').toLowerCase();
+    if (!/^[a-z]{3,}$/.test(w)) return [];
+    if (EN_IRREG[w]) return [EN_IRREG[w]];
+    if (w.length < 4 || EN_SKIP.has(w)) return [];
+    const out = new Set();
+    const add = (x) => { if (x && x !== w && x.length >= 3) out.add(x); };
+    const undouble = (r) => (/([bcdfghjklmnpqrstvwxz])\1$/.test(r) && !/(?:ll|ss|ff|zz)$/.test(r) ? r.slice(0, -1) : r);
+    if (w.endsWith('ies') && w.length >= 5) { add(`${w.slice(0, -3)}y`); return [...out]; }
+    if (/(?:ches|shes|sses)$/.test(w) && w.length >= 6) { add(w.slice(0, -2)); return [...out]; }
+    if (/(?:xes|zes)$/.test(w) && w.length >= 5) { add(w.slice(0, -2)); return [...out]; }
+    if (w.endsWith('s') && !/(?:ss|us|is|os)$/.test(w)) { add(w.slice(0, -1)); return [...out]; }
+    // 겹친 닿소리를 하나로 줄였으면(running → run) -e 꼴을 내지 않는다 ("rune · stope" 같은 엉뚱한 말이 생긴다)
+    if (w.endsWith('ing') && w.length >= 6) {
+        const r0 = w.slice(0, -3), r = undouble(r0);
+        if (/[aeiouy]/.test(r)) { add(r); if (r === r0 && /[bcdfghjklmnpqrstvwxz]$/.test(r) && !/[aeiouy]{2}[bcdfghjklmnpqrstvwxz]$/.test(r)) add(`${r}e`); }
+        return [...out];
+    }
+    if (w.endsWith('ied') && w.length >= 5) { add(`${w.slice(0, -3)}y`); return [...out]; }
+    if (w.endsWith('ed') && w.length >= 5) {
+        const r0 = w.slice(0, -2), r = undouble(r0);
+        if (/[aeiouy]/.test(r)) { add(r); if (r === r0 && /[bcdfghjklmnpqrstvwxz]$/.test(r)) add(`${r}e`); }
+    }
+    return [...out];
+}
+// 영어 기능어 — 세 글자 내용어(map · run · cup · key)를 살리면서 흔한 말은 뺀다
+const EN_STOP = new Set(['the', 'and', 'for', 'are', 'but', 'not', 'you', 'all', 'can', 'had', 'her', 'was', 'one', 'our', 'out', 'has', 'his', 'how', 'man', 'new', 'now', 'old', 'see', 'two', 'way', 'who', 'did', 'get', 'may', 'say', 'she', 'too', 'use', 'its', 'let', 'put', 'any', 'try', 'ask', 'own', 'why', 'got', 'yet', 'him', 'with', 'that', 'this', 'from', 'they', 'been', 'have', 'were', 'what', 'when', 'your', 'will', 'more', 'into', 'than', 'them', 'some', 'time', 'very', 'just', 'know', 'take', 'come', 'make', 'like', 'back', 'only', 'over', 'also', 'after', 'about', 'where', 'which', 'there', 'their', 'would', 'could', 'should', 'does', 'doing', 'done', 'being', 'here', 'then', 'once', 'every', 'still', 'again', 'while']);
+export function enStop(w) { return EN_STOP.has(w); }
+
+/*
  * 용언 줄기 — 사전 없이 활용형에서 어간 후보를 뽑는다 ("빚졌다" → 빚지 · 빚, "지낸다" → 지내, "다퉜다" → 다투, "갔었다" → 가).
  * 조사만 떼는 looseStem 으로는 "빚이 / 빚졌다", "지내 / 지낸다", "싸웠던 / 싸우다"가 서로 남남이었다.
  * 오탐을 막는 규칙:
@@ -152,7 +245,7 @@ const PLAIN_ENDS = ['는다고', '는다면', '는다', '다고', '다는', '다
 const VERB_ONLY_ENDS = new Set(['는다고', '는다면', '는다', '는데', '더니', '면서', '려고', '도록', '니까', '던']);
 // 받침 있는 줄기 + 어/아 (+서 · 도 · 야): "적어 두었다" → 적, "꽂아" → 꽂. 받침 ㄴ · ㄹ · ㅇ은 이름씨("단어 · 연어 · 상어 · 문어")와 겹쳐 뺀다
 const EO_JONG_SKIP = new Set([0, 4, 8, 21]);
-const EO_NOUNS = new Set(['악어', '숙어', '약어', '국어', '독어', '목어', '법어', '속어', '격어', '탁아', '박아지']);
+const EO_NOUNS = new Set(['악어', '숙어', '약어', '국어', '독어', '목어', '법어', '속어', '격어', '탁아', '복어']);
 const PAST_SYL = new Set(['었', '았', '였']);
 // 받침 없는 글자 뒤 '-러'(사러 · 보러)를 풀 때 빼는 외래어 — 받침 ㄹ 뒤의 "달러 · 컬러 · 킬러"는 규칙에서 이미 빠진다
 const REO_LOAN = new Set(['미러', '에러', '테러', '호러', '오러', '투어러']);
@@ -191,7 +284,8 @@ export function verbStems(word) {
         const unfused = { 6: 20, 14: 13, 9: 8, 4: 18 }[j.jung]; // ㅕ→ㅣ(숨겼→숨기) · ㅝ→ㅜ(다퉜→다투) · ㅘ→ㅗ(봤→보) · ㅓ→ㅡ(썼→쓰)
         if (unfused !== undefined) light(head + sylMake(j.cho, unfused));
         // ㅂ 불규칙 ("구웠" → 굽, "무서웠" → 무섭): '웠' 앞 글자에 받침이 없으면 그 글자에 받침 ㅂ을 붙인 꼴도 낸다
-        if (last === '웠' && head) { const h = sylOf(head.slice(-1)); if (h && h.jong === 0) add(head.slice(0, -1) + sylMake(h.cho, h.jung, 17)); }
+        // ㅣ + 웠은 사동("지웠다 · 키웠다 · 비웠다")이라 ㅂ을 붙이지 않는다 ("지웠다 → 집"이 되지 않게)
+        if (last === '웠' && head) { const h = sylOf(head.slice(-1)); if (h && h.jong === 0 && h.jung !== 20) add(head.slice(0, -1) + sylMake(h.cho, h.jung, 17)); }
         return true;
     };
     for (const end of PAST_ENDS) {
@@ -234,44 +328,46 @@ export function verbStems(word) {
  * 개념 묶음 — 임베딩 없이 "싸웠다 ↔ 다투었다", "노래 ↔ 자장가 · 흥얼거리다"를 잇는 작은 표. 낱말 축(어휘 점수)에만 "~c:묶음" 조각으로 들어간다.
  * 그 채팅에서 얼마나 흔한지로 무게가 매겨지므로, 매 장면 나오는 묶음(로맨스 채팅의 "사랑")은 무게가 저절로 0에 가깝다.
  * 줄기(조사 · 어미를 뗀 꼴)와 견준다: 한 글자 말은 그대로 같을 때만, 두 글자 이상은 그 말로 시작하면.
- * 뜻이 여럿인 말(차 · 살 · 배 · 안 · 화 · 주문 · 보수 · 구속 · 연고 · 중독 · 태우다)은 넣지 않는다.
+ * 뜻이 여럿인 말(차 · 살 · 배 · 안 · 화 · 주문 · 보수 · 구속 · 연고 · 중독 · 태우다, 일본어 割 · 打 · 走 · 看 · 手 · 心)은 넣지 않는다.
+ * 일본어 · 중국어는 쪼갠 낱말(喧嘩 · 争吵)과 뜻이 좁은 한 글자(隠 · 逃 · 偷 · 哭)로 넣는다. 과장 표현에 잘 쓰이는 한 글자(死 · 碎)와 두 말에서 뜻이 갈리는 글자(欠)는 넣지 않는다.
  */
 const CONCEPT_TERMS = {
-    fight: ['싸우', '싸움', '다투', '다툼', '말다툼', '말싸움', '언쟁', '실랑이', '몸싸움', '시비', 'fight', 'argu', 'quarrel'],
-    music: ['노래', '자장가', '흥얼', '콧노래', '멜로디', '선율', '가락', '휘파람', '연주', 'song', 'sang', 'hum', 'humm', 'lullab', 'melod'],
-    fond: ['좋아하', '짝사랑', '호감', '설레', '반하', '연모', '사모', '사랑하', 'crush', 'fond'],
+    fight: ['싸우', '싸움', '다투', '다툼', '말다툼', '말싸움', '언쟁', '실랑이', '몸싸움', '시비', 'fight', 'argu', 'quarrel', '喧嘩', '口論', '言い争', '揉め', '争吵', '吵架', '争执', '吵'],
+    music: ['노래', '자장가', '흥얼', '콧노래', '멜로디', '선율', '가락', '휘파람', '연주', 'song', 'sang', 'hum', 'humm', 'lullab', 'melod', '歌', '子守唄', '鼻歌', 'メロディ', '演奏', '唱歌', '歌曲', '摇篮曲', '哼', '旋律'],
+    fond: ['좋아하', '짝사랑', '호감', '설레', '반하', '연모', '사모', '사랑하', 'crush', 'fond', '好き', '片思い', '惚れ', '喜欢', '暗恋', '心动'],
     dislike: ['싫어하', '미워하', '질색', '혐오', '꺼리', 'hate', 'dislik', 'loath'],
-    debt: ['빚', '채무', '빌리', '갚', '외상', '이자', 'debt', 'owe', 'loan'],
-    fear: ['무섭', '무서워', '두렵', '두려', '공포', '겁', '떨리', '악몽', '트라우마', 'afraid', 'fear', 'scare', 'terrif', 'nightmare'],
-    hurt: ['흉터', '상처', '다치', '부상', '화상', 'scar', 'wound', 'injur', 'hurt'],
-    drink: ['마시', '홍차', '커피', '우유', '음료', '술', '와인', '맥주', 'drink', 'tea', 'coffee', 'wine'],
+    debt: ['빚', '채무', '빌리', '갚', '외상', '이자', 'debt', 'owe', 'loan', '借金', '欠债', '欠钱', '债', '借钱'],
+    fear: ['무섭', '무서워', '두렵', '두려', '공포', '겁', '떨리', '악몽', '트라우마', 'afraid', 'fear', 'scare', 'terrif', 'nightmare', '怖', '恐怖', '怯え', '悪夢', '害怕', '恐惧', '噩梦', '怕'],
+    hurt: ['흉터', '상처', '다치', '부상', '화상', 'scar', 'wound', 'injur', 'hurt', '怪我', '火傷', '負傷', '受伤', '伤口', '伤疤', '烫伤'],
+    drink: ['마시', '홍차', '커피', '우유', '음료', '술', '와인', '맥주', 'drink', 'tea', 'coffee', 'wine', '飲', '酒', '喝'],
     dwell: ['지내', '머물', '머무르', '거처', '숙소', '묵', 'lodg'],
     gift: ['선물', '건네', '맡기', '증표', 'gift'],
-    vow: ['약속', '맹세', '서약', '다짐', '기약', 'promis', 'vow', 'swor', 'swear', 'oath'],
-    secret: ['비밀', '숨기', '감추', '몰래', '들키', 'secret', 'hide', 'hid', 'conceal'],
-    lie: ['거짓말', '거짓', '속이', 'liar', 'lied', 'deceiv'],
-    death: ['죽', '죽음', '사망', '숨졌', '숨진', '목숨', 'die', 'dead', 'death', 'kill'],
+    vow: ['약속', '맹세', '서약', '다짐', '기약', 'promis', 'vow', 'swor', 'swear', 'oath', '約束', '誓', '约定', '承诺', '发誓'],
+    secret: ['비밀', '숨기', '감추', '몰래', '들키', 'secret', 'hide', 'hid', 'conceal', '秘密', '隠', '内緒', '藏', '隐瞒', '偷偷'],
+    lie: ['거짓말', '거짓', '속이', 'liar', 'lied', 'deceiv', '嘘', '騙', '撒谎', '谎', '骗'],
+    death: ['죽', '죽음', '사망', '숨졌', '숨진', '목숨', 'die', 'dead', 'death', 'kill', '死ん', '亡くな', '去世', '死亡', '身亡', '遇害'],
     kiss: ['키스', '입맞추', '입맞춤', '뽀뽀', 'kiss'],
-    cry: ['울', '눈물', '흐느끼', '훌쩍', 'cry', 'cried', 'tear', 'sob'],
-    anger: ['화내', '화나', '분노', '짜증', '격분', 'angry', 'anger', 'furious', 'rage'],
+    cry: ['울', '눈물', '흐느끼', '훌쩍', 'cry', 'cried', 'tear', 'sob', '泣', '涙', '哭', '眼泪', '流泪'],
+    anger: ['화내', '화나', '분노', '짜증', '격분', 'angry', 'anger', 'furious', 'rage', '怒', '激怒', '生气', '愤怒', '发火'],
     part: ['떠나', '작별', '이별', '헤어지', 'farewell', 'goodbye'],
     meet: ['만나', '만남', '재회', '마주치', 'meet', 'met', 'reunit'],
-    cook: ['요리', '음식', '수프', '스튜', '국물', '끓이', '볶', '반찬', '레시피', 'cook', 'soup', 'stew', 'meal', 'bake'],
+    break: ['깨뜨리', '부수', '부서지', '망가지', '박살', 'smash', 'shatter', '壊', '砕', '破損', '打碎', '摔碎', '打破', '砸'],
+    cook: ['요리', '음식', '수프', '스튜', '국물', '끓이', '볶', '반찬', '레시피', 'cook', 'soup', 'stew', 'meal', 'bake', '料理', '做饭', '煮', '汤'],
     vessel: ['돛단배', '범선', '선박', '보트', '요트', '나룻배', '함선', '군함', '갑판', '항해', 'boat', 'sail', 'vessel'],
-    escape: ['도망', '달아나', '도주', '탈출', '탈옥', '도피', '쫓기', 'flee', 'fled', 'escap'],
+    escape: ['도망', '달아나', '도주', '탈출', '탈옥', '도피', '쫓기', 'flee', 'fled', 'escap', '逃', '脱出', '逃走', '逃跑', '逃脱'],
     sick: ['열병', '병들', '앓', '감기', '고열', '기침', '몸살', '병상', 'sick', 'fever', 'illness'],
-    heal: ['치료', '치유', '붕대', '해독', '진찰', '처방', 'cure', 'bandag', 'medicin'],
+    heal: ['치료', '치유', '붕대', '해독', '진찰', '처방', 'cure', 'bandag', 'medicin', '治療', '手当', '包帯', '看病', '治疗', '包扎', '绷带'],
     poison: ['독초', '독약', '독살', '맹독', '독침', 'poison', 'venom', 'toxin'],
     combat: ['결투', '전투', '교전', '습격', '매복', '검술', 'duel', 'battle', 'ambush', 'combat'],
     weapon: ['장검', '단검', '검집', '칼날', '단도', '목검', '화살', '권총', '총알', 'sword', 'dagger', 'blade', 'pistol'],
     magic: ['마법', '마력', '저주', '결계', '마도서', '주술', 'magic', 'spell', 'curse'],
     betray: ['배신', '배반', '밀고', '첩자', '스파이', '내통', 'betray', 'traitor'],
-    forgive: ['사과하', '용서', '화해', '뉘우치', '참회', 'forgiv', 'apolog', 'reconcil'],
+    forgive: ['사과하', '용서', '화해', '뉘우치', '참회', 'forgiv', 'apolog', 'reconcil', '謝', '許', '謝罪', '道歉', '原谅'],
     confess: ['고백', '청혼', '프로포즈', '구혼', 'confess', 'propos'],
     jealous: ['질투', '시기하', '샘내', '시샘', 'jealous', 'envy', 'enviou'],
     hug: ['포옹', '껴안', '끌어안', '안아주', 'embrace', 'hug'],
-    steal: ['훔치', '도둑', '소매치기', '절도', '약탈', 'steal', 'stole', 'thief'],
-    prison: ['감옥', '감금', '결박', '수갑', '족쇄', '포박', '지하감옥', 'prison', 'captiv', 'shackl'],
+    steal: ['훔치', '도둑', '소매치기', '절도', '약탈', 'steal', 'stole', 'thief', '盗', '泥棒', '偷', '小偷', '扒手'],
+    prison: ['감옥', '감금', '결박', '수갑', '족쇄', '포박', '지하감옥', 'prison', 'captiv', 'shackl', '牢', '地下牢', '監禁', '投獄', '监狱', '地牢', '关押'],
     sleep: ['불면', '잠들', '선잠', '숙면', '졸리', '낮잠', 'insomnia', 'asleep', 'nap'],
     letter: ['편지', '서신', '쪽지', '전보', '봉투', '답장', '유서', 'envelop'],
     jewelry: ['반지', '은반지', '금반지', '목걸이', '팔찌', '귀걸이', '브로치', '펜던트', 'necklac', 'pendant'],
@@ -330,11 +426,14 @@ export function findRepeatedPhrases(replies, { minShare = 0.2, minReplies = 3, m
         const seen = new Set();
         const seenForm = new Set();
         for (const sentence of doc.split(/[\n.!?…。！？"“”「」『』]+/)) {
-            const words = sentence.match(/[\p{L}\p{N}'’]+/gu) || [];
-            for (let n = 1; n <= 4; n++) {
+            // 띄어 쓰지 않는 일본어 · 중국어: 쉼표에서도 끊고 쪼갠 낱말을 붙여서 잇는다 (표현이 글 속 그대로의 꼴이 되게)
+            const noSpace = HAS_CJK.test(sentence) && !HAS_HANGUL.test(sentence);
+            for (const clause of noSpace ? sentence.split(/[、，,；;：:]+/) : [sentence]) {
+            const words = noSpace ? wordsOf(clause) : (clause.match(/[\p{L}\p{N}'’]+/gu) || []);
+            for (let n = 1; n <= (noSpace ? 8 : 4); n++) {
                 for (let i = 0; i + n <= words.length; i++) {
                     const slice = words.slice(i, i + n);
-                    const phrase = slice.join(' ');
+                    const phrase = slice.join(noSpace ? '' : ' ');
                     const letters = phrase.replace(/\s/g, '');
                     // 한 단어짜리는 충분히 길고 특징적일 때만 (조사·짧은 기능어 배제)
                     if (n === 1 && [...letters].length < 3) continue;
@@ -343,7 +442,11 @@ export function findRepeatedPhrases(replies, { minShare = 0.2, minReplies = 3, m
                     // 이름으로 시작하거나 끝나는 조각은 안쪽 조각이 대신 잡는다 ("아리아는 웃었다" → "웃었다")
                     if (isName(slice[0]) || isName(slice[n - 1])) continue;
                     if (isStopWord(slice[0]) || isStopWord(slice[n - 1])) continue;
-                    const key = slice.map(phraseStem).join(' ');
+                    // 기능어로 시작하는 조각은 빼고, 끝은 일본어 맺음(た · だ · る)이면 네 조각 이상일 때만 둔다 ("小さく息を呑んだ")
+                    if (noSpace && (cjkStop(slice[0]) || (cjkStop(slice[n - 1]) && !(n >= 4 && /^[たださるう]$/.test(slice[n - 1]))))) continue;
+                    // 한자 바로 뒤의 히라가나(送り仮名 — "小 · さく")로 시작하는 조각은 낱말 한가운데서 시작한 것이다
+                    if (noSpace && i > 0 && /^\p{Script=Hiragana}+$/u.test(slice[0]) && /\p{Script=Han}$/u.test(words[i - 1])) continue;
+                    const key = noSpace ? phrase : slice.map(phraseStem).join(' ');
                     let row = counts.get(key);
                     if (!row) { row = { key, forms: new Map(), docs: 0, words: n }; counts.set(key, row); }
                     if (!seen.has(key)) { seen.add(key); row.docs++; }
@@ -355,6 +458,7 @@ export function findRepeatedPhrases(replies, { minShare = 0.2, minReplies = 3, m
                     }
                 }
             }
+            }
         }
     }
     let rows = [...counts.values()].filter(r => r.docs >= need);
@@ -363,7 +467,9 @@ export function findRepeatedPhrases(replies, { minShare = 0.2, minReplies = 3, m
     const kept = [];
     for (const r of rows) {
         const inner = ` ${r.key} `;
-        if (kept.some(k => ` ${k.key} `.includes(inner) && k.docs >= r.docs * 0.8)) continue;
+        // 띄어 쓰지 않는 말의 열쇠에는 빈칸이 없다 — 글자 그대로 들어 있는지로 본다
+        const within = (k) => (HAS_CJK.test(r.key) && !/\s/.test(r.key) ? k.key.includes(r.key) : ` ${k.key} `.includes(inner));
+        if (kept.some(k => within(k) && k.docs >= r.docs * 0.8)) continue;
         kept.push(r);
     }
     // 한 단어짜리는 흔한 낱말이 많이 걸리므로 문턱을 한 단계 더 높인다
@@ -755,8 +861,30 @@ export function stripOpenLines(text) {
  * ------------------------------------------------------------ */
 
 /** text에 나오는 숫자 가운데 source 어디에도 없는 것 (쉼표는 무시: 1,200 = 1200) */
+// 한자 숫자 (열 이상, 단위 글자가 있을 때만 — "十分 · 万一 · 一般"은 숫자가 아니다)
+const CJK_DIGIT = { 零: 0, 〇: 0, 一: 1, 二: 2, 两: 2, 兩: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9 };
+const CJK_NUM_SKIP = /^(?:十分|万一|萬一|十字|一般|一定|一切|一生|一度|百分|千万|千萬)$/;
+function cjkNumber(s) {
+    if (CJK_NUM_SKIP.test(s)) return null;
+    let total = 0, cur = 0, unit = false;
+    for (const ch of s) {
+        if (CJK_DIGIT[ch] !== undefined) { cur = CJK_DIGIT[ch]; continue; }
+        const u = ch === '十' ? 10 : ch === '百' ? 100 : ch === '千' ? 1000 : (ch === '万' || ch === '萬') ? 10000 : 0;
+        if (!u) return null;
+        unit = true;
+        if (u === 10000) { total = (total + cur) * 10000; cur = 0; } else { total += (cur || 1) * u; cur = 0; }
+    }
+    total += cur;
+    return unit && total >= 10 ? String(total) : null;
+}
 export function ungroundedFigures(text, source) {
-    const digits = (t) => (String(t ?? '').replace(/(\d),(?=\d{3})/g, '$1').match(/\d+(?:\.\d+)?/g) || []);
+    // 전각 숫자(３０)는 반각으로, 한자 숫자(三十)는 아라비아 숫자로 세어 견준다
+    const digits = (t) => {
+        const s = String(t ?? '').normalize('NFKC');
+        const out = s.replace(/(\d),(?=\d{3})/g, '$1').match(/\d+(?:\.\d+)?/g) || [];
+        for (const m of s.match(/[零〇一二两兩三四五六七八九十百千万萬]{2,}/g) || []) { const v = cjkNumber(m); if (v) out.push(v); }
+        return out;
+    };
     const have = new Set(digits(source));
     // 한 자리 숫자는 세어서 적은 것일 수 있다("두 사람" → "2명") — 두 자리 이상과 소수만 본다
     return [...new Set(digits(text))].filter(n => n.length >= 2 && !have.has(n));
@@ -807,7 +935,7 @@ export function groundedIn(phrase, source, min = 4) {
     return p.length >= min && squashText(source).includes(p);
 }
 
-const HEDGE_RE = /(아직|거의|일부|반쯤|부분적|것 ?같|듯(?:하|싶|이|$)|모양이|지도 모른|려고 ?(?:했|한다|함)|하려|기로 ?(?:했|함)|\bnot yet\b|\balmost\b|\bnearly\b|\bpartly\b|\bpartially\b|\bseems?\b|\bappears? to\b|\bmight\b|\bmay\b|\bprobably\b|\bplans? to\b|\babout to\b|\bgoing to\b)/i;
+const HEDGE_RE = /(아직|거의|일부|반쯤|부분적|것 ?같|듯(?:하|싶|이|$)|모양이|지도 모른|려고 ?(?:했|한다|함)|하려|기로 ?(?:했|함)|\bnot yet\b|\balmost\b|\bnearly\b|\bpartly\b|\bpartially\b|\bseems?\b|\bappears? to\b|\bmight\b|\bmay\b|\bprobably\b|\bplans? to\b|\babout to\b|\bgoing to\b|まだ|ほぼ|ほとんど|一部|半分|たぶん|多分|おそらく|恐らく|かもしれな|かも知れな|ようだ|らしい|みたい|つもり|しようと|しかけ|还没|尚未|几乎|差点|一半|大概|也许|可能|好像|似乎|仿佛|打算|正要|快要)/i;
 /** 끝났다고 말하면서 말끝을 흐리는가 — 그런 판정으로는 닫지 않는다 */
 export function soundsHedged(text) {
     return HEDGE_RE.test(String(text ?? ''));
@@ -827,9 +955,20 @@ const PARTICLE_TAIL = /(으로부터|에게서|한테서|으로서|으로써|에
 /** 견줄 낱말들 — 한국어는 붙은 조사를 떼고, 로마자는 짧은 낱말을 뺀다 */
 export function contentWords(text) {
     const out = new Set();
-    for (const raw of String(text ?? '').toLowerCase().match(/[\p{L}\p{N}]+/gu) || []) {
-        if (/^[a-z0-9]+$/.test(raw)) { if (raw.length >= 4) out.add(raw); continue; }
+    for (const raw of wordsOf(text)) {
+        // 로마자: 세 글자부터(map · run · key), 기능어는 빼고, 굴절을 뗀 꼴도 함께
+        if (/^[a-z0-9]+$/.test(raw)) {
+            if (raw.length >= 3 && !EN_STOP.has(raw)) { out.add(raw); for (const st of enStems(raw)) if (!EN_STOP.has(st)) out.add(st); }
+            continue;
+        }
         if (/^\d+$/.test(raw)) continue;
+        // 일본어 · 중국어: 기능어를 빼고, 한자는 한 글자 내용어(船 · 傘 · 藏)도 남긴다. 가나는 두 글자 이상
+        if (HAS_CJK.test(raw) && !HAS_HANGUL.test(raw)) {
+            if (cjkStop(raw)) continue;
+            if (/\p{Script=Han}/u.test(raw) || [...raw].length >= 2) out.add(raw);
+            for (const js of jaStems(raw)) if (!cjkStop(js)) out.add(js);
+            continue;
+        }
         const stem = raw.length >= 3 ? raw.replace(PARTICLE_TAIL, '') : raw;
         if (stem.length >= 2) out.add(stem);
     }

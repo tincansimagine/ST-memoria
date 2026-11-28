@@ -21,7 +21,7 @@ Only the present changes the present. Status, bonds and cast growth come from pr
 /** 근거 글귀 — "지금 사실"을 바꾸는 기록에만 받아, 원문에 없으면 버린다 */
 const EVIDENCE_DIRECTIVE = `
 
-EVIDENCE: add "said" — a few words (4 to 15) copied character for character from this exchange that show it — to every status entry except the scene's own slots, and to every memory that is "secret" or has importance 0.8 or more. Copy, never compose or translate. If no words in the exchange show it, do not file it.`;
+EVIDENCE: add "said" — a few words (4 to 15; in Japanese or Chinese, 6 to 25 characters) copied character for character from this exchange, in its original language, that show it — to every status entry except the scene's own slots, and to every memory that is "secret" or has importance 0.8 or more. Copy, never compose or translate. If no words in the exchange show it, do not file it.`;
 const LEARN_DIRECTIVE = `
 
 FOUND OUT: the file below lists private matters already on record, tagged like [k1], with who knows each. For these matters this replaces the general rule of filing the learning as a new memory. If this exchange shows someone who did not know one of them finding it out — told, shown, overhearing, catching it in the act — add a top-level array "learned": [{"tag":"k1","who":"Name","guess":false,"said":"a few words copied character for character from the exchange that show them finding out"}]. Use "guess":true when they only come to suspect it. Do not refile the matter itself as a new memory. Nothing found out, no "learned".`;
