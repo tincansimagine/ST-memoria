@@ -129,7 +129,7 @@ THE SIX SHELVES
 3. status — the current value of one slot for one entity. Use these slots whenever they fit, always the same name: location, whereabouts, outfit, condition, injury, mood, holding, activity, goal — invent a new slot only when none of them fits, then reuse that exact name every time after. "activity" is what they are doing right now, stance included, as ONE line ("lying on the window seat", "sitting in a chair, unpacking") — never split posture into its own slot, so a stale pose can't contradict a fresh action. One fact lives in ONE slot: an injury goes under "injury" alone, never echoed into "condition" or "appearance" too. Refiling the same (entity, slot) replaces it. When a state ENDS, refile the slot with its new reality ("uninjured", "hands free", "calm") — a stale value left standing is worse than no entry. The scene itself is entity "scene": slots "location", "time_of_day", "date" when the story moves or time passes; "present" — the names of everyone in the scene right now, comma-separated, refiled whenever someone arrives or leaves; "mood" — the air of the scene in a few words, when it turns. Keep "date" as concrete as the story supports: a stated calendar date, or a day count ("day 12") if the story tracks one, rather than a vague relative phrase once enough has happened to anchor a real one — fall back to relative phrasing ("that night") only early on or when nothing firmer is available. A home or workplace merely mentioned is NOT the scene's location; move "scene" only when the story actually moves there. When a named character exits the scene with a stated destination or errand, file their slot "whereabouts". Skip anything unchanged. Status holds the current value only — how it came to be belongs in memories, not in the value.
 4. pledges — promises the story must keep: a thread that must stay open (keep_unresolved, loose_end), a secret that must not leak (keep_secret — say in the summary exactly who knows it), knowledge a character must not have yet (knowledge_gap), a consent line (consent), a hard limit of the world (world_limit), or a setup waiting for its payoff (foreshadow). A foreshadow is something the story has planted and may pay off later: an omen or hint, a detail left pointedly unexplained, an object or skill placed in someone's hands, a threat made and not yet carried out. An ordinary plan or errand is not a foreshadow, and neither is anything this same exchange already resolves. Most exchanges plant nothing.
 5. cast — the people of this story. The two leads — the player's character and the story's main character — belong here first: the archive starts empty, so nobody is "already known". Open a lead's card at their first clear characterization and keep it current as their role or voice evolves. Every other named character gets a card at their first real characterization, or when their role or occupation meaningfully changes. Only throwaway NPCs never get a card. Unknown fields stay null. Identity is precise: two people who share a name, title, or trade are still two people — and one person spelled two ways (nickname, romanization, translation) is still one. Reuse the exact name already on file. A pivotal character the story deliberately leaves unnamed may still get a card: use a short stable handle as the name (the SAME words every time, e.g. "the scarred courier") and set "provisional":true. When the story finally names them, file the card under the real name with "aka":["the scarred courier"] so the old records fold in. The fields that say who someone IS:
-   - "core" — the person underneath, written ONCE: three to six short clauses on temperament, what they value, their flaw, how they treat the other lead, and what they would never do. Draw it from the reference material about the character when it is given, plus what the story has plainly shown. No plot. Supply it only for a new card or one the cast list marks [no core yet]; for everyone else use null — a core already on file is never rewritten.
+   - "core" — the person underneath, written ONCE: three to six short clauses on temperament, what they value, their flaw, how they treat the other lead, and what they would never do. When the story or the reference makes their gender plain, open with it in one word ("woman; …") so later scenes never flip how they are referred to. Draw it from the reference material about the character when it is given, plus what the story has plainly shown. No plot. Supply it only for a new card or one the cast list marks [no core yet]; for everyone else use null — a core already on file is never rewritten.
    - "voice" — HOW they speak, as a compact pattern: politeness level and typical sentence endings, first-person word, pet phrases, verbal tics. A pattern only, never sample lines.
    - "line" — ONE line this character actually spoke in THIS exchange, copied character for character in its original language, under about 120 characters. Pick the line that sounds most like them — manner, not plot exposition. Null when they did not speak or nothing was characteristic. Never for the player's character.
    - "traits" — standing temperament only. A mood, one outburst, or a reaction to this particular scene is not a trait. Give only traits the card does not already carry: never a reworded, inflected or intensified form of one it has ("fiery hot-temper" when it has "hot-tempered", "resigned" when it has "resignation").
@@ -160,7 +160,7 @@ SHELVING RULES
 - Small talk shelves nothing; empty arrays are a valid answer. A few sharp entries beat many vague ones — when torn between filing and skipping, skip. Caps: 8 memories, 4 canon, 7 status, 4 pledges, 3 cast, 3 bonds.
 - "digest" and every "summary" are written in YOUR OWN words — condensed, factual, shorter than the source. Never copy sentences or whole passages from the scene into them; verbatim text belongs only in "quote" and "line". The digest names who did what and what came of it, and keeps the manner when the manner mattered.
 - A memory summary is one telegraphic logbook clause in event grammar — actor, action, target, outcome, and the cause when the text gives one — never literary prose. "Doyoon changed the door code after the argument, locking Eunwoo out" — not "in a moment of cold fury, the apartment ceased to welcome her". Name every participant in "entities", by name rather than pronoun, so the line still makes sense months later.
-- "recall" lists 2-4 cue words for finding this memory again later: synonyms, related situations, things someone might say that should surface it. Same language as the chat. Example: a ring gifted at the pier → ["proposal","jewelry","seaside"].
+- "recall" lists 2-5 cues for finding this memory again later, written the way the players would actually bring it up, in the chat's language: everyday words for the thing (not the summary's wording), a nickname for the object or place, the feeling it carries, and at most one short question someone might ask when it comes up again. Never a name already in "entities". Example: a ring gifted at the pier → ["proposal","jewelry","seaside","where's the ring?"].
 - "importance" is how much the future story will need this back. 0.8+ — identity-level facts, hard promises, irreversible turns of plot or heart (a confession, a death, a betrayal, a lasting vow, a major reveal). Around 0.5 — useful context, a meaningful development. 0.3 or below — passing color. When torn, rate by what would break the story if forgotten. "weight" rates the exchange as a whole on the same scale.
 - "time_passed" is how much STORY time this exchange covered, including skips the text implies: a night's sleep, "the following morning", "a week later", an explicit "three years later". One compact duration — 30m, 6h, 2d, 1w, 3mo, 2y — or "0" when the scene flows on unbroken. Infer conservatively from what the text supports; when in doubt, "0".
 
@@ -285,7 +285,7 @@ When space is tight, compress the oldest and least consequential material first,
 // 역대 기본 프롬프트의 해시 (git 이력 33개 버전에서 추출). 저장된 프롬프트가 이 중 하나면
 // 사용자가 손대지 않은 기본값이다 - 프롬프트 개정 때는 이런 것만 새 기본값으로 바꾼다.
 const PAST_DEFAULT_PROMPT_HASHES = {
-    archivist: [6023873964205809, 639936761966242, 803880390645810, 2848760173954906, 3173238436359310, 4236944735344932, 4257825500303407, 5233514286929263, 5241724082412907, 7856124521163849, 8652097948966840, 8865029287759619],
+    archivist: [2821381384617300, 6949330530776338, 6023873964205809, 639936761966242, 803880390645810, 2848760173954906, 3173238436359310, 4236944735344932, 4257825500303407, 5233514286929263, 5241724082412907, 7856124521163849, 8652097948966840, 8865029287759619],
     supervisor: [3818969157655125, 8290944938030339],
     chunk: [1274023884496747, 4174663568090772, 7284549229336977, 7579232396777644, 8741923026190275],
     arc: [4328717764564628, 4395701141853736, 4412824703878145, 5819810183863630, 6451680491176218],
@@ -404,7 +404,7 @@ const DEFAULT_SETTINGS = Object.freeze({
     activeBundle: '',         // 지금 적용 중인 세트 ('' = 기본 설정)
     bundleBase: null,         // 세트가 적용된 동안 맡아 둔 기본 설정
     noticed: {},              // 한 번만 띄우는 안내를 이미 봤는지
-    promptRev: 23,
+    promptRev: 24,
     settingsRev: 4,
     chapterRecall: false,     // 옛 챕터 떠올리기 — 지금 말과 맞는 아주 옛 챕터 요약을 하나 더 싣는다 (기본 끔: 끝난 시절을 지금처럼 끌어온다)
     fossil: { settling: 12, fossilized: 40, deep: 120 },
@@ -2413,11 +2413,13 @@ function wordTrigrams(text) {
 function embedQuery(text, L) {
     if (!L || L.n < 4) return embedText(text);
     const top = Math.log((L.n + 1) / 0.5);
-    const rare = (df) => (df ? Math.max(0.05, L.idf(df) / top) : 1);
+    // 서고에도 최근 대화에도 없는 낱말은 맞을 기억이 거의 없다 — 가장 큰 무게를 주면 벡터만 부풀려 실제로 맞는 낱말의 코사인을 깎는다.
+    // 아주 옛 대사(인용)에만 남은 말일 수 있어 0으로 지우지는 않고 조금만 남긴다
+    const rare = (df, none = 0.1) => (df ? Math.max(0.05, L.idf(df) / top) : none);
     const v = new Float32Array(EMB_DIM);
     for (const [tok, w0] of tokenizeForEmbedding(text)) {
         const kind = tok[0], body = tok.slice(2);
-        const w = kind === 'w' || kind === 's' ? w0 * rare(L.wordDf.get(body) || 0) : kind === 't' ? w0 * rare(L.triDf.get(body) || 0) : w0;
+        const w = kind === 'w' || kind === 's' ? w0 * rare(L.wordDf.get(body) || 0) : kind === 't' ? w0 * rare(L.triDf.get(body) || 0, 0.15) : kind === 'c' ? w0 * 0.5 : w0;
         const h1 = getStringHash(tok) >>> 0;
         const h2 = getStringHash(tok, 1337) >>> 0;
         v[h1 % EMB_DIM] += ((h2 & 1) ? 1 : -1) * w;
@@ -3596,7 +3598,7 @@ function sanitizeExtraction(raw, userText, assistantText, { memoryCap = 12 } = {
         importance: clampScore(firstOf(raw, 'weight', 'importance', 'significance'), 0.4),
         elapsedDays: parseDurationDays(firstOf(raw, 'time_passed', 'elapsed', 'time_elapsed', 'duration')),
         // 이 교환이 끝난 지금이 이야기 며칠째인지 — 칸 이름이나 꼴이 달라도 받는다
-        clockDay: raw?.clock ?? raw?.clock_day ?? raw?.story_day ?? raw?.story_clock ?? raw?.day ?? raw?.now ?? null,
+        clockDay: raw?.clock ?? raw?.clock_day ?? raw?.story_day ?? raw?.story_clock ?? raw?.day ?? null, // "now"는 한 줄 글이라 그 안의 숫자를 날로 읽지 않는다
         memories: [], worldRules: [], entityStates: [], locks: [], characters: [], milestones: [], items: [], bonds: [],
     };
 
@@ -3612,7 +3614,7 @@ function sanitizeExtraction(raw, userText, assistantText, { memoryCap = 12 } = {
             importance: clampScore(m?.importance, 0.5),
             entities: listOf(firstOf(m, 'entities', 'characters', 'people', 'who')).map(e => cleanStr(e, 60)).filter(Boolean).slice(0, 6),
             tags: listOf(m?.tags).map(toSnake).filter(Boolean).slice(0, 6),
-            hints: listOf(firstOf(m, 'recall', 'cues', 'keywords', 'hints')).map(h => cleanStr(h, 40)).filter(Boolean).slice(0, 5),
+            hints: listOf(firstOf(m, 'recall', 'cues', 'keywords', 'hints')).map(h => cleanStr(h, 40)).filter(Boolean).slice(0, 6),
             visibility: normVisibility(firstOf(m, 'visibility', 'privacy')),
             owner: cleanStr(m?.owner, 60) || null,
             // 누가 아는가 — 소유자 말고도 이 비밀·속사정을 아는 인물 (공개 기억에는 의미가 없다)
@@ -3623,6 +3625,8 @@ function sanitizeExtraction(raw, userText, assistantText, { memoryCap = 12 } = {
             by: naStr(m?.by, 60), to: naStr(m?.to, 60),
             // 그때의 일 — 회상 · 꿈 · 전해 들은 이야기 (없으면 지금 일)
             when: normWhen(m?.when),
+            // 이 교환 안에서 끝까지 매듭지어진 일 (다툼이 화해로 끝났다, 싸움이 끝나 다들 흩어졌다) — 지난 일로만 싣는다
+            closed: m?.closed === true || m?.resolved === true || m?.over === true,
             // 본문에 모른다고 나온 사람 · 가진 사람이 일부러 숨기는 상대 (기록할 때의 근거로만)
             unaware: listOf(firstOf(m, 'in_the_dark', 'unaware', 'inTheDark')).map(e => cleanStr(e, 60)).filter(Boolean).slice(0, 6),
             keepFrom: listOf(firstOf(m, 'keep_from', 'keepFrom', 'hidden_from')).map(e => cleanStr(e, 60)).filter(Boolean).slice(0, 6),
@@ -3755,10 +3759,13 @@ function sanitizeExtraction(raw, userText, assistantText, { memoryCap = 12 } = {
         const to = cleanStr(firstOf(b, 'to', 'b', 'target', 'toward', 'object') ?? pair?.to, 60);
         const stage = cleanStr(firstOf(b, 'stage', 'label', 'status', 'relation', 'value'), 120);
         if (!from || !to || !stage || entityKey(from) === entityKey(to)) continue;
-        if (normWhen(b?.when)) { out.offPresent = (out.offPresent || 0) + 1; continue; } // 회상 속 사이는 지금 사이가 아니다
+        // 꿈 속 사이는 버린다. 회상 · 전해 들은 사이는 "지금 사이"를 바꾸지 않지만, 둘 사이가 아직 한 줄도 없으면
+        // 그것이 이 둘이 처음 드러난 사이다 (소꿉친구였다 · 옛 스승이었다) — 처음 관계로만 받는다 (upsertBond 가 가린다)
+        const when = normWhen(b?.when);
+        if (when === 'dream') { out.offPresent = (out.offPresent || 0) + 1; continue; }
         const kind = bondKindOf('', firstOf(b, 'kind', 'tone', 'type'));
         out.bonds.push({
-            from, to, stage,
+            from, to, stage, ...(when ? { backstory: true } : {}),
             // 관계의 갈래(사랑 · 우정 · 적대…) — 사서가 적었을 때만. 관계도의 선 색에만 쓴다
             ...(kind !== 'other' ? { kind } : {}),
             basis: cleanStr(firstOf(b, 'basis', 'why', 'reason', 'evidence'), 200),
@@ -4372,6 +4379,7 @@ function upsertBond(store, b, turnIndex, { manual = false } = {}) {
     if (!from || !to || entityKey(from) === entityKey(to)) return null;
     let row = store.bonds.find(x => bondKey(x.from, x.to) === bondKey(from, to));
     if (row?.disabled && !manual) return null; // 사용자가 치운 줄은 사서가 되살리지 않는다
+    if (b.backstory && row) return null; // 회상 속 사이는 이미 있는 지금 사이를 바꾸지 않는다 — 처음 드러날 때만 받는다
     const entry = { turn: turnIndex, stage: b.stage, basis: b.basis || '', calls: b.calls || '', unsaid: b.unsaid || '' };
     if (b.kind && BOND_KINDS[b.kind] && b.kind !== 'other') entry.kind = b.kind; // 갈래 (관계도의 선 색) — 적혀 왔을 때만
     if (manual) entry.manual = true;
@@ -4809,6 +4817,11 @@ function standingMemoriesNear(store, text, beforeTurn, cap = 8) {
         .map(x => x.m);
 }
 
+/** 정리 순서 — 낮을수록 먼저 정리. 턴 원문 기억(episode_raw)은 요약 · 사서의 기억과 겹치므로, 물린 기억은 이미 지나간 일이므로 먼저 */
+function pruneKey(m) {
+    const raw = (m.tags || []).includes('episode_raw') ? -0.45 : 0, old = m.retired ? -0.3 : 0;
+    return (m.importance ?? 0.5) + raw + old + (m.turnIndex || 0) / 10000;
+}
 function pruneMemories(store) {
     const settings = getSettings();
     const max = Math.max(50, settings.maxMemories);
@@ -4819,14 +4832,14 @@ function pruneMemories(store) {
     const cursor = store.summaryCursor || 0;
     let removable = store.memories
         .filter(m => !m.pinned && !m.manual && m.turnIndex <= cursor)
-        .sort((a, b) => (a.importance + a.turnIndex / 10000) - (b.importance + b.turnIndex / 10000));
+        .sort((a, b) => pruneKey(a) - pruneKey(b));
     let need = store.memories.length - max;
     if (removable.length < need) {
         // 보존된 옛 기억만으로 한도를 못 맞추면(전체가 거의 다 최신), 어쩔 수 없이
         // pinned/manual만 빼고 나머지 중 가장 오래되고 안 중요한 것부터 마저 정리한다
         removable = store.memories
             .filter(m => !m.pinned && !m.manual)
-            .sort((a, b) => (a.importance + a.turnIndex / 10000) - (b.importance + b.turnIndex / 10000));
+            .sort((a, b) => pruneKey(a) - pruneKey(b));
     }
     const toRemove = new Set(removable.slice(0, need).map(m => m.id));
     store.memories = store.memories.filter(m => !toRemove.has(m.id));
@@ -4939,15 +4952,24 @@ async function commitTurns(mesIds, { silent = true, force = false, retry = 1 } =
     // 도감 명단 — 사서가 "누가 아직 카드가 없는지"를 추측하지 않고 알 수 있게 한다.
     // 명단에 없는 등장인물(주역 포함)은 이번 턴에 바로 카드를 연다.
     // 비활성 카드도 명단에 올린다 — 사용자가 치운 인물을 사서가 새 카드로 되살리지 못하게.
+    // 명단이 40을 넘으면 — 처음 연 차례대로 자르면 최근에 나온 인물이 빠져 같은 사람의 카드가 또 열린다.
+    // 이번 교환에 이름이 나온 인물(치운 카드 포함) → 고정 카드 → 최근에 움직인 카드 차례로 40명을 고른다. 보여 주는 차례는 원래대로
+    const castHay = `${userText}\n${assistantText}`.toLowerCase();
+    const castNamed = (c) => [c.name, ...(c.aliases || [])].some(n => n && String(n).length >= 2 && castHay.includes(String(n).toLowerCase()));
+    const castPick = store.characters.length <= 40 ? store.characters : (() => {
+        const rank = (c) => (castNamed(c) ? 3e6 : 0) + (c.locked ? 2e6 : 0) + (c.disabled ? 0 : 1e6) + (c.updatedTurn ?? c.firstTurn ?? 0);
+        const keep = new Set(store.characters.slice().sort((x, y) => rank(y) - rank(x)).slice(0, 40));
+        return store.characters.filter(c => keep.has(c));
+    })();
     const filedCast = settings.characterTracking
-        ? store.characters.slice(0, 40).map(c => `${c.name}${c.locked ? ' [LOCKED]' : ''}${!c.core && !c.locked && !c.disabled ? ' [no core yet]' : ''}`)
+        ? castPick.map(c => `${c.name}${c.locked ? ' [LOCKED]' : ''}${!c.core && !c.locked && !c.disabled ? ' [no core yet]' : ''}`)
         : null;
     const lockedNote = settings.characterTracking && store.characters.some(c => c.locked)
         ? ' Cards marked [LOCKED] are fixed by the user: never restate or revise their name, age, role, occupation, looks, core, voice, or traits — for them file relationship changes and a spoken "line" only.'
         : '';
     const castLine = !settings.characterTracking ? ''
         : filedCast.length
-            ? `Cast already on file: ${filedCast.join(', ')}. Anyone present in this exchange who is NOT on this list — the leads included — gets a card now; for those already listed, file only meaningful changes. Spell every one of these names EXACTLY as written here (same script, same characters) everywhere you use them this turn: cast names, status "entity" and "owner", and memories "entities". A name respelled (romanized, translated, or abbreviated) opens a second record for the same person, and the two then hold different versions of where they are and how they feel.${lockedNote}\n`
+            ? `Cast already on file: ${filedCast.join(', ')}. Anyone present in this exchange who is NOT on this list — the leads included — gets a card now, and so does anyone absent but spoken of in a way that sets who they are to the cast (a missing sister, an old master, the rival everyone fears) — a name merely dropped in passing does not; for those already listed, file only meaningful changes. Spell every one of these names EXACTLY as written here (same script, same characters) everywhere you use them this turn: cast names, status "entity" and "owner", and memories "entities". A name respelled (romanized, translated, or abbreviated) opens a second record for the same person, and the two then hold different versions of where they are and how they feel.${lockedNote}\n`
             : 'The cast shelf is empty — no one has a card yet, not even the leads. Anyone characterized in this exchange gets a card now.\n';
 
     // 옛 비밀·속사정 가운데 이번 교환에 얽힌 것 — 누가 새로 알게 됐는지 함께 묻는다 (아는 사람을 손으로 고친 기억은 올리지 않는다)
@@ -5315,6 +5337,7 @@ async function commitTurns(mesIds, { silent = true, force = false, retry = 1 } =
         if (said.by) row.by = said.by;
         if (said.to) row.to = said.to;
         if (m.when && timeRoles) row.when = m.when; // 회상 · 꿈 · 전해 들은 이야기 — 장부에 "그때 일"로 실린다
+        if (m.closed && timeRoles && !['promise', 'goal', 'secret', 'preference', 'fact'].includes(row.kind)) row.closed = true; // 매듭지은 일 — 장부에 "지난 일"로만 실린다
         // 본문에 모른다고 나온 사람 · 일부러 숨기는 상대 — 기록할 때의 근거로만 (장면에 누가 있는지 짐작하지 않는다). 서고에 있거나 이번 원문에 나온 사람만, 아는 사람과 겹치지 않게
         if (row.visibility !== 'public' && guard && (m.unaware?.length || m.keepFrom?.length)) {
             const knowing = new Set([row.owner, ...(row.knowers || [])].filter(Boolean).map(entityKey));
@@ -5768,18 +5791,23 @@ async function maybeFoldEras(store) {
     if (held && store.turnCounter >= held && store.turnCounter - held < 8) return false;
     const directive = '\n\nThese are the OLDEST records of a long story, being folded into its single standing "story so far". Up to 10 PLOT bullets. Spend them on what the whole story still stands on: how the characters met and what they became to each other, the turning points, lasting promises, secrets and who holds them, deaths, and anything still unresolved. Let routine scenes go.';
     const prior = folding.find(a => a.saga);
-    const sys = `${getSettings().prompts.arc}${directive}\n\n${languageDirective()}`;
+    const sys = `${getSettings().prompts.arc}${directive}${ARC_ANCHOR}\n\n${languageDirective()}`;
     const material = folding.map(a => `[t${a.fromTurn}–t${a.toTurn}${a === prior ? ' · the story so far' : ''}]\n${a.text}`).join('\n\n');
     const fold = async (note = '') => cleanMultiline(sanitizeRecordOutput(await callAuxLLM(sys, material + note + languageTail(), { task: 'summary', maxTokens: auxTokens(4000) })), 2800);
     // 접을 때마다 '옛 이야기'가 조금씩 깎이면 몇 번 뒤에는 이야기의 처음이 남지 않는다.
     // 새 글이 지금의 옛 이야기 절반에도 못 미치면(답이 잘렸거나 최근 것만 적은 것) 한 번 더 쓰게 하고, 그래도 그러면 지금 것을 그대로 둔다.
     const thin = (t) => !!prior && prior.text.length > 400 && t.length < prior.text.length * 0.45;
+    // 사람이 빠졌는가 — 여러 연대기에 나왔거나 옛 이야기에 있던 인물이 새 글에서 사라졌으면 한 번 더 쓰게 한다 (문제없으면 호출은 늘지 않는다)
+    const lost = (t) => peopleLost(store, folding.map(a => a.text), t, prior?.text || '');
     let text = '';
     try {
         text = await fold();
-        if (text && !refusedReply(text) && thin(text)) {
-            const again = await fold('\n\n(Your previous draft kept only a fraction of the record marked "the story so far". Nothing that record holds may be dropped: carry every development in it, shortened where needed, then add what the later records bring.)');
-            if (again && !refusedReply(again) && again.length > text.length) text = again;
+        const gone = text && !refusedReply(text) ? lost(text) : [];
+        if (text && !refusedReply(text) && (thin(text) || gone.length)) {
+            const notes = [thin(text) ? 'Your previous draft kept only a fraction of the record marked "the story so far". Nothing that record holds may be dropped: carry every development in it, shortened where needed, then add what the later records bring.' : '',
+                gone.length ? `Your previous draft lost these people entirely: ${gone.join(', ')}. Keep who each of them is to the others.` : ''].filter(Boolean).join(' ');
+            const again = await fold(`\n\n(${notes})`);
+            if (again && !refusedReply(again) && !thin(again) && (thin(text) ? again.length > text.length : lost(again).length < gone.length)) text = again;
             if (thin(text)) {
                 if (getStore() === store) { store.eraFoldHeld = store.turnCounter; logActivity('error', "'옛 이야기'를 접은 글이 지금 것보다 크게 줄어 받지 않았어요 — 지금 것을 그대로 두고 몇 턴 뒤 다시 해 봐요"); }
                 return false;
@@ -5804,6 +5832,44 @@ async function maybeFoldEras(store) {
     logActivity('summary', `가장 오래된 연대기 ${folding.length}개를 '옛 이야기'로 접었어요`);
     return true;
 }
+
+/**
+ * 묶음 요약에 함께 넘기는 "이 구간에서 이미 무겁게 적어 둔 것" — 무거운 기억 · 처음 나온 인물 · 새로 정해진 부르는 말.
+ * 턴 한 줄 요약에는 이런 것이 자주 빠져, 요약을 거듭할수록 "누가 누구를 뭐라 부르는지", "그 약속"이 사라졌다.
+ * 턴 요약에 이미 거의 그대로 있는 것은 뺀다 (모델을 따로 부르지 않는다)
+ */
+function keyFactsBlock(store, fromTurn, toTurn, digests) {
+    const inSpan = (t) => (t ?? -1) >= fromTurn && (t ?? -1) <= toTurn;
+    const lines = [
+        ...store.memories.filter(m => !m.disabled && !m.retired && inSpan(m.turnIndex) && (m.importance ?? 0) >= 0.75 && !(m.tags || []).includes('episode_raw')
+            && textOverlap(m.summary, digests) < 0.6)
+            .sort((a, b) => (b.importance ?? 0) - (a.importance ?? 0)).slice(0, 6).map(m => `- ${cleanStr(m.summary, 200)}`),
+        ...(store.characters || []).filter(c => !c.disabled && inSpan(c.firstTurn) && !(c.firstTurn <= 0)).slice(0, 4)
+            .map(c => `- ${c.name} first appears${c.role ? ` (${cleanStr(c.role, 60)})` : ''}`),
+        ...(store.bonds || []).filter(b => !b.disabled).flatMap(b => {
+            const e = (b.log || []).filter(x => inSpan(x.turn) && x.calls).pop();
+            const before = (b.log || []).filter(x => (x.turn ?? 0) < fromTurn && x.calls).pop();
+            return e && e.calls !== before?.calls ? [`- ${b.from} now calls ${b.to} ${e.calls}`] : [];
+        }).slice(0, 4),
+    ];
+    return lines.length ? `Key facts already filed from these turns — each must survive in the record (PLOT or SHIFTS), in the record's own words:\n${lines.join('\n')}\n` : '';
+}
+
+/** 합치기 · 접기로 사라진 사람 — 넣은 글 둘 이상에(또는 기준 글에) 나온 카드 인물이 새 글 어디에도 없으면 (모델 호출 없음) */
+function peopleLost(store, src, text, anchor = '') {
+    const low = String(text || '').toLowerCase(), lowSrc = src.map(t => String(t || '').toLowerCase()), lowAnchor = String(anchor || '').toLowerCase();
+    const out = [];
+    for (const c of store?.characters || []) {
+        if (c.disabled) continue;
+        const names = [c.name, ...(c.aliases || [])].map(n => String(n || '').toLowerCase()).filter(n => [...n].length >= 2);
+        if (!names.length || names.some(n => low.includes(n))) continue;
+        const seen = lowSrc.filter(t => names.some(n => t.includes(n))).length;
+        if (seen >= 2 || (lowAnchor && names.some(n => lowAnchor.includes(n)))) out.push(c.name);
+    }
+    return out.slice(0, 6);
+}
+/** 연대기 · 옛 이야기를 쓸 때 덧붙이는 말 — 사람 사이의 처음과 부르는 말은 끝까지 남긴다 */
+const ARC_ANCHOR = '\n\nWhatever else is shortened, SHIFTS keeps, for each pair of central characters, how they met and what they call each other, whenever the records say so — later scenes lean on exactly that.';
 
 /** 요약에 넘기는 턴 기록의 꼬리표 — 순서(tN), 결정적 턴 표시(★), 작중 시간·장소 */
 const SETTLED_AT_SUMMARY = '요약 때 정리됨';
@@ -5884,7 +5950,7 @@ async function maybeSummarizeChunk(store, { flushAll = false, onProgress = null,
             : '';
         try {
             const refBlock = await buildReferenceBlock({ lean: true });
-            const userPrompt = [refBlock, previousSummariesForContext(store), threadBlock, staleBlock, `Turn digests to weave:\n${parts.join('\n')}`]
+            const userPrompt = [refBlock, previousSummariesForContext(store), threadBlock, staleBlock, keyFactsBlock(store, fromTurn, toTurn, parts.join(' ')), `Turn digests to weave:\n${parts.join('\n')}`]
                 .filter(Boolean).join('\n') + languageTail();
             const sysPrompt = `${settings.prompts.chunk}${threadDirective}${staleDirective}\n\n${languageDirective()}`;
             let reply = splitClosedLine(await callAuxLLM(sysPrompt, userPrompt, { task: 'summary', maxTokens: auxTokens(4000) }));
@@ -6038,7 +6104,7 @@ async function rebuildAllSummaries(onProgress) {
  * 그래도 그러면 합치지 않는다 — 부른 쪽이 옛 글을 그대로 둔다 (합칠 때마다 처음이 깎이면 몇 번 뒤에는 이야기의 시작이 남지 않는다)
  */
 async function arcMergeText(parts, { max = 2400 } = {}) {
-    const sys = `${getSettings().prompts.arc}\n\n${languageDirective()}`;
+    const sys = `${getSettings().prompts.arc}${ARC_ANCHOR}\n\n${languageDirective()}`;
     const material = parts.map(c => `[t${c.fromTurn}–t${c.toTurn}]\n${c.text}`).join('\n\n');
     const span = `t${parts[0]?.fromTurn ?? '?'}–t${parts[parts.length - 1]?.toTurn ?? '?'}`;
     const ask = async (note = '') => cleanMultiline(sanitizeRecordOutput(await callAuxLLM(sys, material + note + languageTail(), { task: 'summary', maxTokens: auxTokens(4000) })), max);
@@ -6048,7 +6114,15 @@ async function arcMergeText(parts, { max = 2400 } = {}) {
     if (refusedReply(text)) { logActivity('error', '연대기 요약 대신 거절문이 와서 받지 않았어요'); return ''; }
     const src = parts.map(p => p.text);
     const loss = mergeLoss(src, text, max);
-    if (!loss) return text;
+    if (!loss) {
+        // 사람이 빠졌으면 한 번 더 — 그래도 빠지면 처음 글을 받는다 (합치기 자체는 막지 않는다)
+        const gone = peopleLost(getStore(), src, text);
+        if (!gone.length) return text;
+        let fix = '';
+        try { fix = await ask(`\n\n(Your previous record lost these people entirely: ${gone.join(', ')}. Write it again in the same structure and keep who each of them is to the others.)`); } catch (e) { console.debug(`[${MODULE_NAME}] 연대기 병합 다시 쓰기 실패`, e); }
+        if (fix && !refusedReply(fix) && !mergeLoss(src, fix, max) && peopleLost(getStore(), src, fix).length < gone.length) { logActivity('summary', `${span} 요약을 합친 글에서 빠진 인물이 있어 한 번 다시 쓰게 했어요`); return fix; }
+        return text;
+    }
     let again = '';
     try {
         again = await ask(`\n\n(Your previous record ${loss === 'short' ? 'was far too short for this much material' : 'dropped the earliest records — the beginning of the story is missing'}. Write it again in the same structure, covering every record above from the first to the last.)`);
@@ -6645,8 +6719,16 @@ async function retrieveMemories(queryText, recentUserTexts, sceneText = '') {
     const trace = new Map();
     const eligible = [];
 
-    // 내장 문장 벡터도 질문 쪽은 그 채팅에서 드문 정도로 무게를 단다 — "받은 · 했던"이 "나침반"과 같은 무게로 맞던 것
+    // 다른 이름 · 호칭으로 불린 사람 — "선배가 그때 뭐라 했지?"의 "선배", 별명이나 옛 이름으로 부른 사람도 그 사람의 기억과 맞게 한다 (기억의 인물 칸은 카드 이름으로 적혀 있다)
+    const calledKeys = new Set(), calledHay = String(queryText || '').toLowerCase();
+    if (settings.recallTune !== false && calledHay.trim()) {
+        for (const c of store.characters || []) {
+            if (!c.disabled && (c.aliases || []).some(n => n && [...String(n)].length >= 2 && calledHay.includes(String(n).toLowerCase()))) calledKeys.add(entityKey(c.name));
+        }
+        for (const k of titleReferred(store, calledHay)) calledKeys.add(k);
+    }
     const lexW = lexStats(store, active);
+    // 내장 문장 벡터도 질문 쪽은 그 채팅에서 드문 정도로 무게를 단다 — "받은 · 했던"이 "나침반"과 같은 무게로 맞던 것
     const queryVec = embedQuery(queryText, lexW);
     const auxTexts = (recentUserTexts || []).slice(0, settings.multiQueryRecent);
     const auxVecs = auxTexts.map(t => embedQuery(t, lexW));
@@ -6668,13 +6750,16 @@ async function retrieveMemories(queryText, recentUserTexts, sceneText = '') {
     const shortQ = tune && !!String(sceneText || '').trim() && (bare.length < 12 || queryTokens.size < 3);
     const tail = shortQ ? String(sceneText).slice(-500) : '';
     const tailTokens = shortQ ? new Set((tail.toLowerCase().match(/[\p{L}\p{N}]+/gu) || [])) : null, tailGrams = shortQ ? toCharGrams(tail) : null;
-    const sW = shortQ ? 0.95 : 0.85;
+    // 직전 장면 문맥의 몫 — 짧은 입력은 장면을 거의 입력만큼 믿고, 제대로 된 질문은 질문 자체가 앞선다 (장면의 흔한 서술어가 질문 점수를 덮지 않게)
+    let sW = shortQ ? 0.95 : intent === 'detail' || intent === 'history' ? 0.4 : 0.6;
 
     // 서사 시계: 이야기 속에서 흐른 시간도 노화 축으로 (시간 스킵이 잦은 롤플레잉 대응)
     const storyAges = settings.storyClock ? buildStoryAgeMap(store) : null;
 
     // 회상 쉬어가기: 앞선 답변들에 연달아 실렸던 기억은 점수를 깎는다 (지금 다시 쓰는 답변의 몫은 세지 않는다)
     const coolHistory = settings.recallCooldown !== false ? recallHistoryFor(getCurrentChatId()) : [];
+    const entityKeyMemo = new Map();
+    const keyOfEntity = (e) => { const r = String(e); if (!entityKeyMemo.has(r)) entityKeyMemo.set(r, entityKey(canonEntityName(store, r))); return entityKeyMemo.get(r); };
     const knownNames = [name1, name2, ...(store.characters || []).flatMap(c => [c.name, ...(c.aliases || [])])]
         .map(n => String(n || '').toLowerCase()).filter(n => n.length >= 2);
     let coolBefore = chat.length - 1;
@@ -6721,9 +6806,13 @@ async function retrieveMemories(queryText, recentUserTexts, sceneText = '') {
     const indexLower = new Map(active.map(m => [m.id, memoryIndexText(m).toLowerCase()]));
     // 드문 낱말: 기억 글에서도, 대화 원문에서도 드물어야 한다 — 기억 한 곳에만 적힌 "받은 · 했던"이 직접 가리킨 것으로 잡혀 엉뚱한 기억을 밀어 올렸다
     const rareWords = rareQueryWords(queryText, [...indexLower.values()]).filter(r => (lexW.wordDf.get(r.word) || 0) <= Math.max(2, lexW.n * 0.02));
+    // 서고에 드문 말로 무언가를 콕 집어 물었으면("나침반 어디 뒀더라") 그 물음이 앞선다 — 장면을 닮은 흔한 기억이 끼어들지 않게
+    // 짧은 물음이라도 드문 말이 있으면 장면 쪽(문맥 · 직전 장면 끝의 낱말)을 덜 믿는다 — "응", "그래서?"에는 드문 말이 없어 그대로다
+    const pointed = rareWords.length > 0;
+    if (pointed) sW = Math.min(sW, shortQ ? 0.55 : 0.35);
     // 낱말 축의 무게: 그 채팅에서 드문 낱말 · 조각일수록 무겁다 (서고 기억과 채팅 원문으로 센다)
     const qLex = { stems: stemSet(queryText), grams: queryGrams, raw: queryTokens };
-    const tLex = tailTokens ? { stems: stemSet(tail), grams: tailGrams, raw: tailTokens } : null;
+    const tLex = tailTokens && !pointed ? { stems: stemSet(tail), grams: tailGrams, raw: tailTokens } : null;
 
     // 이 채팅에서 회상하지 않을 말 — 그 말이 든 기억은 후보에서 뺀다 (지우지 않는다. 고정한 기억은 사용자의 뜻이라 그대로)
     const mute = (store.recallMute || []).map(w => String(w).toLowerCase()).filter(w => w.length >= 2);
@@ -6789,7 +6878,7 @@ async function retrieveMemories(queryText, recentUserTexts, sceneText = '') {
         // 어휘 축: 단어 일치와 글자 조각 일치 중 더 강하게 닿는 쪽 —
         // 한국어는 조사·어미 변형 때문에 단어 축만으로는 절반이 샌다
         const lex = lexScore(lexW, m.id, qLex, tLex);
-        const matchedEntities = (m.entities || []).filter(e => queryLower.includes(String(e).toLowerCase()));
+        const matchedEntities = (m.entities || []).filter(e => queryLower.includes(String(e).toLowerCase()) || (calledKeys.size > 0 && calledKeys.has(keyOfEntity(e))));
         const entityHit = matchedEntities.length > 0;
         // 단서 가림: 이미 맞은 개체 이름에 통째로 포함되는 단서는 같은 매치의 중복 가산이므로 제외
         const hintHit = (m.hints || []).some(h => {
@@ -6802,7 +6891,7 @@ async function retrieveMemories(queryText, recentUserTexts, sceneText = '') {
             && (m.entities || []).some(e => presentEntities.has(String(e).toLowerCase()));
         // 드문 낱말이 닿았는가 — 길고 드문 낱말 하나, 또는 드문 낱말 둘이면 "직접 가리킴"으로 친다
         const idxLower = indexLower.get(m.id) || '';
-        const rareHits = rareWords.filter(r => idxLower.includes(r.word));
+        const rareHits = rareWords.filter(r => { if (idxLower.includes(r.word)) return true; const st = looseStem(r.word); return st.length >= 2 && st !== r.word && idxLower.includes(st); });
         const rareStrong = rareHits.length >= 2 || rareHits.some(r => r.word.length >= 3 && !/^[a-z0-9]+$/.test(r.word)) || rareHits.some(r => r.word.length >= 6);
         // 흔한 낱말이 겹치는 것(문맥 유사도의 잡음)보다 확실히 앞서도록 — 그 낱말을 가진 기억은 몇 개뿐이다
         const rareBoost = Math.min(0.2, rareHits.reduce((a, r) => a + 0.03 * r.idf, 0)) + (rareStrong ? 0.06 : 0);
@@ -7068,13 +7157,14 @@ function auditRecallEcho(mes, mesId = chat.indexOf(mes)) {
         const m = store.memories.find(x => x.id === id);
         if (!m || m.pinned || m.manual || m.disabled) continue;
         // 반영 판정: 기억의 고유 토큰(요약·개체)이 응답 본문에 충분히 등장하는가.
-        // 조사·어미가 붙는 한국어 특성상 부분 문자열로 매칭한다.
+        // 조사·어미가 붙는 한국어 특성상 줄기(조사를 뗀 말)로 부분 문자열 매칭한다 — "나침반을"이 답의 "나침반은"과 맞게.
+        // 요약은 서술이고 답은 장면이라 같은 낱말을 다 쓰지 않는다: 줄기로 보고 문턱을 낮춘다 (반영된 기억이 "무시됨"으로 식지 않게)
         const toks = [...new Set(
-            `${m.summary} ${(m.entities || []).join(' ')}`.toLowerCase().match(/[\p{L}\p{N}]{2,}/gu) || []
+            (`${m.summary} ${(m.entities || []).join(' ')}`.toLowerCase().match(/[\p{L}\p{N}]{2,}/gu) || []).map(wordStem).filter(t => [...t].length >= 2)
         )];
         if (toks.length < 3) continue;
         const hits = toks.filter(t => replyLower.includes(t)).length;
-        const echoed = hits >= 2 && hits / toks.length >= 0.35;
+        const echoed = hits >= 2 && hits / toks.length >= 0.25;
 
         m.shown = (m.shown || 0) + 1;
         if (echoed) {
@@ -7166,7 +7256,8 @@ function formatMemoryLine(m, withExcerpt, storyAges = null, turnNow = 0, banned 
     // 40턴이 지나면 요약만 남기고 인용은 뗀다 (고정·핵심 기억은 예외: 정체성급 대사는 유지)
     const isEpisode = (m.tags || []).includes('episode_raw');
     const quoteAgo = Math.max(0, (turnNow || 0) - (m.turnIndex || 0));
-    const quoteFresh = quoteAgo <= 40 || m.pinned || (m.importance ?? 0) >= 0.8;
+    // 매듭지은 일은 대사를 오래 싣지 않는다 — 끝난 다툼의 말을 다시 꺼내면 그 장면이 되풀이된다
+    const quoteFresh = m.closed ? quoteAgo <= 8 || m.pinned : quoteAgo <= 40 || m.pinned || (m.importance ?? 0) >= 0.8;
     // 금지 표현이 든 옛 대사는 걷어내면 말이 깨지므로 인용째로 뺀다
     const quote = (withExcerpt && !isEpisode && quoteFresh && m.excerpt && m.excerpt.length <= 160
         && !(banned?.length && hasPhrase(m.excerpt, banned))) ? m.excerpt : null;
@@ -7184,7 +7275,8 @@ function formatMemoryLine(m, withExcerpt, storyAges = null, turnNow = 0, banned 
     // 최신성만으론 가치를 못 가린다 — 오래돼도 무거운 기억엔 core 표기로 가중치를 준다
     const core = (m.importance ?? 0) >= 0.8 || m.pinned ? ' · core' : '';
     // 그때의 일: 회상 장면 · 꿈 · 전해 들은 이야기 — 지금 상태가 아니다
-    const era = m.when === 'past' ? ' · flashback, not the present' : m.when === 'dream' ? ' · a dream, not what happened' : m.when === 'told' ? ' · as told by someone, not seen' : '';
+    const era = (m.when === 'past' ? ' · flashback, not the present' : m.when === 'dream' ? ' · a dream, not what happened' : m.when === 'told' ? ' · as told by someone, not seen' : '')
+        + (m.closed ? ' · over and settled — background, not to be replayed' : '');
     return `- (${m.kind}${core}${era}, ${when}${ago})${vis} ${m.summary}${excerpt}${gaps}${dated}`;
 }
 
@@ -7817,6 +7909,24 @@ function formatCharacterLine(c) {
     return `- ${c.name}${aka}${head ? ` (${head})` : ''}${unnamed}${bits.length ? ` — ${bits.join(' | ')}` : ''}`;
 }
 
+/**
+ * 요약을 limit 개로 줄인다 — 이야기의 처음(옛 이야기 saga · 다른 채팅에서 인계 carried)은 끝까지 두고,
+ * 가운데의 연대기(arc)부터 오래된 것을 빼고, 그래도 넘치면 오래된 묶음 요약을 뺀다. 차례는 그대로
+ * (그냥 뒤에서 자르면 맨 앞의 처음 이야기가 가장 먼저 잘려, 이야기가 시작 설정으로 돌아가곤 했다)
+ */
+function keepRootsAndRecent(arr, limit) {
+    if (!Number.isFinite(limit) || arr.length <= limit) return arr;
+    if (limit <= 0) return [];
+    const roots = arr.filter(s => s.saga || s.carried).slice(-Math.min(2, limit));
+    const room = limit - roots.length, rest = arr.filter(s => !roots.includes(s));
+    const keep = new Set(roots);
+    // 최근 묶음부터 채우고, 남는 자리에 최근 연대기를
+    const chunks = rest.filter(s => s.level !== 'arc'), arcs = rest.filter(s => s.level === 'arc');
+    for (const s of [...chunks.slice(-room)]) keep.add(s);
+    let left = limit - keep.size;
+    for (const s of arcs.slice().reverse()) { if (left <= 0) break; keep.add(s); left--; }
+    return arr.filter(s => keep.has(s));
+}
 function takeLast(arr, limit) {
     if (limit === Infinity) return arr;
     if (limit <= 0) return [];
@@ -7913,7 +8023,7 @@ function renderPacket(parts, { withExcerpts = true, excerptLimit = Infinity, rec
         return t.includes('\n') ? `\n  ${t.replace(/\n/g, '\n  ')}` : ` ${t}`;
     };
     const allSums = stableMode ? parts.summaries.filter(s => !s.recalled) : parts.summaries;
-    const sums = takeLast(allSums, summaryLimit); // 예산 부족 시 오래된 요약부터 제외
+    const sums = keepRootsAndRecent(allSums, summaryLimit); // 예산 부족 시 — 이야기의 처음(옛 이야기 · 인계)은 지키고 가운데 연대기부터 줄인다
     if (sums.length) {
         stable.push('## Story So Far (chronological, oldest first)');
         let chapterNo = 0;
@@ -10068,6 +10178,7 @@ function renderMemoriesPanel() {
                 <div class="memoria__mem-head">
                     <span class="memoria__badge memoria__badge--${m.kind}">${KIND_LABELS[m.kind] || m.kind}</span>
                     ${m.when ? `<span class="memoria__badge memoria-mem-when" role="button" tabindex="0" title="${{ past: '회상 장면이나 옛일을 이야기한 것', dream: '꿈 · 환상 — 실제로 일어난 일이 아니에요', told: '누가 전해 준 이야기 — 장면에서 직접 본 일이 아니에요' }[m.when] || ''} — 지금 상태를 바꾸지 않아요. 누르면 바뀌어요">${MEMORY_WHEN[m.when] || m.when}</span>` : ''}
+                    ${m.closed ? '<span class="memoria__badge memoria-mem-closed" role="button" tabindex="0" title="이 교환 안에서 매듭지어진 일 — 지난 일로만 실리고 그때의 대사는 곧 떼요. 누르면 풀려요">매듭</span>' : ''}
                     <span class="memoria__mem-turn" title="채팅 메시지 번호">${(m.mesId ?? -1) >= 0 ? `#${m.mesId}` : '수동'}</span>
                     <i class="fa-solid ${visIcon} memoria__mem-vis" title="${visNorm}${m.owner ? ` (소유: ${escapeHtml(m.owner)})` : ''}"></i>
                     <span class="memoria__mem-imp" title="중요도"><i class="memoria__meter" aria-hidden="true"><i style="width:${Math.round(clamp01(m.importance, 0.5) * 100)}%"></i></i>${fmtPct(m.importance)}</span>
@@ -13785,6 +13896,12 @@ function bindExtraUI() {
     $('#memoria_settings').on('click', '.memoria-lock-veil', function () { editVeil(String($(this).closest('.memoria__row').data('id'))); });
     $('#memoria_settings').on('click', '.memoria-mem-knowers', function () { editKnowers(String($(this).closest('.memoria__mem-card').data('id'))); });
     // 회상 · 꿈 · 들은 말 표시 — 누르면 다음 것으로, 마지막 다음은 "지금 일"(표시 없음)
+    $('#memoria_settings').on('click', '.memoria-mem-closed', function () {
+        const m = getStore().memories.find(x => x.id === String($(this).closest('.memoria__mem-card').data('id')));
+        if (!m) return;
+        delete m.closed;
+        persistStore(); renderMemoriesPanel(); updateInjection({ quiet: true });
+    });
     $('#memoria_settings').on('click', '.memoria-mem-when', function () {
         const m = getStore().memories.find(x => x.id === String($(this).closest('.memoria__mem-card').data('id')));
         if (!m) return;

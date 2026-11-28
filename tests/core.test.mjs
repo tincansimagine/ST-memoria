@@ -200,7 +200,7 @@ test('default prompts carry the new shelves, and a customised prompt survives th
     b.context.extension_settings.memoria = { ...JSON.parse(JSON.stringify(a.getSettings())), promptRev: 22, prompts: { ...prompts, archivist: '내가 직접 쓴 사서 프롬프트' } };
     const migrated = b.getSettings();
     assert.equal(migrated.prompts.archivist, '내가 직접 쓴 사서 프롬프트');
-    assert.equal(migrated.promptOutdated.archivist, 23);
+    assert.equal(migrated.promptOutdated.archivist, a.getSettings().promptRev);
     assert.equal(migrated.prompts.chunk, prompts.chunk);
 });
 

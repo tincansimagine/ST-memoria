@@ -16,7 +16,8 @@ WHEN IT HAPPENED — optional field "when" on memories, status and bonds; leave 
 - "past": a flashback the story shows, or someone recounting what happened long before the present scene.
 - "dream": a dream, vision or hallucination the story itself shows as one.
 - "told": a report, rumor or story someone tells about events the scene does not show (file the telling, as the hearsay rule says).
-Only the present changes the present. Status, bonds and cast growth come from present events alone — a flashback or a dream never moves anyone's location, mood, holdings or ties, however vivid it is. What a flashback reveals still goes on the memories shelf, marked "when":"past", because it is true that it happened back then.`;
+Separately, "closed":true on an event memory whose matter was also wrapped up on-screen within this exchange — the quarrel ended in making up, the fight is over and everyone walked away. It stays history; it only tells later scenes there is nothing left open to replay. Never on promises, goals or secrets.
+Only the present changes the present. Status, bonds and cast growth come from present events alone — a flashback or a dream never moves anyone's location, mood, holdings or ties, however vivid it is. What a flashback reveals still goes on the memories shelf, marked "when":"past", because it is true that it happened back then. One exception for ties: when a flashback or a telling is the first the story says of two people's tie (they grew up together, he was her teacher), file that bond with "when":"past" — it opens the line where none is on file and never overwrites one that is.`;
 /** 근거 글귀 — "지금 사실"을 바꾸는 기록에만 받아, 원문에 없으면 버린다 */
 const EVIDENCE_DIRECTIVE = `
 
