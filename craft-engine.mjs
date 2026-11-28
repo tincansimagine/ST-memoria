@@ -145,10 +145,23 @@ const HANGUL0 = 0xAC00;
 const sylOf = (ch) => { const c = ch.charCodeAt(0) - HANGUL0; return c >= 0 && c < 11172 ? { cho: Math.floor(c / 588), jung: Math.floor((c % 588) / 28), jong: c % 28 } : null; };
 const sylMake = (cho, jung, jong = 0) => String.fromCharCode(HANGUL0 + (cho * 21 + jung) * 28 + jong);
 // 과거 표지(받침 ㅆ) 뒤에 오는 어미 — 긴 것부터
-const PAST_ENDS = ['습니다', '는데', '더니', '다고', '다는', '다가', '다며', '다면', '지만', '으니', '으면', '어요', '어서', '어도', '다', '어', '지', '죠', '네', '고', '던', '나', '니', '냐', '는지', '을까', '을'];
+const PAST_ENDS = ['습니다', '잖아요', '거든요', '더라고', '더라', '잖아', '거든', '구나', '는데', '더니', '다고', '다는', '다가', '다며', '다면', '지만', '으니', '으면', '어요', '어서', '어도', '던가', '던지', '을지', '다', '어', '지', '죠', '네', '고', '던', '나', '니', '냐', '는지', '을까', '을', '군', '대', '래'];
 // 과거 표지 없이 용언 어간 뒤에 오는 어미 (명사 끝과 겹치는 한 글자 어미는 넣지 않는다)
 const PLAIN_ENDS = ['는다고', '는다면', '는다', '다고', '다는', '다가', '다며', '다면', '는데', '더니', '면서', '려고', '도록', '지만', '니까', '던', '고', '며', '면'];
+// 용언에만 붙는 어미 — 앞에 한 글자만 남아도 줄기로 본다 ("굽던" → 굽, "먹는다" → 먹)
+const VERB_ONLY_ENDS = new Set(['는다고', '는다면', '는다', '는데', '더니', '면서', '려고', '도록', '니까', '던']);
+// 받침 있는 줄기 + 어/아 (+서 · 도 · 야): "적어 두었다" → 적, "꽂아" → 꽂. 받침 ㄴ · ㄹ · ㅇ은 이름씨("단어 · 연어 · 상어 · 문어")와 겹쳐 뺀다
+const EO_JONG_SKIP = new Set([0, 4, 8, 21]);
+const EO_NOUNS = new Set(['악어', '숙어', '약어', '국어', '독어', '목어', '법어', '속어', '격어', '탁아', '박아지']);
 const PAST_SYL = new Set(['었', '았', '였']);
+// 받침 없는 글자 뒤 '-러'(사러 · 보러)를 풀 때 빼는 외래어 — 받침 ㄹ 뒤의 "달러 · 컬러 · 킬러"는 규칙에서 이미 빠진다
+const REO_LOAN = new Set(['미러', '에러', '테러', '호러', '오러', '투어러']);
+// 받침 ㄴ 꾸밈꼴 가운데 이름씨와 겹치지 않는 것만 — 규칙으로는 "숨긴"과 "사진 · 주인 · 여신"을 가를 수 없다
+const VERB_N_ADNOM = { 숨긴: '숨기', 감춘: '감추', 만든: '만들', 보낸: '보내', 남긴: '남기', 바꾼: '바꾸', 맡긴: '맡기', 훔친: '훔치', 지킨: '지키', 다친: '다치', 들킨: '들키', 태운: '태우', 키운: '키우', 배운: '배우', 던진: '던지', 깬: '깨', 쓴: '쓰', 구운: '굽', 찢긴: '찢기', 버린: '버리', 잊은: '잊', 잃은: '잃' };
+// 본용언 뒤에 붙여 쓴 보조용언 — 이미 용언으로 확인된 줄기에서만 뗀다 ("잃어버리" → 잃, "찾아내" → 찾)
+const AUX_TAIL = /^(.+?)(?:어버리|아버리|어주|아주|어두|아두|어놓|아놓|어내|아내)$/;
+// 어미 없는 두 글자 "-해" 가운데 용언인 것 (나머지 "이해 · 오해 · 새해 · 항해 · 피해"는 이름씨)
+const HAE_TWO = new Set(['말해', '전해', '변해', '정해', '원해', '향해', '구해', '행해']);
 export function verbStems(word) {
     const w = String(word || '').toLowerCase();
     if (!/^[가-힣]{2,}$/.test(w)) return [];
@@ -159,7 +172,10 @@ export function verbStems(word) {
         add(stem);
         if (/[하되]$/.test(stem) && stem.length >= 3) add(stem.slice(0, -1), 2);
         else if (/지$/.test(stem) && stem.length === 2) add(stem.slice(0, -1));
+        const aux = stem.match(AUX_TAIL);
+        if (aux) add(aux[1]);
     };
+    if (VERB_N_ADNOM[w]) { add(VERB_N_ADNOM[w]); return [...out]; }
     // 받침 ㅆ을 푼다 — "다투었" → 다투, "갔" → 가, "다퉜" → 다투, "숨겼" → 숨기, "했" → 하
     const openPast = (r) => {
         const last = r.slice(-1), head = r.slice(0, -1), j = sylOf(last);
@@ -174,15 +190,20 @@ export function verbStems(word) {
         light(head + sylMake(j.cho, j.jung));
         const unfused = { 6: 20, 14: 13, 9: 8, 4: 18 }[j.jung]; // ㅕ→ㅣ(숨겼→숨기) · ㅝ→ㅜ(다퉜→다투) · ㅘ→ㅗ(봤→보) · ㅓ→ㅡ(썼→쓰)
         if (unfused !== undefined) light(head + sylMake(j.cho, unfused));
+        // ㅂ 불규칙 ("구웠" → 굽, "무서웠" → 무섭): '웠' 앞 글자에 받침이 없으면 그 글자에 받침 ㅂ을 붙인 꼴도 낸다
+        if (last === '웠' && head) { const h = sylOf(head.slice(-1)); if (h && h.jong === 0) add(head.slice(0, -1) + sylMake(h.cho, h.jung, 17)); }
         return true;
     };
     for (const end of PAST_ENDS) {
         if (!w.endsWith(end) || w.length - end.length < 1) continue;
         if (openPast(w.slice(0, -end.length))) return [...out];
     }
-    // 해 · 해서 · 해요 · 해도 · 해야 — 하 + 어가 줄어든 꼴 ("좋아해" → 좋아하 · 좋아)
-    const hae = w.match(/^(.+)해(?:서|요|도|야|라)?$/);
-    if (hae && hae[1].length >= 1) { light(`${hae[1]}하`); return [...out]; }
+    // 목적 '-으러' · 받침 없는 글자 뒤 '-러' ("먹으러" → 먹, "사러" → 사)
+    if (w.endsWith('으러') && w.length >= 3) { light(w.slice(0, -2)); return [...out]; }
+    if (w.endsWith('러') && !REO_LOAN.has(w)) { const r = w.slice(0, -1), j = sylOf(r.slice(-1)); if (j && j.jong === 0) { light(r); return [...out]; } }
+    // 해 · 해서 · 해요 · 해도 · 해야 — 하 + 어가 줄어든 꼴 ("좋아해" → 좋아하 · 좋아). 어미 없는 두 글자는 용언인 것만 ("이해 · 오해"는 이름씨)
+    const hae = w.match(/^(.+)해(서|요|도|야|라)?$/);
+    if (hae && (hae[2] || hae[1].length >= 2 || HAE_TWO.has(w))) { light(`${hae[1]}하`); return [...out]; }
     // 하 + 짧은 어미 ("공부하지 · 약속하고 · 좋아하는") — 앞에 두 글자 이상 남을 때만
     const ha = w.match(/^(.{2,})하(?:지|고|며|면|니|는|던|자|게|기|냐|나|려|러)$/);
     if (ha) { light(`${ha[1]}하`); return [...out]; }
@@ -196,8 +217,10 @@ export function verbStems(word) {
         const j = sylOf(r.slice(-1));
         // "-ㄴ다"류: 받침 ㄴ을 푼다 ("지낸다고" → 지내, "싸운다면" → 싸우)
         if (/^다/.test(end) && j?.jong === 4) { light(r.slice(0, -1) + sylMake(j.cho, j.jung)); return [...out]; }
-        if ([...r].length >= 2) { light(r); return [...out]; }
+        if ([...r].length >= 2 || (VERB_ONLY_ENDS.has(end) && j && j.jong !== 0)) { light(r); return [...out]; }
     }
+    const eo = w.match(/^(.+)[어아](?:서|도|야)?$/);
+    if (eo && !EO_NOUNS.has(w)) { const j = sylOf(eo[1].slice(-1)); if (j && !EO_JONG_SKIP.has(j.jong)) { light(eo[1]); return [...out]; } }
     // 맨 "-ㄴ다" ("지낸다" · "흥얼거린다" · "한다")
     if (w.endsWith('다') && w.length >= 2) {
         const r = w.slice(0, -1), j = sylOf(r.slice(-1));
@@ -211,7 +234,7 @@ export function verbStems(word) {
  * 개념 묶음 — 임베딩 없이 "싸웠다 ↔ 다투었다", "노래 ↔ 자장가 · 흥얼거리다"를 잇는 작은 표. 낱말 축(어휘 점수)에만 "~c:묶음" 조각으로 들어간다.
  * 그 채팅에서 얼마나 흔한지로 무게가 매겨지므로, 매 장면 나오는 묶음(로맨스 채팅의 "사랑")은 무게가 저절로 0에 가깝다.
  * 줄기(조사 · 어미를 뗀 꼴)와 견준다: 한 글자 말은 그대로 같을 때만, 두 글자 이상은 그 말로 시작하면.
- * 뜻이 여럿인 한 글자 말(차 · 살 · 배 · 안 · 화)은 넣지 않는다.
+ * 뜻이 여럿인 말(차 · 살 · 배 · 안 · 화 · 주문 · 보수 · 구속 · 연고 · 중독 · 태우다)은 넣지 않는다.
  */
 const CONCEPT_TERMS = {
     fight: ['싸우', '싸움', '다투', '다툼', '말다툼', '말싸움', '언쟁', '실랑이', '몸싸움', '시비', 'fight', 'argu', 'quarrel'],
@@ -220,19 +243,43 @@ const CONCEPT_TERMS = {
     dislike: ['싫어하', '미워하', '질색', '혐오', '꺼리', 'hate', 'dislik', 'loath'],
     debt: ['빚', '채무', '빌리', '갚', '외상', '이자', 'debt', 'owe', 'loan'],
     fear: ['무섭', '무서워', '두렵', '두려', '공포', '겁', '떨리', '악몽', '트라우마', 'afraid', 'fear', 'scare', 'terrif', 'nightmare'],
-    hurt: ['흉터', '상처', '다치', '부상', '화상', '멍', 'scar', 'wound', 'injur', 'hurt'],
+    hurt: ['흉터', '상처', '다치', '부상', '화상', 'scar', 'wound', 'injur', 'hurt'],
     drink: ['마시', '홍차', '커피', '우유', '음료', '술', '와인', '맥주', 'drink', 'tea', 'coffee', 'wine'],
     dwell: ['지내', '머물', '머무르', '거처', '숙소', '묵', 'lodg'],
     gift: ['선물', '건네', '맡기', '증표', 'gift'],
     vow: ['약속', '맹세', '서약', '다짐', '기약', 'promis', 'vow', 'swor', 'swear', 'oath'],
     secret: ['비밀', '숨기', '감추', '몰래', '들키', 'secret', 'hide', 'hid', 'conceal'],
-    lie: ['거짓말', '거짓', '속이', 'lie', 'lied', 'deceiv'],
-    death: ['죽', '죽음', '사망', '숨지', '목숨', 'die', 'dead', 'death', 'kill'],
+    lie: ['거짓말', '거짓', '속이', 'liar', 'lied', 'deceiv'],
+    death: ['죽', '죽음', '사망', '숨졌', '숨진', '목숨', 'die', 'dead', 'death', 'kill'],
     kiss: ['키스', '입맞추', '입맞춤', '뽀뽀', 'kiss'],
     cry: ['울', '눈물', '흐느끼', '훌쩍', 'cry', 'cried', 'tear', 'sob'],
     anger: ['화내', '화나', '분노', '짜증', '격분', 'angry', 'anger', 'furious', 'rage'],
     part: ['떠나', '작별', '이별', '헤어지', 'farewell', 'goodbye'],
     meet: ['만나', '만남', '재회', '마주치', 'meet', 'met', 'reunit'],
+    cook: ['요리', '음식', '수프', '스튜', '국물', '끓이', '볶', '반찬', '레시피', 'cook', 'soup', 'stew', 'meal', 'bake'],
+    vessel: ['돛단배', '범선', '선박', '보트', '요트', '나룻배', '함선', '군함', '갑판', '항해', 'boat', 'sail', 'vessel'],
+    escape: ['도망', '달아나', '도주', '탈출', '탈옥', '도피', '쫓기', 'flee', 'fled', 'escap'],
+    sick: ['열병', '병들', '앓', '감기', '고열', '기침', '몸살', '병상', 'sick', 'fever', 'illness'],
+    heal: ['치료', '치유', '붕대', '해독', '진찰', '처방', 'cure', 'bandag', 'medicin'],
+    poison: ['독초', '독약', '독살', '맹독', '독침', 'poison', 'venom', 'toxin'],
+    combat: ['결투', '전투', '교전', '습격', '매복', '검술', 'duel', 'battle', 'ambush', 'combat'],
+    weapon: ['장검', '단검', '검집', '칼날', '단도', '목검', '화살', '권총', '총알', 'sword', 'dagger', 'blade', 'pistol'],
+    magic: ['마법', '마력', '저주', '결계', '마도서', '주술', 'magic', 'spell', 'curse'],
+    betray: ['배신', '배반', '밀고', '첩자', '스파이', '내통', 'betray', 'traitor'],
+    forgive: ['사과하', '용서', '화해', '뉘우치', '참회', 'forgiv', 'apolog', 'reconcil'],
+    confess: ['고백', '청혼', '프로포즈', '구혼', 'confess', 'propos'],
+    jealous: ['질투', '시기하', '샘내', '시샘', 'jealous', 'envy', 'enviou'],
+    hug: ['포옹', '껴안', '끌어안', '안아주', 'embrace', 'hug'],
+    steal: ['훔치', '도둑', '소매치기', '절도', '약탈', 'steal', 'stole', 'thief'],
+    prison: ['감옥', '감금', '결박', '수갑', '족쇄', '포박', '지하감옥', 'prison', 'captiv', 'shackl'],
+    sleep: ['불면', '잠들', '선잠', '숙면', '졸리', '낮잠', 'insomnia', 'asleep', 'nap'],
+    letter: ['편지', '서신', '쪽지', '전보', '봉투', '답장', '유서', 'envelop'],
+    jewelry: ['반지', '은반지', '금반지', '목걸이', '팔찌', '귀걸이', '브로치', '펜던트', 'necklac', 'pendant'],
+    money: ['금화', '은화', '동전', '지폐', '현상금', '몸값', '전당포', '흥정', 'coin', 'bounty', 'ransom'],
+    storm: ['천둥', '번개', '벼락', '폭풍', '태풍', '폭설', '우박', 'thunder', 'lightn', 'storm'],
+    fire: ['화재', '불길', '불타', '방화', '잿더미', '전소', 'arson', 'blaze'],
+    dance: ['춤', '춤추', '무도회', '왈츠', '연회', 'dance', 'waltz', 'ballroom'],
+    funeral: ['무덤', '묘지', '묘비', '장례', '추모', '영정', 'tomb', 'funeral', 'graveyard'],
 };
 const CONCEPT_EXACT = new Map(), CONCEPT_PREFIX = new Map();
 for (const [key, terms] of Object.entries(CONCEPT_TERMS)) {

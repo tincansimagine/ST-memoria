@@ -662,9 +662,9 @@ function getStore() {
         s.lexiconRev = 5;
     }
     // 내장 벡터에 줄기 조각이 생겼다 (v2.17) — 저장된 기억 벡터를 한 번 다시 만든다 (모델 호출 없음)
-    // v2: 용언 줄기가 내장 문장 벡터의 조각에 들어갔다 — 저장된 벡터를 한 번 다시 만든다 (모델 호출 없음)
-    if ((s.vecRev || 0) < 2 && s.memories.length) { rebuildLocalVectors(s); s.vecRev = 2; }
-    else if (!s.vecRev) s.vecRev = 2;
+    // v2: 용언 줄기가 내장 문장 벡터의 조각에 들어갔다 · v3: 줄기 규칙을 더했다 — 저장된 벡터를 한 번 다시 만든다 (모델 호출 없음)
+    if ((s.vecRev || 0) < 3 && s.memories.length) { rebuildLocalVectors(s); s.vecRev = 3; }
+    else if (!s.vecRev) s.vecRev = 3;
     return s;
 }
 
@@ -4992,7 +4992,7 @@ async function commitTurns(mesIds, { silent = true, force = false, retry = 1 } =
     const privTagMap = new Map();
     const privLines = !guard ? [] : store.memories
         .filter(m => (m.visibility || 'public') !== 'public' && !m.disabled && !m.retired && !m.knowLock && m.turnIndex < units[0].turn.turnIndex
-            && [m.owner, ...(m.entities || [])].some(n => n && String(n).length >= 2 && hayLower.includes(String(n).toLowerCase())))
+            && [m.owner, ...(m.entities || [])].some(n => n && String(n).length >= 2 && nameIn(hayLower, String(n).toLowerCase())))
         .sort((a, b) => (b.importance || 0) - (a.importance || 0)).slice(0, 6)
         .map((m, i) => {
             const tag = `k${i + 1}`;
@@ -5813,15 +5813,22 @@ async function maybeFoldEras(store) {
     const thin = (t) => !!prior && prior.text.length > 400 && t.length < prior.text.length * 0.45;
     // 사람이 빠졌는가 — 여러 연대기에 나왔거나 옛 이야기에 있던 인물이 새 글에서 사라졌으면 한 번 더 쓰게 한다 (문제없으면 호출은 늘지 않는다)
     const lost = (t) => peopleLost(store, folding.map(a => a.text), t, prior?.text || '');
+    // 접는 구간의 큰 전환점(고정했거나 major) — 접을수록 사람 이름은 남아도 "처음 만난 날 · 고백 · 배신"이 닳아 없어졌다
+    const span0 = folding[0].fromTurn, span1 = folding[folding.length - 1].toTurn;
+    const turning = (store.milestones || []).filter(e => !e.disabled && (e.pinned || e.grade === 'major') && (e.turnIndex ?? -1) >= span0 && (e.turnIndex ?? -1) <= span1)
+        .sort((a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0)).slice(0, 4);
+    const pointsLost = (t) => turning.filter(e => textOverlap(`${e.title} ${e.summary || ''}`, t) < 0.2 && textOverlap(e.title, t) < 0.34);
+    const worse = (t) => lost(t).length + pointsLost(t).length;
     let text = '';
     try {
         text = await fold();
-        const gone = text && !refusedReply(text) ? lost(text) : [];
-        if (text && !refusedReply(text) && (thin(text) || gone.length)) {
+        const gone = text && !refusedReply(text) ? lost(text) : [], missedPoints = text && !refusedReply(text) ? pointsLost(text) : [];
+        if (text && !refusedReply(text) && (thin(text) || gone.length || missedPoints.length)) {
             const notes = [thin(text) ? 'Your previous draft kept only a fraction of the record marked "the story so far". Nothing that record holds may be dropped: carry every development in it, shortened where needed, then add what the later records bring.' : '',
-                gone.length ? `Your previous draft lost these people entirely: ${gone.join(', ')}. Keep who each of them is to the others.` : ''].filter(Boolean).join(' ');
+                gone.length ? `Your previous draft lost these people entirely: ${gone.join(', ')}. Keep who each of them is to the others.` : '',
+                missedPoints.length ? `It also lost these turning points — each needs its own PLOT bullet: ${missedPoints.map(e => `"${cleanStr(e.title, 80)}"`).join(' / ')}.` : ''].filter(Boolean).join(' ');
             const again = await fold(`\n\n(${notes})`);
-            if (again && !refusedReply(again) && !thin(again) && (thin(text) ? again.length > text.length && lost(again).length <= gone.length : lost(again).length < gone.length)) text = again;
+            if (again && !refusedReply(again) && !thin(again) && (thin(text) ? again.length > text.length && worse(again) <= gone.length + missedPoints.length : worse(again) < gone.length + missedPoints.length)) text = again;
             if (thin(text)) {
                 if (getStore() === store) { store.eraFoldHeld = store.turnCounter; logActivity('error', "'옛 이야기'를 접은 글이 지금 것보다 크게 줄어 받지 않았어요 — 지금 것을 그대로 두고 몇 턴 뒤 다시 해 봐요"); }
                 return false;
@@ -5870,13 +5877,23 @@ function keyFactsBlock(store, fromTurn, toTurn, digests) {
 }
 
 /** 합치기 · 접기로 사라진 사람 — 넣은 글 둘 이상에(또는 기준 글에) 나온 카드 인물이 새 글 어디에도 없으면 (모델 호출 없음) */
-const NAME_TAIL = '(?:은|는|이|가|을|를|의|에|도|만|와|과|랑|이랑|에게|한테|께|씨|님|군|양|아|야|이야|이가|이는|이를|이의|이와|이도|이랑|이에게|이한테)?';
+const NAME_TAIL = '(?:은|는|이|가|을|를|의|에|에서|에게서|한테서|도|만|와|과|랑|이랑|하고|에게|한테|께|처럼|보다|까지|부터|로|으로|네|씨|님|군|양|아|야|이야|이가|이는|이를|이의|이와|이도|이하고|이에게|이한테|이처럼|이보다|이네)?';
 /** 글에 그 이름이 나오는가 — 두 글자 이하 이름은 낱말 경계를 본다 ("보라"가 "보라색 · 바라보라"에, "유리"가 "유리창"에 걸리지 않게. 뒤에 붙는 조사는 허용) */
 function nameIn(hay, name) {
     if (!hay || !name) return false;
-    if ([...name].length >= 3 || /^[a-z0-9 ]+$/.test(name)) return hay.includes(name);
     const esc = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    return new RegExp(`(?:^|[^\\p{L}\\p{N}])${esc}${NAME_TAIL}(?![\\p{L}\\p{N}])`, 'u').test(hay);
+    // 로마자 이름: 넉 자 이상은 그대로, 짧은 것("al · li")은 낱말 경계로 ("finally · like" 속에 걸리지 않게)
+    if (/^[a-z0-9 ]+$/.test(name)) return name.length >= 4 ? hay.includes(name) : new RegExp(`(?:^|[^a-z0-9])${esc}(?![a-z0-9])`).test(hay);
+    if ([...name].length >= 3) return hay.includes(name);
+    // 조사가 둘 겹쳐도 ("보라랑은 · 리아한테도") 그 사람이다
+    return new RegExp(`(?:^|[^\\p{L}\\p{N}])${esc}${NAME_TAIL}(?:은|는|도|만|의|요)?(?![\\p{L}\\p{N}])`, 'u').test(hay);
+}
+/** 인물 카드의 이름 · 별명이 글에 나오는가 — 두 글자 이하는 낱말 경계로, 한 글자 한글 별명도 ("보라"가 "보라색"에, "린"이 "기린"에 걸리지 않게) */
+function cardNamedIn(hay, c) {
+    return [c?.name, ...(c?.aliases || [])].some(n => {
+        const x = String(n || '').toLowerCase();
+        return x && ([...x].length >= 2 || /^[가-힣]$/.test(x)) && nameIn(hay, x);
+    });
 }
 function peopleLost(store, src, text, anchor = '') {
     const low = String(text || '').toLowerCase(), lowSrc = src.map(t => String(t || '').toLowerCase()), lowAnchor = String(anchor || '').toLowerCase();
@@ -5895,7 +5912,14 @@ const ARC_ANCHOR = '\n\nWhatever else is shortened, SHIFTS keeps, for each pair 
 
 /** 연대기를 WHEN · SHIFTS 줄만 남겨 줄인다 (그런 줄이 없는 옛 글·자유 글은 앞부분만) — 장부 예산이 빠듯할 때 */
 function compactChronicle(text) {
-    const keep = String(text || '').split('\n').map(l => l.trim()).filter(l => /^(WHEN|SHIFTS)\s*:/i.test(l));
+    const keep = [];
+    let on = false;
+    for (const raw of String(text || '').split('\n')) {
+        const l = raw.trim();
+        if (/^(WHEN|SHIFTS)\s*:/i.test(l)) { on = true; keep.push(l); continue; }
+        if (/^[A-Z]{3,}\s*:/.test(l)) { on = false; continue; } // PLOT · OPEN 같은 다른 칸이 시작되면 멈춘다
+        if (on && l) keep.push(l); // "SHIFTS:" 아래 줄바꿈 불릿으로 쓴 것도 남긴다
+    }
     return keep.length ? keep.join('\n') : cleanStr(text, 240);
 }
 
@@ -5999,8 +6023,11 @@ async function maybeSummarizeChunk(store, { flushAll = false, onProgress = null,
             const newCalls = (store.bonds || []).filter(b => !b.disabled).flatMap(b => {
                 const e = (b.log || []).filter(x => (x.turn ?? -1) >= fromTurn && (x.turn ?? -1) <= toTurn && x.calls).pop();
                 const before = (b.log || []).filter(x => (x.turn ?? 0) < fromTurn && x.calls).pop();
-                const term = e && e.calls !== before?.calls ? String(e.calls).replace(/\([^)]*\)|（[^）]*）/g, ' ').split(/[\/,，·;]/)[0].replace(/["'“”‘’]/g, '').trim() : '';
-                return [...term].length >= 2 ? [{ from: b.from, to: b.to, term }] : [];
+                if (!e || e.calls === before?.calls) return [];
+                // 말씨("반말 · 존댓말 · casual")는 부르는 말이 아니다 — 첫 번째 진짜 호칭을 고른다
+                const term = String(e.calls).replace(/\([^)]*\)|（[^）]*）/g, ' ').split(/[\/,，·;]|\s또는\s|\sor\s/)
+                    .map(x => x.replace(/["'“”‘’]/g, '').trim()).find(x => [...x].length >= 2 && !TITLE_SKIP.has(x.toLowerCase()));
+                return term ? [{ from: b.from, to: b.to, term }] : [];
             }).slice(0, 4);
             const callsMissedIn = (rec) => (comparable(rec) ? newCalls.filter(c => !String(rec).toLowerCase().includes(c.term.toLowerCase())) : []); // 요약 언어가 다르면 견줄 수 없다
             let callsMissed = text ? callsMissedIn(text) : [];
@@ -6783,14 +6810,16 @@ async function retrieveMemories(queryText, recentUserTexts, sceneText = '') {
     // 짧은 입력("응", "그래서?", 행동 한 줄)에는 직전 장면의 끝을 낱말 축에 함께 넣고 장면 문맥을 거의 입력만큼 믿는다
     const tune = settings.recallTune !== false;
     const intent = !tune || !queryLower.trim() ? '' : pastQuery ? 'history' : DETAIL_QUERY_RE.test(queryLower) ? 'detail' : NOW_QUERY_RE.test(queryLower) ? 'current' : '';
-    const W = intent === 'current' ? { c: 0.58, lex: 0.16, imp: 0.10, rec: 0.16 } : intent === 'detail' ? { c: 0.54, lex: 0.28, imp: 0.10, rec: 0.08 } : { c: 0.62, lex: 0.18, imp: 0.12, rec: 0.08 };
+    let W = intent === 'current' ? { c: 0.58, lex: 0.16, imp: 0.10, rec: 0.16 } : intent === 'detail' ? { c: 0.54, lex: 0.28, imp: 0.10, rec: 0.08 } : { c: 0.62, lex: 0.18, imp: 0.12, rec: 0.08 };
     const bare = queryLower.replace(/[\s\p{P}\p{S}]+/gu, '');
     // 짧은 입력 — 한국어는 여덟아홉 글자면 온전한 물음이다("리아는 어디서 지내?"). 글자 수만 보면 그런 물음까지 "응"처럼 장면에 기대게 돼,
     // 장면을 닮은 흔한 기억이 끼어들었다. 무엇을 묻는 말(물음표 · 의문사)에 내용 낱말이 둘 이상이면, 또는 질문 종류가 읽히면 짧은 입력으로 보지 않는다.
     // 맞장구("응", "그래서?") · 행동 한 줄("*고개를 끄덕인다*")은 그대로 장면을 따른다
     const asks = /[?？]|(?:^|[^\p{L}])(?:뭐|뭘|무엇|무슨|왜|어디|언제|누구|누가|얼마|어떻게|어떤|몇)/u.test(queryLower)
-        || /\b(?:what|why|where|when|who|how|which)\b/.test(queryLower);
-    const pointedAsk = asks && contentWords(queryText).size >= 2;
+        || /\b(?:what|why|where|when|who|how|which)\b/.test(queryLower) || /(?:何|どこ|いつ|誰|だれ|なぜ|どう|いくら|どれ)/.test(queryLower);
+    // "그래서 뭐야?" · "진짜 왜?"처럼 맞장구 말만 있는 물음은 짧은 입력 그대로 — 내용 낱말이 하나는 있어야 한다
+    const askWords = [...contentWords(queryText)];
+    const pointedAsk = asks && askWords.length >= 2 && askWords.some(w => !ASK_FILLER.has(w));
     const shortQ = tune && !!String(sceneText || '').trim() && !intent && !pointedAsk && (bare.length < 12 || queryTokens.size < 3);
     const tail = shortQ ? String(sceneText).slice(-500) : '';
     const tailTokens = shortQ ? new Set((tail.toLowerCase().match(/[\p{L}\p{N}]+/gu) || [])) : null, tailGrams = shortQ ? toCharGrams(tail) : null;
@@ -6832,6 +6861,11 @@ async function retrieveMemories(queryText, recentUserTexts, sceneText = '') {
             { weights: [1, ...auxTexts.slice(0, 1).map(() => 0.92), ...(sceneQuery ? [0.85] : [])] },
         ))
         : null;
+    // 의미 임베딩(API · 로컬)이 없으면 문맥 유사도는 내장 해시 벡터뿐이다 — 낱말 조각을 128칸에 접어 넣은 것이라, 아무 상관 없는 기억도 우연히 0.2~0.3을 받는다.
+    // 그때는 같은 낱말을 겹침 없이 세는 낱말 축에 무게를 옮긴다 (짧은 입력은 장면 문맥이 주 신호라 그대로)
+    if (tune && !apiQueryVec && !apiSceneVec && !localRanks && !shortQ) {
+        W = intent === 'current' ? { c: 0.30, lex: 0.44, imp: 0.10, rec: 0.16 } : intent === 'detail' ? { c: 0.24, lex: 0.56, imp: 0.12, rec: 0.08 } : { c: 0.30, lex: 0.48, imp: 0.12, rec: 0.10 };
+    }
 
     // 장면 개체 사전확률: 지금 장면에 있는 인물(도감 이름·별칭이 최근 본문에 등장)의 목록.
     // 한국어 롤플레잉은 대명사·호칭 생략이 많아 질의에 이름이 없어도, 장면에 있는 인물과
@@ -6840,10 +6874,7 @@ async function retrieveMemories(queryText, recentUserTexts, sceneText = '') {
     const presentEntities = new Set();
     for (const c of store.characters || []) {
         if (c.disabled) continue;
-        const names = [c.name, ...(c.aliases || [])];
-        if (names.some(n => n && String(n).length >= 2 && presenceText.includes(String(n).toLowerCase()))) {
-            presentEntities.add(String(c.name).toLowerCase());
-        }
+        if (cardNamedIn(presenceText, c)) presentEntities.add(String(c.name).toLowerCase());
     }
 
     // 드문 낱말: 입력의 낱말 가운데 서고 전체에서 몇 기억에만 나오는 것 — 그 기억을 가리키는 강한 단서
@@ -6854,9 +6885,6 @@ async function retrieveMemories(queryText, recentUserTexts, sceneText = '') {
     const isNameBit = (w) => { const st = looseStem(w); return allNames.some(n => n.includes(st) || n.includes(w)); };
     const rareWords = rareQueryWords(queryText, [...indexLower.values()]).filter(r => (lexW.wordDf.get(r.word) || 0) <= Math.max(2, lexW.n * 0.02) && !isNameBit(r.word));
     // 서고에 드문 말로 무언가를 콕 집어 물었으면("나침반 어디 뒀더라") 그 물음이 앞선다 — 장면을 닮은 흔한 기억이 끼어들지 않게
-    // 짧은 물음이라도 드문 말이 있으면 장면 쪽(문맥 · 직전 장면 끝의 낱말)을 덜 믿는다 — "응", "그래서?"에는 드문 말이 없어 그대로다
-    const pointed = rareWords.length > 0;
-    if (pointed) sW = Math.min(sW, shortQ ? 0.55 : 0.35);
     // 낱말 축의 무게: 그 채팅에서 드문 낱말 · 조각일수록 무겁다 (서고 기억과 채팅 원문으로 센다)
     const qStems = stemSet(queryText);
     const qConcepts = [...conceptTags(qStems)];
@@ -6868,16 +6896,20 @@ async function retrieveMemories(queryText, recentUserTexts, sceneText = '') {
         .map(x => ({ word: x.c, idf: lexW.idf(x.df) }));
     // 한 글자 이름씨("배 · 검 · 빚")가 붙어 쓴 겹낱말 끝("돛단배 · 장검")에 든 기억 — 드물 때만 드문 낱말처럼 친다
     const oneCharHits = new Map();
-    for (const ch of new Set([...queryTokens].map(looseStem).filter(w => /^[가-힣]$/.test(w) && !ONE_CHAR_SKIP.has(w)))) {
+    for (const ch of new Set([...queryTokens].map(looseStem).filter(w => /^[가-힣]$/.test(w) && !ONE_CHAR_SKIP.has(w) && !isNameBit(w)))) {
         const ids = [];
         for (const m of active) {
             const d = lexW.docs.get(m.id);
-            if (d && (d.words.has(ch) || [...d.raw].some(w => w.length >= 2 && w.length <= 4 && w.endsWith(ch) && /^[가-힣]+$/.test(w) && !w.endsWith(`${ch}${ch}`)))) ids.push(m.id);
+            // 조사를 뗀 꼴로 겹낱말 끝을 본다 ("돛단배를"의 끝 글자는 '를'이다)
+            if (d && (d.words.has(ch) || [...d.raw].some(rw => { const w = looseStem(rw); return w.length >= 2 && w.length <= 4 && w.endsWith(ch) && /^[가-힣]+$/.test(w) && !w.endsWith(`${ch}${ch}`); }))) ids.push(m.id);
         }
         if (!ids.length || ids.length > Math.max(2, Math.floor(active.length * 0.04))) continue;
         const idf = lexW.idf(ids.length);
         for (const id of ids) oneCharHits.set(id, [...(oneCharHits.get(id) || []), { word: ch, idf }]);
     }
+    // 드문 낱말 · 드문 개념 묶음 · 한 글자 이름씨 가운데 하나라도 닿으면 무언가를 콕 집은 입력이다 ("카엘이 부르던 노래") — 장면 쪽(문맥 · 직전 장면 끝의 낱말)을 덜 믿는다. "응", "그래서?"에는 어느 것도 없어 그대로다
+    const pointed = rareWords.length > 0 || rareConcepts.length > 0 || oneCharHits.size > 0;
+    if (pointed) sW = Math.min(sW, shortQ ? 0.55 : 0.35);
     const tLex = tailTokens && !pointed ? { stems: stemSet(tail), grams: tailGrams, raw: tailTokens } : null;
 
     // 이 채팅에서 회상하지 않을 말 — 그 말이 든 기억은 후보에서 뺀다 (지우지 않는다. 고정한 기억은 사용자의 뜻이라 그대로)
@@ -6952,11 +6984,20 @@ async function retrieveMemories(queryText, recentUserTexts, sceneText = '') {
             const hl = String(h).toLowerCase().trim();
             if (hl.length < 2 || matchedEntities.some(e => String(e).toLowerCase().includes(hl))) return false;
             if (queryLower.includes(hl)) return true;
-            if (!/\s/.test(hl)) return false;
-            const hs = [...stemSet(hl)].filter(t => [...t].length >= 2);
-            const got = hs.filter(t => qLex.stems.has(t));
-            // 의문사 · 지시어만 맞은 것("어디 · 그때 · 뭐라고")은 치지 않는다 — 맞은 것 가운데 내용 낱말이 하나는 있어야 한다
-            return hs.length >= 2 && got.length >= 2 && got.some(t => !HINT_FILLER.has(t));
+            const words = hl.match(/[\p{L}\p{N}]+/gu) || [];
+            // 두 글자 이상, 또는 활용형에서 뽑은 한 글자 용언 줄기("줬다" → 주)
+            const formsOf = (w) => [...stemSet(w)].filter(t => [...t].length >= 2 || (t !== w && /^[가-힣]$/.test(t) && !ONE_CHAR_SKIP.has(t)));
+            // 한 낱말 단서는 줄기로 ("싸웠다" ↔ "싸웠어"). 의문사 · 지시어는 치지 않는다
+            if (words.length === 1) return formsOf(words[0]).some(t => !HINT_FILLER.has(t) && qLex.stems.has(t));
+            // 여러 낱말 단서는 서로 다른 낱말 둘 이상이 맞고, 그중 내용 낱말이 하나는 있어야 한다 (한 낱말의 원래 꼴과 줄기를 둘로 세지 않는다)
+            let hitWords = 0, content = false;
+            for (const w of words) {
+                const forms = formsOf(w).filter(t => qLex.stems.has(t));
+                if (!forms.length) continue;
+                hitWords++;
+                if (forms.some(t => !HINT_FILLER.has(t))) content = true;
+            }
+            return hitWords >= 2 && content;
         });
         // 장면 개체 사전확률: 질의에 이름은 없지만 지금 장면에 있는 인물과 얽힌 기억
         const presenceHit = !entityHit && presentEntities.size > 0
@@ -6967,7 +7008,8 @@ async function retrieveMemories(queryText, recentUserTexts, sceneText = '') {
         const rareStrong = rareHits.length >= 2 || rareHits.some(r => r.word.length >= 3 && !/^[a-z0-9]+$/.test(r.word)) || rareHits.some(r => r.word.length >= 6);
         // 같은 개념 묶음 — 낱말은 달라도 같은 일을 말한다. 드문 낱말보다 조금 약하게, "직접 가리킴"으로는 치지 않는다
         const docWords = lexW.docs.get(m.id)?.words;
-        const conceptHits = [...(docWords ? rareConcepts.filter(r => docWords.has(r.word)) : []), ...(oneCharHits.get(m.id) || [])];
+        const oneHits = oneCharHits.get(m.id) || [];
+        const conceptHits = [...(docWords ? rareConcepts.filter(r => docWords.has(r.word)) : []), ...oneHits];
         // 흔한 낱말이 겹치는 것(문맥 유사도의 잡음)보다 확실히 앞서도록 — 그 낱말을 가진 기억은 몇 개뿐이다
         const rareBoost = Math.min(0.2, rareHits.reduce((a, r) => a + 0.03 * r.idf, 0) + conceptHits.reduce((a, r) => a + 0.025 * r.idf, 0)) + (rareStrong ? 0.06 : 0);
         // 관문: 사전확률만으로는 절반의 의미 유사도라도 있어야 통과 (무관 기억 범람 방지)
@@ -7001,7 +7043,7 @@ async function retrieveMemories(queryText, recentUserTexts, sceneText = '') {
             + (entityHit ? 0.08 : 0) + (hintHit ? 0.07 : 0) + (presenceHit ? 0.05 : 0) + rareBoost + quoteBonus) * cool * era * settled * (m.retired ? 0.7 : 1);
         if (score < settings.minScore) continue;
         candidates.push({ m, score, vec });
-        trace.set(m.id, { reason: [rareHits.length && `드문 낱말: ${rareHits.map(r => r.word).join(', ')}`, conceptHits.length && '같은 뜻의 말', cool < 0.8 && '연달아 실려 순서를 미룸', m.retired && '지나간 기억', gate < 0.8 && '어디에나 닮은 흔한 결이라 덜 믿음', era < 1 && '그때의 일이라 조금 뒤로', entityHit && '인물 일치', hintHit && '검색 힌트', presenceHit && '현재 장면의 인물', lex >= 0.035 && '어휘 일치', cos >= settings.minCosine && '문맥 유사도'].filter(Boolean).join(' · ') || '관련성 점수', score, mode: 'direct' });
+        trace.set(m.id, { reason: [rareHits.length && `드문 낱말: ${rareHits.map(r => r.word).join(', ')}`, conceptHits.length > oneHits.length && '같은 뜻의 말', oneHits.length && `한 글자 낱말: ${oneHits.map(r => r.word).join(', ')}`, cool < 0.8 && '연달아 실려 순서를 미룸', m.retired && '지나간 기억', gate < 0.8 && '어디에나 닮은 흔한 결이라 덜 믿음', era < 1 && '그때의 일이라 조금 뒤로', entityHit && '인물 일치', hintHit && '검색 힌트', presenceHit && '현재 장면의 인물', lex >= 0.035 && '어휘 일치', cos >= settings.minCosine && '문맥 유사도'].filter(Boolean).join(' · ') || '관련성 점수', score, mode: 'direct' });
     }
 
     candidates.sort((a, b) => b.score - a.score);
@@ -7452,7 +7494,9 @@ function currentRecallQuery() {
  * "형"이 "인형·형태"에 걸리지 않게 낱말 경계를 보고, 누구에게나 쓰는 말(너·당신)과 여러 사람을 가리키는 호칭은 쓰지 않는다. 반환: 인물 열쇠 집합
  */
 /** 한 글자 이름씨로 겹낱말 끝을 맞출 때 쓰지 않는 말 (대명사 · 의존명사 · 부사 · 맞장구) */
-const ONE_CHAR_SKIP = new Set(['그', '이', '저', '것', '거', '걸', '게', '수', '때', '데', '줄', '중', '말', '일', '한', '두', '세', '네', '더', '다', '안', '못', '왜', '뭐', '뭘', '날', '널', '난', '넌', '내', '너', '나', '또', '좀', '잘', '곧', '늘', '참', '꽤', '막', '딱', '응', '어', '아', '야', '음', '흠', '네', '예', '등', '분', '번', '개', '명', '살', '년', '월', '시', '쪽', '편', '측', '앞', '뒤', '위', '밑', '옆', '속', '밖']);
+const ONE_CHAR_SKIP = new Set(['그', '이', '저', '것', '거', '걸', '게', '건', '수', '때', '데', '줄', '중', '말', '일', '한', '두', '세', '네', '더', '다', '안', '못', '왜', '뭐', '뭘', '날', '널', '난', '넌', '내', '너', '나', '또', '좀', '잘', '곧', '늘', '참', '꽤', '막', '딱', '응', '어', '아', '야', '음', '흠', '예', '채', '척', '듯', '뿐', '쯤', '셈', '바', '곳', '등', '분', '번', '개', '명', '살', '년', '월', '시', '쪽', '편', '측', '앞', '뒤', '위', '밑', '옆', '속', '밖']);
+/** 물음이라도 이것만 있으면 무엇을 콕 집은 물음이 아니다 (맞장구 · 이음말 · 의문사) */
+const ASK_FILLER = new Set(['그래서', '그럼', '그러면', '근데', '그런데', '진짜', '정말', '아니', '그래', '뭐야', '뭔데', '뭐해', '뭐라고', '거야', '건데', '어째서', '왜요', '어떻게', '어디', '언제', '누구', '누가', '무엇', '무슨', '얼마']);
 /** 여러 낱말 회상 단서를 줄기로 견줄 때 내용 낱말로 치지 않는 말 */
 const HINT_FILLER = new Set(['어디', '어디서', '어디로', '언제', '누구', '누가', '무엇', '무슨', '뭐라', '뭐라고', '어떻게', '어떤', '얼마', '그때', '그거', '그건', '이거', '저거', '지금', '아직', '우리', '그날', '그게', '있어', '있지', '했지', '했어', '갔지', '였지', '이었지', 'what', 'where', 'when', 'who', 'how', 'that', 'this', 'did', 'was']);
 const TITLE_SKIP = new Set(['너', '당신', '자네', '그대', '니', '네', 'you', '이름', '반말', '존댓말', 'name', 'casual', 'formal']);
@@ -7710,9 +7754,7 @@ async function buildPacketSections(query, supervisorPlan) {
     const sceneHay = `${recentSceneText}\n${filedPresent}`;
     // 이름 없이 호칭으로만 불린 사람 ("형", "선배") — 관계선에 적힌 부르는 말로 누구인지 찾는다
     const referred = titleReferred(store, `${recentSceneText}\n${String(query || '').toLowerCase()}`);
-    const inScene = (c) => sceneHay.includes(String(c.name).toLowerCase())
-        || (c.aliases || []).some(a => a.length >= 2 && sceneHay.includes(String(a).toLowerCase()))
-        || referred.has(entityKey(c.name));
+    const inScene = (c) => cardNamedIn(sceneHay, c) || referred.has(entityKey(c.name));
     // 상태 보드: 지금 장면과 닿는 것부터, 그다음 최근에 바뀐 것. 예전에는 저장 순서의 끝 10개를 실어
     // 장면과 무관한 인물의 묵은 상태가 자리를 차지하고 정작 눈앞 인물의 상태가 밀려났다.
     const stateInScene = (s) => {
@@ -7761,7 +7803,7 @@ async function buildPacketSections(query, supervisorPlan) {
         .filter(b => !b.disabled && bondNow(b))
         .map(b => ({ b, scene: (sceneNames.has(entityKey(b.from)) ? 1 : 0) + (sceneNames.has(entityKey(b.to)) ? 1 : 0), turn: bondNow(b).turn || 0 }))
         .sort((a, z) => (z.scene - a.scene) || (z.turn - a.turn))
-        .slice(0, 8)
+        .slice(0, 12) // 네댓 명이 한 장면에 모이면 오가는 줄만 열 개가 넘는다 — 예산이 빠듯하면 장부 단계가 줄인다
         .map(x => x.b); // 앞선 것이 중요한 차례 그대로 넘긴다 — 가나다 정렬은 장부에서 자른 뒤에 한다
     // 장면 속 인물의 실제 남긴 말 — 요약된 원문이 숨겨져도 말투를 붙잡아 둔다
     const banned = bannedPhrases();
@@ -7908,7 +7950,7 @@ async function buildPacketSections(query, supervisorPlan) {
     const returning = [];
     {
         const hay = `${sceneHay}\n${String(query || '').toLowerCase()}`;
-        const named = (c) => referred.has(entityKey(c.name)) || [c.name, ...(c.aliases || [])].some(n => String(n).length >= 2 && hay.includes(String(n).toLowerCase()));
+        const named = (c) => referred.has(entityKey(c.name)) || cardNamedIn(hay, c);
         const lastSeen = (c) => {
             const keys = new Set([c.name, ...(c.aliases || [])].map(entityKey));
             let t = c.updatedTurn || c.firstTurn || 0;
@@ -8449,8 +8491,11 @@ async function buildPacketWithinBudget(query, supervisorPlan) {
     // 토큰 계산(getTokenCountAsync)은 서버 왕복일 수 있어 매 단 호출하면 전송 직전 렉의 원인이 된다.
     // 첫 단의 실측으로 "글자당 토큰 밀도"를 배우고, 명백히 예산 초과인 단은 계산 없이 건너뛴다.
     let density = 0; // 실측 tokens / chars
+    let prevText = null;
     for (let i = 0; i < ladder.length; i++) {
         const text = renderPacket(parts, { ...ladder[i], stableMode: splitMode });
+        if (i > 0 && i < ladder.length - 1 && text === prevText) continue; // 앞 단과 글이 같으면(줄일 가운데 연대기가 없는 채팅) 다시 세지 않는다
+        prevText = text;
         if (density > 0 && text.length * density > settings.tokenBudget * 1.15 && i < ladder.length - 1) continue;
         const tokens = await getTokenCountAsync(text);
         if (text.length) density = tokens / text.length;

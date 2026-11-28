@@ -51,16 +51,17 @@ test('a memory injected turn after turn steps back, and returns when the user ra
         withVec(a, memory('door', { kind: 'event', summary: '등대 문이 밤새 열려 있었다', turnIndex: 5 })),
     );
     const order = async (q) => [...(await a.retrieveMemories(q, [], '')).selected.map(m => m.id)];
-    const base = await order('등대');
+    // 문을 묻는 말 — 문 기억이 먼저다 (한 낱말 "등대"만으로는 둘 다 같은 정도로 닿아 중요도가 높은 반지가 앞설 수 있다)
+    const base = await order('등대 문');
     assert.deepEqual(base, ['door', 'ring']);
 
     // 앞선 세 번의 답변에 문 기억이 내리 실렸다
     for (const at of [-3, -2, -1]) a.run('noteRecallHistory')('test-chat', at, ['door']);
-    assert.equal((await order('등대'))[0], 'ring', 'the repeated memory yields its place');
+    assert.equal((await order('등대 문'))[0], 'ring', 'the repeated memory yields its place');
     assert.equal((await order('그날 문이 밤새 열려 있었지?'))[0], 'door', 'asking about it brings it straight back');
 
     a.getSettings().recallCooldown = false;
-    assert.deepEqual(await order('등대'), base);
+    assert.deepEqual(await order('등대 문'), base);
 });
 
 test('the librarian retires an outdated memory in the same call; it stays out of recall until asked about, and a swipe revives it', async () => {

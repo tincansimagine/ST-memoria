@@ -203,3 +203,73 @@ test('when the budget is tight, middle eras shrink to their WHEN and SHIFTS line
     assert.match(text, /처음의 긴 줄거리/, 'the oldest part keeps its plot');
     assert.match(text, /최근 일/);
 });
+
+test('more verb forms reduce to their stem: purpose -러, attached helper verbs, ㅂ-irregular, -던 after one letter, stem + 어/아', async () => {
+    const { verbStems } = await import('../craft-engine.mjs');
+    const has = (w, st) => assert.ok(verbStems(w).includes(st), `${w} → ${st} (got ${verbStems(w).join(', ')})`);
+    has('사러', '사'); has('먹으러', '먹'); has('잃어버렸다', '잃'); has('찾아냈다', '찾'); has('숨긴', '숨기'); has('만든', '만들');
+    has('구웠다', '굽'); has('굽던', '굽'); has('춤췄더라', '춤추'); has('약속했잖아', '약속'); has('갔대', '가'); has('적어', '적'); has('꽂아', '꽂');
+    for (const noun of ['달러', '컬러', '킬러', '에러', '이해', '오해', '새해', '항해', '피해', '단어', '연어', '상어', '악어', '약어', '고려', '우려', '참여', '사진', '주인', '여신']) {
+        assert.deepEqual(verbStems(noun), [], noun);
+    }
+});
+
+test('the concept table leaves words with several meanings alone', async () => {
+    const a = await app();
+    const tags = (t) => [...a.run('conceptTags')(a.run('stemSet')(t))];
+    for (const t of ['숨지 마', '멍하니 서 있었다', 'lie down here', '구속받기 싫어', '연고가 없는 도시', '중독성 있는 노래', '주문한 것', '차에 태워 줄게', '배고파']) {
+        assert.ok(!tags(t).some(c => ['~c:death', '~c:hurt', '~c:lie', '~c:prison', '~c:heal', '~c:poison', '~c:fire', '~c:vessel'].includes(c)), `${t} → ${tags(t).join(',')}`);
+    }
+    assert.ok(tags('마르코가 생선 수프를 끓여 준다').includes('~c:cook'));
+    assert.ok(tags('지하감옥에 갇혔다').includes('~c:prison'));
+});
+
+test('a recall cue counts distinct words, and a one-word cue matches by its stem', async () => {
+    const a = await app();
+    const store = a.getStore();
+    for (let i = 0; i < 9; i++) store.memories.push(withVec(a, memory(`n${i}`, { summary: `여행자가 시장에서 ${i}번째 물건을 골랐다`, turnIndex: 10 + i })));
+    store.memories.push(withVec(a, memory('ring', { summary: '아리아가 여행자에게 은반지를 건넸다', turnIndex: 2, hints: ['반지를 줬다'] })));
+    store.memories.push(withVec(a, memory('fight', { summary: '아리아와 보라가 시장에서 말다툼을 벌였다', turnIndex: 3, hints: ['싸웠다'] })));
+    const hint = async (q, id) => /검색 힌트/.test((await a.retrieveMemories(q, [], '')).trace.get(id)?.reason || '');
+    assert.equal(await hint('반지를 봤어?', 'ring'), false, 'one word of the cue (in two forms) is not two words');
+    assert.equal(await hint('반지를 줬잖아', 'ring'), true);
+    assert.equal(await hint('둘이 싸웠어?', 'fight'), true);
+});
+
+test('names match on word boundaries, with stacked particles and short Latin names', async () => {
+    const a = await app();
+    const f = a.run('nameIn');
+    assert.equal(f('보라랑은 안 가', '보라'), true);
+    assert.equal(f('리아한테도 말했어', '리아'), true);
+    assert.equal(f('미나네 고양이', '미나'), true);
+    assert.equal(f('보라색 커튼', '보라'), false);
+    assert.equal(f('기린이 있다', '린'), false);
+    assert.equal(f('finally', 'al'), false);
+    assert.equal(f('al said hi', 'al'), true);
+});
+
+test('a question made only of filler words stays a short input; a chronicle keeps its SHIFTS bullets when squeezed', async () => {
+    const a = await app();
+    const store = a.getStore();
+    for (let i = 0; i < 3; i++) store.memories.push(withVec(a, memory(`m${i}`, { summary: `등대에서 있었던 일 ${i}` })));
+    assert.equal((await a.retrieveMemories('그래서 뭐야?', [], '아리아가 등대 계단을 올라갔다.')).shortQ, true);
+    const squeeze = a.run('compactChronicle');
+    assert.equal(squeeze('WHEN: 3일째\nPLOT:\n- 긴 줄거리\nSHIFTS:\n- 아리아 → 보라: 신뢰\n- 열쇠는 보라가 가졌다\nOPEN: 북문'), 'WHEN: 3일째\nSHIFTS:\n- 아리아 → 보라: 신뢰\n- 열쇠는 보라가 가졌다');
+});
+
+test('folding the oldest eras asks once more when a big turning point of that span is gone', async () => {
+    const a = await app();
+    const store = a.getStore();
+    a.getSettings().eraKeep = 3;
+    store.arcSummaries = [1, 2, 3, 4, 5].map(n => ({ id: `a${n}`, fromTurn: n * 10, toTurn: n * 10 + 9, text: `PLOT:\n- ${n}번째 시대의 일` }));
+    store.milestones = [{ id: 'e1', title: '등대에서 처음 만났다', summary: '아리아와 여행자가 등대에서 처음 만났다', grade: 'major', turnIndex: 12 }];
+    const asked = [];
+    a.context.generateRaw = async ({ prompt }) => {
+        asked.push(prompt[0].content);
+        return asked.length === 1 ? 'PLOT:\n- 시장에서 물건을 샀다.' : 'PLOT:\n- 아리아와 여행자가 등대에서 처음 만났다.\n- 시장에서 물건을 샀다.';
+    };
+    assert.equal(await a.run('maybeFoldEras')(store), true);
+    assert.equal(asked.length, 2);
+    assert.match(asked[1], /lost these turning points[\s\S]*등대에서 처음 만났다/);
+    assert.match(store.arcSummaries.find(x => x.saga).text, /처음 만났다/);
+});

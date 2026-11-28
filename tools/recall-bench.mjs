@@ -2,7 +2,7 @@
 //   node tools/recall-bench.mjs            이 저장소
 //   node tools/recall-bench.mjs <다른 폴더>  다른 판(예: git worktree)과 견줄 때
 //   node tools/recall-bench.mjs . -v        물음마다 1~3등까지
-// 두 묶음: A는 회상을 다듬으며 본 물음, B는 다듬는 데 쓰지 않은 물음(따로 둔 시험). 둘 다 직전 장면 없이 / 함께 각각 잰다.
+// 세 묶음: A는 회상을 다듬으며 본 물음, B는 다듬는 데 쓰지 않은 물음, C는 바깥에서 만든 물음(유형별 넷씩). 모두 직전 장면 없이 / 함께 각각 잰다.
 import { fileURLToPath } from 'node:url';
 import { resolve } from 'node:path';
 const root = resolve(process.argv[2] && !process.argv[2].startsWith('-') ? process.argv[2] : fileURLToPath(new URL('..', import.meta.url)));
@@ -15,15 +15,18 @@ async function run(label, setup, qs, scene) {
     setup(store, memory);
     for (const m of store.memories) m.vec = a.encodeVec(a.embedText(a.memoryIndexText(m)));
     let t1 = 0, t3 = 0, s1 = 0, s3 = 0;
-    for (const [q, want] of qs) {
+    const byCat = new Map();
+    for (const [q, want, cat] of qs) {
         const ids = (await a.retrieveMemories(q, [], '')).selected.map(m => m.id);
         const ids2 = (await a.retrieveMemories(q, [], scene)).selected.map(m => m.id);
         if (ids[0] === want) t1++; if (ids.slice(0, 3).includes(want)) t3++;
         if (ids2[0] === want) s1++; if (ids2.slice(0, 3).includes(want)) s3++;
+        if (cat) { const c = byCat.get(cat) || [0, 0, 0]; c[0]++; if (ids[0] === want) c[1]++; if (ids2[0] === want) c[2]++; byCat.set(cat, c); }
         if (verbose) console.log(`  ${q} [${want}] ${ids.slice(0, 3).join(',')} | ${ids2.slice(0, 3).join(',')}`);
     }
     const n = qs.length;
     console.log(`${label}: 장면 없이 1등 ${t1}/${n} · 3등 안 ${t3}/${n} — 장면과 함께 1등 ${s1}/${n} · 3등 안 ${s3}/${n}`);
+    if (byCat.size) console.log(`  유형별 1등 (장면 없이 / 함께): ${[...byCat].map(([c, [k, a1, b1]]) => `${c} ${a1}/${k} · ${b1}/${k}`).join(' | ')}`);
 }
 
 { // 묶음 A
@@ -103,4 +106,49 @@ async function run(label, setup, qs, scene) {
         for (const [id, summary, entities, t] of facts) store.memories.push(memory(id, { summary, entities, turnIndex: t, importance: 0.6 }));
         for (let i = 0; i < 40; i++) store.memories.push(memory(`f${i}`, { summary: `세린과 여행자가 항구 거리를 걸으며 ${['날씨','저녁','배','바람','시장','하늘','파도','등불'][i % 8]} 이야기를 나눴다`, entities: ['세린', '여행자'], turnIndex: 100 + i * 2, importance: 0.5 }));
     }, qs.filter(([, want]) => want), scene);
+}
+
+{ // 묶음 C — 바깥에서 만든 물음 (용언 활용 · 같은 뜻 · 별명 · 호칭 · 한 글자 이름씨 · 꾸밈꼴 · 장면 쏠림 각 넷)
+    const facts = [
+        ['bake', '소연은 축제 전날 밤 호두파이를 직접 구웠다', ['소연'], 6],
+        ['fix', '태오가 고장 난 회중시계를 밤새 직접 고쳤다', ['태오'], 11],
+        ['bury', '유진이 오래된 철제 상자를 떡갈나무 아래 묻었다', ['유진'], 16],
+        ['freeze', '겨울 한파 때문에 북쪽 강물이 단단히 얼어붙었다', ['태오'], 21],
+        ['apology', '소연이 먼저 고개를 숙여 태오에게 사과했다', ['소연', '태오'], 26],
+        ['heal', '유진이 다친 레온의 팔에 붕대를 감아 주었다', ['유진', '레온'], 31],
+        ['prison', '레온이 반역 누명을 쓰고 지하감옥에 갇혔다', ['레온'], 36],
+        ['steal', '소매치기가 시장 골목에서 태오의 지갑을 훔쳤다', ['태오'], 41],
+        ['burn', '지안은 어릴 적 벼락을 맞은 뒤 왼손에 화상을 입었다', ['지안'], 45],
+        ['sword2', '태오는 새벽마다 뒤뜰에서 목검을 휘두른다', ['태오'], 49],
+        ['cloak', '레온은 밤순찰 때 늘 붉은 망토를 두른다', ['레온'], 53],
+        ['herb', '유진은 약방 서랍에 말린 라벤더를 모아 둔다', ['유진'], 57],
+        ['tower', '태오가 낡은 시계탑 꼭대기에 망원경을 숨겼다', ['태오'], 61],
+        ['gun', '레온은 책상 깊숙한 곳에 은빛 권총을 보관한다', ['레온'], 65],
+        ['flower', '소연이 유리병에 노란 들꽃을 꽂아 두었다', ['소연'], 69],
+        ['remedy', '유진이 독에 대비해 해독약을 미리 달여 두었다', ['유진'], 73],
+        ['note', '태오가 떠나기 전 책상 위에 짧은 쪽지를 남겨 두었다', ['태오'], 77],
+        ['code', '지안이 비밀 금고의 비밀번호를 어젯밤 바꾸었다', ['지안'], 81],
+        ['diary', '소연이 지하실 통로 좌표를 수첩에 적어 두었다', ['소연'], 85],
+        ['parcel', '유진이 수도에서 온 소포를 여행자에게 보냈다', ['유진'], 89],
+        ['snow_oath', '지안은 첫눈이 오면 여행자와 항구 등불을 보러 가기로 맹세했다', ['지안', '여행자'], 18],
+        ['piano', '지안은 비가 쏟아지는 밤이면 낡은 피아노를 친다', ['지안'], 24],
+        ['clash', '지안과 레온이 항구 창고에서 밀수 장부를 두고 크게 다투었다', ['지안', '레온'], 33],
+        ['peach', '지안은 복숭아를 먹으면 온몸에 두드러기가 난다', ['지안'], 39],
+    ];
+    const qs = [
+        ['소연이가 직접 굽던 파이가 뭐였지?', 'bake', '활용'], ['태오가 시계 고쳐 줬어?', 'fix', '활용'], ['유진이 나무 밑에 뭘 묻어 뒀지?', 'bury', '활용'], ['북쪽 강이 완전히 얼었어?', 'freeze', '활용'],
+        ['소연이가 태오한테 용서 빌었어?', 'apology', '같은 뜻'], ['레온 팔 치료해 준 사람이 누구야?', 'heal', '같은 뜻'], ['레온 왜 감옥에 잡혀 들어갔어?', 'prison', '같은 뜻'], ['태오 지갑 가져간 도둑 기억나?', 'steal', '같은 뜻'],
+        ['안이 왼손 화상은 왜 생겼어?', 'burn', '별명·호칭'], ['사부가 새벽마다 휘두르는 게 뭐야?', 'sword2', '별명·호칭'], ['대장이 순찰 나갈 때 두르는 거 뭐야?', 'cloak', '별명·호칭'], ['누나가 서랍에 모아 두는 게 뭐야?', 'herb', '별명·호칭'],
+        ['태오가 탑 위에 둔 게 뭐였지?', 'tower', '한 글자'], ['레온이 가진 총 어디에 있어?', 'gun', '한 글자'], ['소연이가 꽃을 어디에 꽂아 뒀어?', 'flower', '한 글자'], ['유진이 달여 둔 약이 무슨 용도야?', 'remedy', '한 글자'],
+        ['태오가 남긴 쪽지 어디에 뒀어?', 'note', '꾸밈꼴'], ['지안이가 바꾼 비밀번호 알아?', 'code', '꾸밈꼴'], ['소연이가 수첩에 적은 게 뭐였지?', 'diary', '꾸밈꼴'], ['유진이 보낸 소포 도착했어?', 'parcel', '꾸밈꼴'],
+        ['우리 첫눈 오면 하기로 한 거 기억나?', 'snow_oath', '장면 쏠림'], ['지안이 비 오는 밤에 뭘 쳐?', 'piano', '장면 쏠림'], ['지안이랑 레온 왜 싸웠던 거야?', 'clash', '장면 쏠림'], ['지안이 먹으면 두드러기 나는 게 뭐였지?', 'peach', '장면 쏠림'],
+    ];
+    const scene = '지안은 온실 유리창 너머로 내리는 비를 바라보았다. 빗소리가 잦아들었다. 여행자는 젖은 외투를 털며 그녀 옆에 앉았다. 두 사람은 말없이 정원을 내다보았다.';
+    await run('C (바깥에서 만든 물음)', (store, memory) => {
+        store.turnCounter = 220;
+        store.characters.push({ id: 'c1', name: '지안', aliases: ['안'] }, { id: 'c2', name: '태오', aliases: ['사부'] }, { id: 'c3', name: '소연', aliases: ['연이'] }, { id: 'c4', name: '레온', aliases: [] }, { id: 'c5', name: '유진', aliases: [] });
+        store.bonds.push({ id: 'b1', from: '여행자', to: '레온', log: [{ turn: 4, stage: '믿는 상관', calls: '대장' }], disabled: false }, { id: 'b2', from: '여행자', to: '유진', log: [{ turn: 5, stage: '친한 누나', calls: '누나' }], disabled: false });
+        for (const [id, summary, entities, t] of facts) store.memories.push(memory(id, { summary, entities, turnIndex: t, importance: 0.6 }));
+        for (let i = 0; i < 30; i++) store.memories.push(memory(`f${i}`, { summary: `지안과 여행자가 온실 정원을 거닐며 ${['빗소리', '차향', '계절', '구름', '화분', '오후'][i % 6]} 이야기를 나눴다`, entities: ['지안', '여행자'], turnIndex: 110 + i * 2, importance: 0.5 }));
+    }, qs, scene);
 }
