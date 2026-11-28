@@ -2,7 +2,8 @@
 //   node tools/recall-bench.mjs            이 저장소
 //   node tools/recall-bench.mjs <다른 폴더>  다른 판(예: git worktree)과 견줄 때
 //   node tools/recall-bench.mjs . -v        물음마다 1~3등까지
-// 세 묶음: A는 회상을 다듬으며 본 물음, B는 다듬는 데 쓰지 않은 물음, C는 바깥에서 만든 물음(유형별 넷씩). 모두 직전 장면 없이 / 함께 각각 잰다.
+// 한국어 세 묶음: A는 회상을 다듬으며 본 물음, B는 다듬는 데 쓰지 않은 물음, C는 바깥에서 만든 물음(유형별 넷씩).
+// 다른 말 세 묶음: D 영어 · E 일본어 · F 중국어 (같은 이야기 틀, 유형별 셋씩). 모두 직전 장면 없이 / 함께 각각 잰다.
 import { fileURLToPath } from 'node:url';
 import { resolve } from 'node:path';
 const root = resolve(process.argv[2] && !process.argv[2].startsWith('-') ? process.argv[2] : fileURLToPath(new URL('..', import.meta.url)));
@@ -152,3 +153,74 @@ async function run(label, setup, qs, scene) {
         for (let i = 0; i < 30; i++) store.memories.push(memory(`f${i}`, { summary: `지안과 여행자가 온실 정원을 거닐며 ${['빗소리', '차향', '계절', '구름', '화분', '오후'][i % 6]} 이야기를 나눴다`, entities: ['지안', '여행자'], turnIndex: 110 + i * 2, importance: 0.5 }));
     }, qs, scene);
 }
+
+// 다른 말 — 같은 틀(사실 12 · 평범한 장면 기억 20 · 물음 12)을 영어 · 일본어 · 중국어로. 유형: 그대로 · 활용(바꿔 말함) · 같은 뜻 · 별명/호칭
+async function langSet(label, { chars, bonds = [], facts, filler, fillTopics, qs, scene }) {
+    await run(label, (store, memory) => {
+        store.turnCounter = 120;
+        store.characters.push(...chars);
+        store.bonds.push(...bonds);
+        for (const [id, summary, entities, t] of facts) store.memories.push(memory(id, { summary, entities, turnIndex: t, importance: 0.6 }));
+        for (let i = 0; i < 20; i++) store.memories.push(memory(`f${i}`, { summary: filler(fillTopics[i % fillTopics.length]), entities: [chars[0].name], turnIndex: 60 + i * 2, importance: 0.5 }));
+    }, qs, scene);
+}
+await langSet('D (영어)', {
+    chars: [{ id: 'c1', name: 'Elena', aliases: ['Lena'] }, { id: 'c2', name: 'Marcus', aliases: [] }, { id: 'c3', name: 'Iris', aliases: [] }, { id: 'c4', name: 'Theo', aliases: ['Teddy'] }],
+    bonds: [{ id: 'b1', from: 'Traveler', to: 'Iris', log: [{ turn: 2, stage: 'trusted healer', calls: 'Doc' }], disabled: false }],
+    facts: [
+        ['bread', 'Elena buys rye bread from the bakery every morning', ['Elena'], 4], ['umbrella', 'Marcus lent the traveler his umbrella on a rainy night', ['Marcus'], 8],
+        ['tattoo', 'Iris has a small star tattoo on her wrist', ['Iris'], 12], ['ship', 'Marcus sails an old schooner called the Petrel', ['Marcus'], 16],
+        ['study', 'Theo studies ancient runes in the library every night', ['Theo'], 20], ['broke', 'Elena accidentally broke her favorite teacup', ['Elena'], 24],
+        ['lost', 'Theo lost his younger brother in the forest as a child', ['Theo'], 28], ['ran', 'Iris escaped the guards by running across the rooftops', ['Iris'], 32],
+        ['soup', 'Marcus cooks fish stew for his crew', ['Marcus'], 36], ['quarrel', 'Elena and Iris argued over how to read the map', ['Elena', 'Iris'], 40],
+        ['hide', 'Elena hid an old ring inside a wooden box', ['Elena'], 44], ['herb', 'Iris keeps dried lavender in her medicine drawer', ['Iris'], 48],
+    ],
+    filler: (t) => `Elena and the traveler strolled along the harbor talking about the ${t}`, fillTopics: ['weather', 'evening', 'wind', 'sea', 'market'],
+    qs: [
+        ['What does Elena buy every morning?', 'bread', '그대로'], ['Does Iris have a tattoo?', 'tattoo', '그대로'], ["What's the name of Marcus's ship?", 'ship', '그대로'],
+        ['Who lends me umbrellas when it rains?', 'umbrella', '활용'], ['What is Theo studying at night?', 'study', '활용'], ['What does Marcus cook for the crew?', 'soup', '활용'],
+        ['Why did Elena and Iris fight?', 'quarrel', '같은 뜻'], ['What did Elena smash?', 'broke', '같은 뜻'], ['Did Iris flee from the guards?', 'ran', '같은 뜻'],
+        ['Where did Lena hide the ring?', 'hide', '별명·호칭'], ['What does Doc keep in her drawer?', 'herb', '별명·호칭'], ['Who did Teddy lose in the forest?', 'lost', '별명·호칭'],
+    ],
+    scene: 'The harbor wind was cold. Elena leaned on the railing and watched the boats while the traveler stood beside her.',
+});
+await langSet('E (일본어)', {
+    chars: [{ id: 'c1', name: '美奈', aliases: ['ミナ'] }, { id: 'c2', name: '健太', aliases: [] }, { id: 'c3', name: 'アリア', aliases: ['リア'] }, { id: 'c4', name: '蓮', aliases: [] }],
+    bonds: [{ id: 'b1', from: '旅人', to: '健太', log: [{ turn: 2, stage: '頼れる先輩', calls: '先輩' }], disabled: false }],
+    facts: [
+        ['bread', '美奈は毎朝パン屋でライ麦パンを買う', ['美奈'], 4], ['umbrella', '健太は雨の夜に旅人へ傘を貸した', ['健太'], 8],
+        ['tattoo', 'アリアの手首には小さな星の刺青がある', ['アリア'], 12], ['ship', '蓮は古い帆船「海燕号」に乗っている', ['蓮'], 16],
+        ['study', '健太は毎晩図書館で古代文字を勉強している', ['健太'], 20], ['broke', '美奈はお気に入りのティーカップを割ってしまった', ['美奈'], 24],
+        ['lost', '蓮は幼い頃、森で弟とはぐれた', ['蓮'], 28], ['ran', 'アリアは衛兵から逃げて屋根の上を走った', ['アリア'], 32],
+        ['soup', '蓮は船員たちに魚のスープを作ってあげる', ['蓮'], 36], ['quarrel', '美奈とアリアは地図の読み方で口論した', ['美奈', 'アリア'], 40],
+        ['hide', '美奈は古い指輪を木箱の中に隠した', ['美奈'], 44], ['herb', 'アリアは薬棚に乾燥ラベンダーをしまっている', ['アリア'], 48],
+    ],
+    filler: (t) => `美奈と旅人は港を歩きながら${t}の話をした`, fillTopics: ['天気', '夕方', '風', '海', '市場'],
+    qs: [
+        ['美奈は毎朝何を買うの？', 'bread', '그대로'], ['アリアの手首に何がある？', 'tattoo', '그대로'], ['蓮の船の名前は？', 'ship', '그대로'],
+        ['健太は夜に何を勉強してる？', 'study', '활용'], ['蓮が作るスープって何の？', 'soup', '활용'], ['蓮が小さい頃はぐれたのは誰？', 'lost', '활용'],
+        ['美奈とアリアはなんで喧嘩したの？', 'quarrel', '같은 뜻'], ['美奈が壊したものは？', 'broke', '같은 뜻'], ['アリアは衛兵から逃走したの？', 'ran', '같은 뜻'],
+        ['ミナが隠した指輪はどこ？', 'hide', '별명·호칭'], ['先輩が貸してくれたのは何？', 'umbrella', '별명·호칭'], ['リアは薬棚に何をしまってる？', 'herb', '별명·호칭'],
+    ],
+    scene: '港の風は冷たかった。美奈は手すりにもたれて船を眺め、旅人はその隣に立っていた。',
+});
+await langSet('F (중국어)', {
+    chars: [{ id: 'c1', name: '王芳', aliases: ['芳芳'] }, { id: 'c2', name: '李明', aliases: ['阿明'] }, { id: 'c3', name: '陈默', aliases: [] }, { id: 'c4', name: '林雪', aliases: ['小雪'] }],
+    bonds: [{ id: 'b1', from: '旅人', to: '陈默', log: [{ turn: 2, stage: '可靠的师兄', calls: '师兄' }], disabled: false }],
+    facts: [
+        ['bread', '王芳每天早上都去面包店买黑麦面包', ['王芳'], 4], ['umbrella', '陈默在一个雨夜把伞借给了旅人', ['陈默'], 8],
+        ['tattoo', '林雪的手腕上有一个小小的星星纹身', ['林雪'], 12], ['ship', '李明驾驶着一艘名叫海燕号的旧帆船', ['李明'], 16],
+        ['study', '陈默每天晚上在图书馆研究古代文字', ['陈默'], 20], ['broke', '王芳不小心打碎了她最喜欢的茶杯', ['王芳'], 24],
+        ['lost', '李明小时候在森林里和弟弟走散了', ['李明'], 28], ['ran', '林雪为了躲避卫兵从屋顶上逃走了', ['林雪'], 32],
+        ['soup', '李明经常给船员们煮鱼汤', ['李明'], 36], ['quarrel', '王芳和林雪因为怎么看地图吵了一架', ['王芳', '林雪'], 40],
+        ['hide', '王芳把一枚旧戒指藏在了木盒里', ['王芳'], 44], ['herb', '林雪在药柜里收着晒干的薰衣草', ['林雪'], 48],
+    ],
+    filler: (t) => `王芳和旅人沿着港口散步，聊着${t}`, fillTopics: ['天气', '傍晚', '风', '大海', '集市'],
+    qs: [
+        ['王芳每天早上买什么？', 'bread', '그대로'], ['林雪手腕上有什么？', 'tattoo', '그대로'], ['李明的船叫什么名字？', 'ship', '그대로'],
+        ['陈默晚上在研究什么？', 'study', '활용'], ['李明给船员做什么汤？', 'soup', '활용'], ['李明小时候跟谁走散了？', 'lost', '활용'],
+        ['王芳和林雪为什么争吵？', 'quarrel', '같은 뜻'], ['王芳摔碎了什么？', 'broke', '같은 뜻'], ['林雪是怎么逃跑的？', 'ran', '같은 뜻'],
+        ['芳芳把戒指藏在哪里了？', 'hide', '별명·호칭'], ['师兄借给我的是什么？', 'umbrella', '별명·호칭'], ['小雪在药柜里放了什么？', 'herb', '별명·호칭'],
+    ],
+    scene: '港口的风很冷。王芳靠在栏杆上看着船，旅人站在她身边。',
+});

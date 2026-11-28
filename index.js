@@ -5884,7 +5884,8 @@ function nameIn(hay, name) {
     const esc = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     // 로마자 이름: 넉 자 이상은 그대로, 짧은 것("al · li")은 낱말 경계로 ("finally · like" 속에 걸리지 않게)
     if (/^[a-z0-9 ]+$/.test(name)) return name.length >= 4 ? hay.includes(name) : new RegExp(`(?:^|[^a-z0-9])${esc}(?![a-z0-9])`).test(hay);
-    if ([...name].length >= 3) return hay.includes(name);
+    // 한자 · 가나 이름은 띄어 쓰지 않는 글에 붙어 나온다 (「美奈は」 · 「李明笑了」) — 낱말 경계를 볼 수 없어 그대로 찾는다
+    if ([...name].length >= 3 || /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}]/u.test(name)) return hay.includes(name);
     // 조사가 둘 겹쳐도 ("보라랑은 · 리아한테도") 그 사람이다
     return new RegExp(`(?:^|[^\\p{L}\\p{N}])${esc}${NAME_TAIL}(?:은|는|도|만|의|요)?(?![\\p{L}\\p{N}])`, 'u').test(hay);
 }

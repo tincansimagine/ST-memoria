@@ -246,6 +246,9 @@ test('names match on word boundaries, with stacked particles and short Latin nam
     assert.equal(f('기린이 있다', '린'), false);
     assert.equal(f('finally', 'al'), false);
     assert.equal(f('al said hi', 'al'), true);
+    // 띄어 쓰지 않는 일본어 · 중국어 글 속의 두 글자 이름
+    assert.equal(f('美奈は笑った', '美奈'), true);
+    assert.equal(f('李明笑了', '李明'), true);
 });
 
 test('a question made only of filler words stays a short input; a chronicle keeps its SHIFTS bullets when squeezed', async () => {
