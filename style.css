@@ -1,5 +1,3 @@
-@import url('https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css');
-@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800&display=swap');
 /* ============================================================
    Memoria — 장기기억 서고
    테마 색(BodyColor)을 옅게 섞어 어떤 테마에서도 대비가 유지되도록 함
@@ -1818,6 +1816,17 @@ body[data-memoria-paper="dark"] :is(#memoria_settings.memoria, .memoria-library,
 #memoria_settings .memoria-au-sub small { font-weight: 400; font-size: .82em; color: var(--dim); }
 
 /* 어긋난 곳 · 채점 결과 */
+#memoria_settings .memoria-fg-hole { gap: 6px; }
+#memoria_settings #memoria_audit_forgot > .memoria-au-sub { margin-bottom: 6px; }
+#memoria_settings .memoria-fg-hole > p { font-weight: 600; }
+#memoria_settings .memoria-fg-said { display: block; font-size: .86em; line-height: 1.55; color: var(--dim); overflow-wrap: anywhere; word-break: keep-all; }
+#memoria_settings .memoria-fg-cause { font-size: .84em; color: var(--dim); text-decoration: underline dotted; text-underline-offset: 3px; cursor: help; }
+#memoria_settings .memoria-fg-hole .memoria-au-btns { align-items: center; gap: 12px; }
+#memoria_settings .memoria-fg-hole.is-done > p, #memoria_settings .memoria-fg-hole.is-done .memoria-fg-said { opacity: .55; }
+#memoria_settings .memoria-au-sub .memoria-au-textbtn { margin-left: auto; font-size: .84em; font-weight: 500; }
+#memoria_settings .memoria-fg-kept { margin: 0; padding: 0; list-style: none; display: grid; gap: 6px; font-size: .88em; line-height: 1.55; color: var(--text); }
+#memoria_settings .memoria-fg-kept li { overflow-wrap: anywhere; word-break: keep-all; }
+#memoria_settings .memoria-fg-kept .memoria-au-link { margin-right: 6px; }
 #memoria_settings .memoria-au-card { display: flex; flex-direction: column; gap: 8px; margin: 0; padding: 12px 14px; border: 1px solid var(--ink-line); border-radius: 4px; background: var(--surface); min-width: 0; }
 #memoria_settings .memoria-au-card.is-off { opacity: .7; }
 #memoria_settings .memoria-au-card header { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
@@ -2173,7 +2182,7 @@ select.mm-yn-whof { width: 100%; min-height: 36px; max-width: none; }
 #memoria_settings .mm-yn .memoria__toggle-row + .memoria__toggle-row { margin-top: 2px; }
 .mm-yn-title { margin: 0 0 2px; font: 800 1.05em var(--font); color: var(--text); overflow-wrap: anywhere; }
 
-/* ════ 서고 머리 · 탭 · 단추 — 드림랜드 서고와 같은 얼굴 (v2.16) ════ */
+/* ════ 서고 머리 · 탭 · 단추 (v2.16) ════ */
 /* 머리: 제목 앞 작은 초승달(포인트 색), 위에 작은 MEMORIA, 제목 뒤 작은 별 둘 */
 #memoria_settings .inline-drawer-header .memoria__brand { display: inline-flex; align-items: center; gap: 10px; min-width: 0; font-weight: 400; }
 #memoria_settings .memoria__moon { flex: none; width: 24px; height: 24px; border-radius: 50%; background: none; box-shadow: inset -6px -2px 0 0 var(--accent); transform: rotate(-14deg); }
@@ -2267,7 +2276,7 @@ select.mm-yn-whof { width: 100%; min-height: 36px; max-width: none; }
     #memoria_settings .memoria__mem-card > .memoria__mem-head > .memoria__mem-actions { flex: 1 1 100%; margin: 0 -6px 0 0; justify-content: flex-end; }
 }
 
-/* ════ 인물 도감 카드 — 드림랜드 서고의 인물 카드와 같은 생김새 (v2.16.1) ════
+/* ════ 인물 도감 카드 (v2.16.1) ════
    첫 글자 네모 · 이름과 하는 일 · 밑줄 / 생김새 · 바탕(닻) · 말투(말풍선) · 변화(새싹) · 대사(따옴표) / 특성 칩 · 관계 칩 / 점선 아래 오른쪽의 단추 */
 #memoria_settings #memoria_characters_list { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 10px; }
 #memoria_settings .memoria__char-card.mm-person { display: flex; flex-direction: column; gap: 6px; padding: 12px; border: 1px solid var(--ink-line); border-radius: 0; background: var(--surface); font-size: .9em; min-width: 0; position: relative; }
@@ -2300,7 +2309,7 @@ select.mm-yn-whof { width: 100%; min-height: 36px; max-width: none; }
 
 
 
-/* 관계선 카드: 지금 단계는 짙게 채운 딱지 (드림랜드 서고와 같이) */
+/* 관계선 카드: 지금 단계는 짙게 채운 딱지 */
 #memoria_settings .memoria__bond-card .memoria__char-head > .memoria__badge { background: var(--text); border-color: var(--text); color: var(--bg); font-weight: 700; }
 
 /* ⟦icons:start⟧ — tools/icons.mjs 가 짓는 덩어리입니다. 손으로 고치지 말고 node tools/icons.mjs 를 돌리세요. */
@@ -2666,6 +2675,8 @@ select.mm-yn-whof { width: 100%; min-height: 36px; max-width: none; }
 #memoria_settings .memoria-au-mode.is-on { background: var(--ink) !important; color: var(--surface) !important; }
 #memoria_settings .inline-drawer-content .memoria-au-every input, #memoria_settings .inline-drawer-content .memoria-au-every select { width: auto !important; min-width: 0 !important; height: 36px !important; min-height: 36px !important; margin: 0 !important; padding: 0 10px !important; border: 1px solid var(--ink-line) !important; border-radius: 4px !important; background: var(--surface) !important; box-shadow: none !important; color: var(--text) !important; font-size: 1em !important; }
 #memoria_settings .inline-drawer-content .memoria-au-every input { width: 64px !important; text-align: center !important; }
+#memoria_settings .memoria-au-sub .memoria-au-textbtn { margin-left: auto !important; font-size: .84em !important; font-weight: 500 !important; }
+#memoria_settings .memoria-fg-kept .memoria-au-link { margin-right: 6px !important; }
 #memoria_settings .memoria-au-link.mmv-jump { min-height: 0 !important; padding: 2px 1px !important; margin: 0 !important; border: 0 !important; border-radius: 0 !important; background: none !important; color: var(--accent-ink, var(--accent)) !important; font: 600 .9em var(--font) !important; text-decoration: underline !important; text-underline-offset: 3px !important; cursor: pointer !important; }
 #memoria_settings .memoria-au-textbtn { min-height: 0 !important; padding: 0 !important; margin: 0 !important; border: 0 !important; background: none !important; color: var(--accent-ink, var(--accent)) !important; font: inherit !important; text-decoration: underline !important; text-underline-offset: 3px !important; cursor: pointer !important; }
 #memoria_settings #memoria_audit_drift .menu_button, #memoria_settings #memoria_audit_sums .menu_button { min-height: 36px !important; padding: 0 14px !important; border: 1px solid var(--ink-line) !important; border-radius: 4px !important; background: var(--surface) !important; font-size: .88em !important; }

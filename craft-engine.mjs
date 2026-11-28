@@ -103,6 +103,39 @@ export function phraseStem(word) {
     return w;
 }
 
+/**
+ * 회상의 낱말 맞추기에 쓰는 줄기 — 끝의 조사를 남는 글자가 두 자 아래로 줄지 않는 동안 거듭 뗀다.
+ * "고양이를" · "고양이가" · "고양이"가 모두 같은 줄기가 된다 (한 번만 떼면 "고양이를"은 "고양이", "고양이"는 "고양"이 되어 어긋난다).
+ * 한 글자 이름은 줄기로 남기지 않는다 — 그런 이름은 인물 이름 축이 따로 맞춘다.
+ */
+export function wordStem(word) {
+    let w = String(word || '').toLowerCase();
+    if (!/^[가-힣]{3,}$/.test(w)) return w;
+    for (let guard = 0; guard < 3; guard++) {
+        const p = KO_PARTICLES.find(x => w.endsWith(x) && [...w].length - x.length >= 2);
+        if (!p) break;
+        w = w.slice(0, -p.length);
+    }
+    return w;
+}
+
+/**
+ * 이 서고에서 너무 흔해 아무것도 가리키지 못하는 두 글자 조각 (기억의 share 넘게에 들어 있는 것).
+ * "었다" · "했다" · "에서" 같은 어미 · 조사 조각이 질문과 기억을 엉뚱하게 이어 붙이던 것 — 목록을 박아 두지 않고 서고에서 센다 (말이 달라도 맞는다).
+ * grams: 질문의 조각, docs: 띄어쓰기 · 문장부호를 지운 기억 글. 기억이 minDocs 개보다 적으면 거르지 않는다.
+ */
+export function commonGrams(grams, docs, { share = 0.2, minDocs = 30 } = {}) {
+    const out = new Set();
+    const n = docs.length;
+    if (n < minDocs) return out;
+    const limit = Math.ceil(n * share);
+    for (const g of grams) {
+        let df = 0;
+        for (const d of docs) if (d.includes(g) && ++df >= limit) { out.add(g); break; }
+    }
+    return out;
+}
+
 // 표현의 처음이나 끝에 오면 안 되는 말 — 그 자체로는 아무 버릇도 아닌 대명사·접속어·흔한 서술어
 const KO_STOP_HEADS = '그|그녀|그것|이것|저것|그들|우리|나|내|너|네|당신|자신|서로|모두|무엇|누구|어디|언제|여기|거기|저기|이|저|것|수|때|곳|중|안|속|위|앞|뒤|옆|말|일|더|또|다시|아직|이미|그리고|그러나|하지만|그런데|그래서|그러자|그때|그런|이런|저런|어떤|모든|마치|정말|아주|매우|너무|조금|잠시|이제|바로|다만|역시|혹은|또는|및|등|한|두|세';
 const KO_STOP_RE = new RegExp(`^(?:${KO_STOP_HEADS})(?:은|는|이|가|을|를|의|에|에게|에서|도|만|와|과|로|으로|께|한테|처럼|보다|까지|부터|라고|이라고)?$`);

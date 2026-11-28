@@ -42,12 +42,13 @@ import { NARRATOR_PERSPECTIVE, isSharedPerspective, hasChatPerspective, resolveP
 import { showArchiveLibrary } from './library-ui.mjs';
 import * as Ties from './ties-engine.mjs';
 import { yeonHtml, yeonView, tiePickerHtml, typeChipsHtml, typeName, clampZoom } from './yeon-view.mjs';
-import { withDeadline, parsePhraseList, stripPhrases, hasPhrase, findRepeatedPhrases, pickBundleValues, resolveBundleName, switchBundle, saveBundle, deleteBundle, renameBundle, exportBundle, parseBundleFile, diffStableEntries, shouldRefreeze, createActivityLog, findRivalExtensions, splitClosedLine, sleepStaleThreads, pickPledges, stripOpenLines, THREAD_KINDS, recallCooldown, pushRecallHistory, isEndedValue, ungroundedFigures, roughTokens, noteUsage, usageTotals, groundedIn, soundsHedged, noteThreadSightings, threadTouched, rareQueryWords, findConflicts, looksRefused, looksBlocked, strayHidden, pickTranscript, transcriptTerms, crossScriptPairs, crossScriptSame, pickPledgesToCheck, ensembleLabel, firstOf, listOf, joinValue, clampScore, splitPair, jsonRepairVariants, normalizeRecordLabels, BOND_KINDS, bondKindOf, summaryGaps, spanWindows, TIC_TYPES, readTicPicks, keptMilestones, sameTrait, mergeTraits, startsWithFieldLabel, looksLikeAlias, looksLikeAge, storyOnly, endsMidSentence, mergeLoss, sameText, cardVoicesMany } from './craft-engine.mjs';
+import { withDeadline, parsePhraseList, stripPhrases, hasPhrase, findRepeatedPhrases, wordStem, commonGrams, pickBundleValues, resolveBundleName, switchBundle, saveBundle, deleteBundle, renameBundle, exportBundle, parseBundleFile, diffStableEntries, shouldRefreeze, createActivityLog, findRivalExtensions, splitClosedLine, sleepStaleThreads, pickPledges, stripOpenLines, THREAD_KINDS, recallCooldown, pushRecallHistory, isEndedValue, ungroundedFigures, roughTokens, noteUsage, usageTotals, groundedIn, soundsHedged, noteThreadSightings, threadTouched, rareQueryWords, findConflicts, looksRefused, looksBlocked, strayHidden, pickTranscript, transcriptTerms, crossScriptPairs, crossScriptSame, pickPledgesToCheck, ensembleLabel, firstOf, listOf, joinValue, clampScore, splitPair, jsonRepairVariants, normalizeRecordLabels, BOND_KINDS, bondKindOf, summaryGaps, spanWindows, TIC_TYPES, readTicPicks, keptMilestones, sameTrait, mergeTraits, startsWithFieldLabel, looksLikeAlias, looksLikeAge, storyOnly, endsMidSentence, mergeLoss, sameText, cardVoicesMany } from './craft-engine.mjs';
 import { isOocText, looksOocReply, attributeQuote, addressTermsIn, tallyAddress, pickAddressLines, personNowLine } from './stage-engine.mjs';
 import { parseStoryDate, storyDatesOf, isIsoDate, trackerText, trackerLineOf, pickBeats, beatLines, veilLeaks } from './calendar-engine.mjs';
 import { peopleList, matchPerson, personPage, nameSuggestions, planMerge, pairKey, WIPE_KINDS, wipeCounts, NOW_ORDER, strayPeople, mentions } from './people-engine.mjs';
 import { readerSystem, readerUser, readerKey, needsReading, packBatches, replyBudget, readReply, trimItems, READER_LANGS } from './reader-engine.mjs';
 import { checkModeOf, checkEveryOf, gradeEveryOf, NOTE_REPLIES, auditHash, sumSecs, whenOf, evidenceRows, readFindings, liveFindings, repliesSince, driftNoteLines, sumChecks, applySumFix, excerptsFor, readGrade, readRepair, repairBad } from './audit-engine.mjs';
+import { FORGOT_CAUSE, pickScenes, readFacts, readReplies, readJudgments, saidBlank, forgotCause } from './forgot-engine.mjs';
 import { KNOW_DIRECTIVE, LEARN_DIRECTIVE, BEATS_DIRECTIVE, FEELING_DIRECTIVE, WHEN_DIRECTIVE, EVIDENCE_DIRECTIVE, THREAD_KIND_NOTE, VOICE_LINES, PLAN_HEAD, VEIL_PROMPT } from './directives.mjs';
 import { findStatusBars, statusOneLine, isPauseDirective, isPauseMessage, buildTimelineRows, filterTimelineRows, timelineMarkdown, timelineCsv, layoutTimelineGraph, verifyIssues, applyVerdicts } from './scene-engine.mjs';
 import { heroHtml, pulseSvg, flowHtml, railHtml, tableHtml, bondMapSvg, bondCardsHtml, statusListHtml, bondLegendHtml, bondPeopleHtml, buildChanges, changesHtml } from './story-view.mjs';
@@ -528,8 +529,8 @@ function buildProfileReference(lean = false) {
         if (ch) {
             const bits = [];
             if (ch.name) bits.push(`Name: ${ch.name}`);
-            if (ch.description && !lean) bits.push(`About: ${cleanStr(ch.description, 800)}`);
-            if (ch.personality && !lean) bits.push(`Personality: ${cleanStr(ch.personality, 400)}`);
+            if (ch.description && !lean) bits.push(`About: ${cleanStr(fillMacros(ch.description), 800)}`);
+            if (ch.personality && !lean) bits.push(`Personality: ${cleanStr(fillMacros(ch.personality), 400)}`);
             if (bits.length) parts.push(`[Main character card]\n${bits.join('\n')}`);
         }
     } catch { /* ignore */ }
@@ -538,7 +539,7 @@ function buildProfileReference(lean = false) {
         if (name1 || persona) {
             const bits = [];
             if (name1) bits.push(`Name: ${name1}`);
-            if (persona && !lean) bits.push(`About: ${cleanStr(persona, 600)}`);
+            if (persona && !lean) bits.push(`About: ${cleanStr(fillMacros(persona), 600)}`);
             parts.push(`[Player persona]\n${bits.join('\n')}`);
         }
     } catch { /* ignore */ }
@@ -553,7 +554,7 @@ async function buildWorldInfoReference() {
         if (!usable.length) return '';
         const lines = usable.map(e => {
             const keys = Array.isArray(e.key) ? e.key.join(', ') : (e.key || '');
-            return `- ${keys ? `(${cleanStr(keys, 80)}) ` : ''}${cleanStr(e.content, 300)}`;
+            return `- ${keys ? `(${cleanStr(fillMacros(keys), 80)}) ` : ''}${cleanStr(fillMacros(e.content), 300)}`;
         });
         return `[World Info / Lorebook]\n${lines.join('\n')}`;
     } catch (e) {
@@ -904,7 +905,7 @@ async function showCheckIssues(mesId) {
         ${(c.issues || []).map(row).join('') || '<p class="memoria__hint">남은 경고가 없습니다.</p>'}
         ${(c.filtered || []).length ? `<details><summary>걸러진 경고 ${c.filtered.length}개</summary>${c.filtered.map(row).join('')}</details>` : ''}
     </div>`;
-    const pick = await ctx.callGenericPopup(html, ctx.POPUP_TYPE.TEXT, '', {
+    const pick = await scrollingPopup(ctx, html, ctx.POPUP_TYPE.TEXT, '', {
         okButton: '닫기', wide: true, allowVerticalScrolling: true,
         customButtons: [{ text: '고치기', result: 2 }, { text: '경고 지우기', result: 3 }],
     });
@@ -1371,7 +1372,7 @@ function renderAuditPanel() {
     if (!$drift.length) return;
     const settings = getSettings(), store = getStore(), st = store.audit || {}, has = !!getCurrentChatId();
     $('#memoria_audit_status').html(`<i class="memoria-au-lamp${auditBusy ? ' is-busy' : ''}"></i><span>${escapeHtml(auditBusy || '쉬는 중 — 검사는 답이 쌓이면 저절로 돌아요')}</span>`);
-    if (!has) { $drift.html('<div class="memoria__empty">열린 채팅이 없어요.</div>'); $('#memoria_audit_sums').empty(); return; }
+    if (!has) { $drift.html('<div class="memoria__empty">열린 채팅이 없어요.</div>'); $('#memoria_audit_sums').empty(); $('#memoria_audit_forgot').empty(); return; }
     // ── 1. 어긋난 곳
     const mode = checkModeOf(settings), every = checkEveryOf(settings), report = st.drift || null, due = driftDue(store), note = driftNoteState(store);
     const live = liveFindings(report, chat, mesHashOf), liveIds = new Set(live.map(f => f.id)), aside = (report?.findings || []).filter(f => !liveIds.has(f.id));
@@ -1456,6 +1457,7 @@ function renderAuditPanel() {
         </div>`).join('') + '</div>';
     }
     $('#memoria_audit_sums').html(sh);
+    $('#memoria_audit_forgot').html(forgotHtml(store, settings));
 }
 
 function setCheckMode(mode, every) {
@@ -1468,6 +1470,176 @@ function setCheckMode(mode, every) {
     $('#memoria_reply_check').prop('checked', settings.replyCheck === true);
     saveSettingsDebounced();
     renderAuditPanel();
+}
+
+/* ------------------------------------------------------------
+ * 잊은 것 찾기 — 원문이 더는 보이지 않는 옛 장면을 몇 곳 골라, 거기서 있었던 일을 서고만으로 기억하는지 본다.
+ * 잊은 것만 남기고, 까닭(안 적힘 · 요약하며 빠짐 · 안 떠오름 · 어긋남)에 맞는 고치는 길을 하나씩 붙인다.
+ * 누를 때마다 아직 안 훑은 장면을 이어서 본다.
+ * ------------------------------------------------------------ */
+const FORGOT_FACT_PROMPT = `You are checking the archive of a long roleplay for things it has lost.
+Each scene below, tagged [S1], [S2] and so on, is an old exchange the chat model can no longer read. Under it are the notes the archive filed for that moment, tagged [N1], [N2] and so on.
+For each scene pick the ONE fact the rest of the story most depends on: what happened, who did it, a promise or a decision, an object and who holds it, a name or a place, a feeling said aloud and its reason. Skip exact wording, small talk, a passing look, and anything that would be true of any story.
+For each give:
+- "fact": that fact as one short Korean sentence that names the people
+- "ask": a Korean question whose answer is this fact and that reads on its own without the scene
+- "note": the fact as one archive sentence written in {LANG}
+- "held": the tag of the note that already states this fact, or "" when no note does (a note that only hints at it does not count)
+Reply with one JSON object and nothing else:
+{"facts":[{"scene":"S1","fact":"...","ask":"...","note":"...","held":"N2"}]}`;
+
+const FORGOT_REPLY_PROMPT = `You are the memory of a long roleplay. First come the archive records the chat model receives every turn; then numbered questions, each followed by the notes recalled for it.
+Reply to each question from the records and that question's own notes only. When they do not hold it, reply exactly "모름": never guess, and never fill a gap with what usually happens in stories.
+Reply in Korean, in one or two short sentences each.
+Reply with one JSON object and nothing else: {"replies":[{"id":"A1","said":"..."}]}`;
+
+const FORGOT_JUDGE_PROMPT = `Each item has a FACT from a story and what the story's memory SAID when asked about it. Decide how well the memory holds the fact:
+- "kept": it states the same fact (other wording, or correct extra detail, is fine)
+- "blurred": it is close but vague, incomplete, or claims more or less than the fact
+- "wrong": it contradicts the fact, or has the wrong person, thing, place or time
+- "blank": it says it does not know
+Reply with one JSON object and nothing else: {"judgments":[{"id":"A1","held":"kept"}]}`;
+
+const FORGOT_SCENES = 8;
+/** 한 번 훑는 데 드는 호출 수 (사실 뽑기 다섯 곳씩 · 답 다섯 곳씩 · 견주기 한 번) */
+const forgotCalls = (n) => Math.ceil(n / 5) * 2 + 1;
+const forgotNoteLang = () => ({ ko: 'Korean', en: 'English', hybrid: 'English', ja: 'Japanese' }[getSettings().summaryLanguage] || 'the language of the scene');
+const FORGOT_DONE = { filed: '적어 뒀어요', pinned: '늘 싣게 했어요', edited: '고쳤어요', skipped: '넘겼어요' };
+const FORGOT_FIX = { file: '적어 두기', pin: '늘 싣기', edit: '고치기' };
+
+/** 원문이 보이지 않는 옛 장면 (기록된 것만) */
+function forgotPool(store = getStore()) {
+    return store.turns.filter(t => t.summary && !t.failed).map(t => ({ turnIndex: t.turnIndex, mesId: t.mesId, importance: t.importance, star: !!(t.star || chat[t.mesId]?.extra?.memoria_star) }));
+}
+
+function sweepForgotten() {
+    return queueAuditJob('잊은 것 찾는 중…', async () => {
+        const store = getStore(), prev = store.forgot || {};
+        const { picks, total, fresh } = pickScenes(forgotPool(store), { before: visibleFrom(store), n: FORGOT_SCENES, swept: prev.swept || [], marks: (store.milestones || []).map(x => x.turnIndex) });
+        if (!picks.length) throw new Error('원문이 안 보이는 옛 장면이 아직 없어요');
+        const spans = turnSpans(store, chat), clean = (m) => visibleProse(m.mes || '');
+        // 1. 장면마다 가장 중요한 사실 하나와, 그 사실이 이미 어느 기록에 있었는지
+        const facts = [];
+        for (let i = 0; i < picks.length; i += 5) {
+            const group = picks.slice(i, i + 5), notes = new Map();
+            let nn = 0;
+            const blocks = group.map((p, k) => {
+                const span = spans.get(p.turnIndex) || [p.mesId, p.mesId], t = store.turns.find(x => x.turnIndex === p.turnIndex), lines = [];
+                if (t?.summary) { const tag = `N${++nn}`; notes.set(tag, { kind: 'digest' }); lines.push(`[${tag}] ${cleanStr(t.summary, 400)}`); }
+                for (const m of store.memories.filter(m => !m.disabled && Math.abs((m.turnIndex || 0) - p.turnIndex) <= 1 && !(m.tags || []).includes('episode_raw')).slice(0, 8)) {
+                    const tag = `N${++nn}`;
+                    notes.set(tag, { kind: 'memory', id: m.id });
+                    lines.push(`[${tag}] ${cleanStr(m.summary, 240)}`);
+                }
+                return `[S${k + 1}]\n${excerptsFor(chat, span[0], span[1], 1800, speakerOf, clean).join('\n')}\nNotes filed for it:\n${lines.join('\n') || '(none)'}`;
+            });
+            const out = await callAuxLLM(FORGOT_FACT_PROMPT.replace('{LANG}', forgotNoteLang()), `${hostNoteOf(store)}${blocks.join('\n\n────────\n\n')}`, { task: 'summary', maxTokens: auxTokens(1800) });
+            if (getStore() !== store) return null;
+            for (const f of readFacts(parseJsonLoose(out), group, notes)) {
+                const p = group[f.scene], span = spans.get(p.turnIndex) || [p.mesId, p.mesId];
+                facts.push({ id: uuidv4().slice(0, 8), turn: p.turnIndex, from: span[0], to: span[1], fact: f.fact, ask: f.ask, note: f.note, src: f.src });
+            }
+        }
+        if (!facts.length) throw new Error('장면에서 사실을 뽑지 못했어요 — 받은 답을 읽지 못했어요');
+        // 2. 서고만 보고 답하기 — 장부의 고정된 몸통은 한 번만, 물음마다 그 물음으로 떠오른 기억만 따로 붙인다
+        const pinned = store.memories.filter(m => m.pinned && !m.disabled).map(m => m.id);
+        const rows = [];
+        let base = '';
+        for (const f of facts) {
+            const parts = await buildPacketSections(f.ask, null);
+            if (getStore() !== store) return null;
+            const recalled = [...(parts.publicRecall || []), ...(parts.protectedRecall || [])];
+            if (!base) base = renderPacket({ ...parts, publicRecall: [], protectedRecall: [], cards: [], transcript: [], summaries: (parts.summaries || []).filter(x => !x.recalled) }, {});
+            const lines = recalled.slice(0, 12).map(m => formatMemoryLine(m, true, parts.storyAges, parts.turnNow, parts.banned || []));
+            for (const h of parts.transcript || []) lines.push(`- ${h.lines.map(l => `${l.who}: ${cleanStr(l.text, 300)}`).join(' / ')}`);
+            const chapter = (parts.summaries || []).find(x => x.recalled);
+            if (chapter) lines.push(`- (an earlier chapter) ${cleanStr(chapter.text, 900)}`);
+            rows.push({ f, lines, seen: new Set([...recalled.map(m => m.id), ...pinned]) });
+        }
+        for (let i = 0; i < rows.length; i += 5) {
+            const group = rows.slice(i, i + 5);
+            const user = `${hostNoteOf(store)}Archive records:\n${base}\n\n${group.map((r, k) => `[A${k + 1}] ${r.f.ask}\nNotes recalled for A${k + 1}:\n${r.lines.join('\n') || '(none)'}`).join('\n\n')}`;
+            const got = readReplies(parseJsonLoose(await callAuxLLM(FORGOT_REPLY_PROMPT, user, { task: 'light', maxTokens: auxTokens(900) })), group.length);
+            if (getStore() !== store) return null;
+            group.forEach((r, k) => { r.said = got.get(k) || ''; });
+        }
+        // 3. 사실과 견주기 (모른다고 한 것은 견줄 것 없이 잊은 것)
+        const ask = rows.filter(r => !saidBlank(r.said));
+        if (ask.length) {
+            const user = ask.map((r, k) => `[A${k + 1}]\nFACT: ${r.f.fact}\nSAID: ${r.said}`).join('\n\n');
+            const got = readJudgments(parseJsonLoose(await callAuxLLM(FORGOT_JUDGE_PROMPT, user, { task: 'check', maxTokens: auxTokens(500) })), ask.length);
+            if (getStore() !== store) return null;
+            ask.forEach((r, k) => { r.held = got.get(k) || 'wrong'; });
+        }
+        const alive = new Set(store.memories.filter(m => !m.disabled).map(m => m.id));
+        const holes = [], kept = [];
+        for (const r of rows) {
+            const held = saidBlank(r.said) ? 'blank' : r.held;
+            const cause = forgotCause(r.f.src, held, { has: (id) => alive.has(id), seen: r.seen });
+            if (!cause) { kept.push({ turn: r.f.turn, from: r.f.from, fact: r.f.fact }); continue; }
+            holes.push({ ...r.f, said: held === 'blank' ? '' : cleanStr(r.said, 300), held, cause });
+        }
+        const sweptNow = picks.map(p => p.turnIndex);
+        store.forgot = {
+            at: Date.now(), total, last: picks.length,
+            swept: fresh ? sweptNow : [...new Set([...(prev.swept || []), ...sweptNow])],
+            // 아직 손대지 않은 지난 것은 남기고, 이번 것을 앞에
+            holes: [...holes, ...(prev.holes || []).filter(h => !h.done && !sweptNow.includes(h.turn))].slice(0, 40),
+            kept,
+        };
+        persistStore();
+        logActivity('check', `잊은 것 찾기: 옛 장면 ${picks.length}곳 가운데 ${holes.length}곳의 일을 잊고 있어요`);
+        return { holes: holes.length, scenes: picks.length };
+    });
+}
+
+/** 잊은 사실을 그 장면의 기억으로 적는다 */
+async function fileForgotten(h) {
+    const store = getStore();
+    const summary = cleanStr(h.note || h.fact, 300);
+    if (!summary) return false;
+    const hay = `${h.fact} ${summary}`;
+    const m = {
+        id: uuidv4(), turnIndex: h.turn, mesId: chat[h.to] ? h.to : -1,
+        kind: 'fact', summary, excerpt: null, importance: 0.8,
+        entities: store.characters.filter(c => [c.name, ...(c.aliases || [])].some(n => n && String(n).length >= 2 && hay.includes(n))).map(c => c.name).slice(0, 4),
+        tags: ['manual'], hints: [], visibility: 'public', owner: null,
+        pinned: false, disabled: false, manual: true, trigger: '',
+    };
+    m.vec = encodeVec(embedText(memoryIndexText(m)));
+    m.cvec = memoryCueText(m).length >= 4 ? encodeVec(embedText(memoryCueText(m))) : '';
+    store.memories.push(m);
+    h.done = 'filed';
+    await attachApiEmbeddings([m]);
+    return true;
+}
+
+function forgotHtml(store, settings) {
+    const st = store.forgot || null, busy = !!auditBusy;
+    const total = st?.total ?? pickScenes(forgotPool(store), { before: visibleFrom(store), n: 1 }).total;
+    const swept = Math.min(total, st?.swept?.length || 0);
+    const btn = `<button type="button" class="memoria-au-btn is-primary"${settings.enabled && !busy && total ? '' : ' disabled'} id="memoria_fg_sweep" title="안 훑은 옛 장면 ${FORGOT_SCENES}곳을 서고만으로 기억하는지 봐요 (호출 약 ${forgotCalls(FORGOT_SCENES)}번)"><i class="fa-solid fa-magnifying-glass"></i><span>찾기</span></button>`;
+    if (!total) return `<div class="memoria-au-row">${btn}</div><p class="memoria-au-foot">아직 원문이 다 보이는 채팅이에요. 옛 장면이 원문에서 밀려나기 시작하면 찾을 수 있어요.</p>`;
+    if (!st) return `<div class="memoria-au-row">${btn}<span class="memoria-au-foot">옛 장면 ${total}곳</span></div>
+        <p class="memoria-au-foot">누를 때마다 안 훑은 장면 ${FORGOT_SCENES}곳을 이어서 봐요. 호출 약 ${forgotCalls(FORGOT_SCENES)}번.</p>`;
+    let h = `<div class="memoria-au-row">${btn}<span class="memoria-au-foot">옛 장면 <b>${swept}</b>/${total}곳 훑음 · ${auditWhen(st.at)}</span></div>`;
+    const open = (st.holes || []).filter(x => !x.done);
+    const fileable = open.filter(x => FORGOT_CAUSE[x.cause]?.fix === 'file');
+    if ((st.holes || []).length) {
+        h += `<h5 class="memoria-au-sub">잊은 것 <b>${open.length}</b>${fileable.length > 1 ? `<button type="button" class="memoria-au-textbtn memoria-fg-all" title="안 적혔거나 요약하며 빠진 ${fileable.length}개를 모두 기억으로 적어요">모두 적어 두기</button>` : ''}</h5>
+            <div class="memoria-au-issues">${st.holes.map(x => {
+                const c = FORGOT_CAUSE[x.cause] || FORGOT_CAUSE.unfiled;
+                const act = x.done ? `<span class="memoria-au-tag is-ok">${FORGOT_DONE[x.done] || ''}</span>`
+                    : `<button type="button" class="memoria-au-btn memoria-fg-fix" data-id="${x.id}">${FORGOT_FIX[c.fix]}</button><button type="button" class="memoria-au-textbtn memoria-fg-skip" data-id="${x.id}">넘기기</button>`;
+                return `<div class="memoria-au-issue memoria-fg-hole${x.done ? ' is-done' : ''}">
+                    <p>${escapeHtml(x.fact)}</p>
+                    <small class="memoria-fg-said">서고: ${x.said ? `“${escapeHtml(x.said)}”` : '모름'}</small>
+                    <div class="memoria-au-acts"><span class="memoria-au-meta">${auditJump(x.from)}<span class="memoria-fg-cause" title="${escapeHtml(c.tip)}">${c.label}</span></span><span class="memoria-au-btns">${act}</span></div>
+                </div>`;
+            }).join('')}</div>`;
+    } else h += `<p class="memoria-au-foot">이번에 훑은 ${st.last}곳은 모두 서고만으로 기억해요.</p>`;
+    if (st.kept?.length) h += `<details class="memoria-au-aside"><summary>이번에 기억한 것 ${st.kept.length}</summary><ul class="memoria-fg-kept">${st.kept.map(k => `<li>${auditJump(k.from)} ${escapeHtml(k.fact)}</li>`).join('')}</ul></details>`;
+    return h;
 }
 
 function bindAuditPanel() {
@@ -1520,6 +1692,51 @@ function bindAuditPanel() {
             work.done(r?.fixed.length ? 'success' : 'info', !r ? '고칠 요약이 없어요' : `요약 ${r.fixed.length}개를 고쳤어요 · ${r.kept.length}개는 그대로 뒀어요`);
         } catch (e) { work.done('error', `요약을 고치지 못했어요: ${e?.message || e}`); }
         renderAuditPanel();
+    });
+    const holeOf = (el) => getStore().forgot?.holes?.find(h => h.id === String($(el).data('id')));
+    $root.on('click', '#memoria_fg_sweep', async function () {
+        if ($(this).prop('disabled') || auditBusy) return;
+        const work = workToast(`옛 장면 ${FORGOT_SCENES}곳을 훑는 중이에요…`);
+        try {
+            const r = await sweepForgotten();
+            work.done(!r ? 'info' : r.holes ? 'warning' : 'success', !r ? '채팅이 바뀌어 멈췄어요' : r.holes ? `잊은 것 ${r.holes}개를 찾았어요 — 대조 탭에서 메울 수 있어요` : `훑은 ${r.scenes}곳 모두 기억하고 있어요`);
+        } catch (e) { work.done('error', `찾지 못했어요: ${e?.message || e}`); }
+        renderAuditPanel();
+    });
+    $root.on('click', '.memoria-fg-fix', async function () {
+        const h = holeOf(this), store = getStore();
+        if (!h || h.done) return;
+        const fix = FORGOT_CAUSE[h.cause]?.fix;
+        const m = h.src?.kind === 'memory' ? store.memories.find(x => x.id === h.src.id) : null;
+        if (fix === 'file') await fileForgotten(h);
+        else if (fix === 'pin' && m) { m.pinned = true; h.done = 'pinned'; }
+        else if (fix === 'edit' && m) {
+            const ctx = getContext();
+            const edited = await scrollingPopup(ctx, `기억 고치기 — 장면에서는: ${escapeHtml(h.fact)}`, ctx.POPUP_TYPE.INPUT, m.summary, { rows: 4 });
+            if (!edited || typeof edited !== 'string' || !edited.trim() || edited.trim() === m.summary) return;
+            m.summary = cleanStr(edited, 300);
+            m.vec = encodeVec(embedText(memoryIndexText(m)));
+            m.cvec = memoryCueText(m).length >= 4 ? encodeVec(embedText(memoryCueText(m))) : '';
+            m.avec = null;
+            await attachApiEmbeddings([m]);
+            h.done = 'edited';
+        } else await fileForgotten(h); // 가리키던 기억이 사라졌으면 새로 적는다
+        persistStore(); scheduleLocalSync(); renderMemoriesPanel(); updateInjection({ quiet: true });
+        renderAuditPanel();
+    });
+    $root.on('click', '.memoria-fg-all', async function () {
+        const st = getStore().forgot;
+        const list = (st?.holes || []).filter(h => !h.done && FORGOT_CAUSE[h.cause]?.fix === 'file');
+        for (const h of list) await fileForgotten(h);
+        persistStore(); scheduleLocalSync(); renderMemoriesPanel(); updateInjection({ quiet: true });
+        if (list.length) toastr.success(`${list.length}개를 기억으로 적어 뒀어요`, 'Memoria');
+        renderAuditPanel();
+    });
+    $root.on('click', '.memoria-fg-skip', function () {
+        const h = holeOf(this);
+        if (!h) return;
+        h.done = 'skipped';
+        persistStore(); renderAuditPanel();
     });
     $root.on('click', '.memoria-au-restore', function () {
         if (restoreRepairedSummary(String($(this).data('id')))) toastr.success('요약을 바꿔 놓았어요', 'Memoria');
@@ -2017,8 +2234,10 @@ function lexicalOverlap(queryTokens, text) {
     if (!queryTokens.size) return 0;
     const words = new Set((String(text || '').toLowerCase().match(/[\p{L}\p{N}]+/gu) || []));
     if (!words.size) return 0;
+    // 조사만 다른 같은 낱말도 맞힌다 ("반지를"과 "반지가")
+    const stems = new Set([...words].map(wordStem));
     let hit = 0;
-    for (const t of queryTokens) if (words.has(t)) hit++;
+    for (const t of queryTokens) if (words.has(t) || stems.has(wordStem(t))) hit++;
     return hit / Math.sqrt(queryTokens.size * words.size);
 }
 
@@ -2472,6 +2691,15 @@ function noteAuthFallback(profileId, detail) {
  * task: 'record' 턴 기록(사서) · 'summary' 요약·연대기·서고 정리 · 'light' 검사·연출·질문 같은 가벼운 판단.
  * 받아 적기와 가벼운 판단에 같은 값의 모델을 쓸 이유가 없다 — 작업별로 연결(또는 모델)을 달리 둘 수 있다.
  */
+/**
+ * 몇몇 모델이 한글 · 가나 · 한자 바로 앞에 엉뚱한 문자(데바나가리 · 벵골 · 타이 등) 몇 자를 흘린다.
+ * 그대로 두면 요약 · 기억 첫머리에 남아 장부에 실리고 회상 글자 조각까지 흐린다 — 줄 · 낱말 첫머리의 그런 몇 자만 걷는다.
+ */
+function tidyReply(text) {
+    if (typeof text !== 'string') return text;
+    return text.replace(/(^|[\s"“'‘(\[])[\u0900-\u0DFF\u0E00-\u0E7F]{1,8}(?=[\uAC00-\uD7AF\u3040-\u30FF\u4E00-\u9FFF])/g, '$1');
+}
+
 async function callAuxLLM(systemPrompt, userPrompt, opts = {}) {
     let reply = '';
     const task = opts.task || 'record';
@@ -2488,14 +2716,14 @@ async function callAuxLLM(systemPrompt, userPrompt, opts = {}) {
         catch (e) {
             if (!fb || e?.name === 'AbortError' || !looksBlocked(e)) throw e;
             reply = await swap('연결이 내용을 막았어요');
-            return reply;
+            return tidyReply(reply);
         }
         if (fb && (task === 'record' || task === 'summary') && refusedReply(reply)) {
             const first = reply;
             reply = '';
             try { reply = await swap('기록 대신 거절문이 왔어요'); } catch (e) { if (e?.name === 'AbortError') throw e; reply = first; }
         }
-        return reply;
+        return tidyReply(reply);
     } finally {
         count(reply);
     }
@@ -3624,8 +3852,19 @@ function entityKey(s) {
 }
 
 /** 이름을 인물 도감의 정식 이름으로 바꾼다. 도감에 없으면 원래 이름 그대로. */
+/**
+ * 실리태번 자리 표시({{user}} · {{char}})를 실제 이름으로. 카드 · 페르소나 · 로어북 글에 그대로 남아 사서에게 가면
+ * 사서가 "{{user}}"를 한 사람의 이름으로 적었다 (관계선 · 상태 · 기억의 인물이 "{{user}}"로 따로 생긴다)
+ */
+function fillMacros(text) {
+    let s = String(text ?? '');
+    if (name1) s = s.replace(/\{\{\s*user\s*\}\}|<user>/gi, name1);
+    if (name2 && !selected_group) s = s.replace(/\{\{\s*char\s*\}\}|<bot>|<char>/gi, name2);
+    return s;
+}
+
 function canonEntityName(store, name) {
-    const raw = String(name || '').trim();
+    const raw = fillMacros(String(name || '').trim());
     if (!raw) return raw;
     const k = entityKey(raw);
     if (!k) return raw;
@@ -3668,6 +3907,8 @@ function foldEntityAliases(store) {
 
     // 2) 기억의 entities — 회상 점수의 개체 축이 갈라지지 않게 같은 이름으로 접는다
     for (const m of store.memories) {
+        if (m.owner) { const o = canonEntityName(store, m.owner); if (o !== m.owner) { m.owner = o; memories++; } }
+        if (Array.isArray(m.knowers)) m.knowers = m.knowers.map(k => canonEntityName(store, k));
         if (!Array.isArray(m.entities) || !m.entities.length) continue;
         const folded = [];
         let touched = false;
@@ -4553,8 +4794,12 @@ async function commitTurns(mesIds, { silent = true, force = false, retry = 1 } =
     }
 
     // 관계선의 현재 단계 — 사서가 이미 적힌 단계를 되풀이하거나 몇 단계를 건너뛰어 적지 않게
+    // 이번 교환에 나온 사람의 줄을 먼저 — 관계선이 많은 채팅에서 최근에 바뀐 순으로만 자르면 지금 장면의 두 사람 줄이 빠져, 사서가 있는 단계를 다시 적거나 건너뛰어 적었다
+    const named = (n) => { const c = store.characters.find(x => entityKey(x.name) === entityKey(n)); return [n, ...(c?.aliases || [])].some(a => a && (String(a).length >= 2 || /[가-힣]/.test(a)) && hayLower.includes(String(a).toLowerCase())); };
+    const bondHere = (b) => (named(b.from) ? 1 : 0) + (named(b.to) ? 1 : 0);
     const bondLines = (store.bonds || []).filter(b => !b.disabled && bondNow(b))
-        .sort((a, b) => (bondNow(b).turn || 0) - (bondNow(a).turn || 0)).slice(0, 12)
+        .map(b => ({ b, here: bondHere(b) }))
+        .sort((x, y) => y.here - x.here || (bondNow(y.b).turn || 0) - (bondNow(x.b).turn || 0)).slice(0, 12).map(x => x.b)
         .map(b => `${b.from} → ${b.to}: ${bondNow(b).stage}${bondNow(b).calls ? ` (calls them: ${bondNow(b).calls})` : ''}${tieOn ? tieReadTag(Ties.tieOf(b)) : ''}`);
 
     // 카드 본문은 바탕을 적을 때 필요하다 — 주요 인물의 바탕이 다 적혔으면 이름만 보낸다 (턴마다 수백 토큰 절약)
@@ -6284,6 +6529,12 @@ async function retrieveMemories(queryText, recentUserTexts, sceneText = '') {
     // 드문 낱말: 입력의 낱말 가운데 서고 전체에서 몇 기억에만 나오는 것 — 그 기억을 가리키는 강한 단서
     const indexLower = new Map(active.map(m => [m.id, memoryIndexText(m).toLowerCase()]));
     const rareWords = rareQueryWords(queryText, [...indexLower.values()]);
+    // 이 서고에서 너무 흔한 조각(어미 · 조사)은 글자 조각 축에서 뺀다 — 아무 기억에나 조금씩 닿아 엉뚱한 옛 장면을 끌어올렸다
+    if (active.length >= 30) {
+        const squashed = [...indexLower.values()].map(t => t.replace(/[^\p{L}\p{N}]+/gu, ''));
+        for (const g of commonGrams(queryGrams, squashed)) queryGrams.delete(g);
+        if (tailGrams) for (const g of commonGrams(tailGrams, squashed)) tailGrams.delete(g);
+    }
 
     // 이 채팅에서 회상하지 않을 말 — 그 말이 든 기억은 후보에서 뺀다 (지우지 않는다. 고정한 기억은 사용자의 뜻이라 그대로)
     const mute = (store.recallMute || []).map(w => String(w).toLowerCase()).filter(w => w.length >= 2);
@@ -8166,6 +8417,12 @@ function renumberTurns(store) {
         }).filter(Boolean);
         if (!store.summaryVoids.length) delete store.summaryVoids;
     }
+    if (store.forgot) {
+        // 잊은 것 찾기: 장면이 사라진 것은 뺀다 (지운 · 되감은 이야기의 일이므로)
+        store.forgot.swept = (store.forgot.swept || []).filter(t => map.has(t)).map(t => map.get(t));
+        store.forgot.holes = (store.forgot.holes || []).filter(h => map.has(h.turn)).map(h => ({ ...h, turn: map.get(h.turn) }));
+        store.forgot.kept = (store.forgot.kept || []).filter(k => map.has(k.turn)).map(k => ({ ...k, turn: map.get(k.turn) }));
+    }
     delete store.gapMiss;
     if (store.eraFoldHeld) store.eraFoldHeld = remap(store.eraFoldHeld);
     if (store.lastConsolidateTurn) store.lastConsolidateTurn = remap(store.lastConsolidateTurn);
@@ -9398,7 +9655,7 @@ async function reviewArchiveChanges(changes, title, note = '확인한 변경만 
     }
     if (!changes.length) list.append($('<p></p>').text('목록 내용의 차이가 없습니다. 서고의 설정과 기록 시점은 교체될 수 있습니다.'));
     const ctx = getContext();
-    const result = await ctx.callGenericPopup(content, ctx.POPUP_TYPE.CONFIRM, '', { okButton: '변경 적용', cancelButton: '취소', wide: true });
+    const result = await scrollingPopup(ctx, content, ctx.POPUP_TYPE.CONFIRM, '', { okButton: '변경 적용', cancelButton: '취소', wide: true });
     return result === true || result === ctx.POPUP_RESULT.AFFIRMATIVE;
 }
 
@@ -9462,7 +9719,7 @@ async function showMemorySource(id) {
         ? '수동 또는 인계된 기억입니다. 이 채팅에서 원문을 확인할 수 없습니다.'
         : '원문이 편집·삭제되었거나 기록과 일치하지 않습니다. 도구의 「채팅과 기록 맞추기」를 실행해 주세요.'));
     const ctx = getContext();
-    await ctx.callGenericPopup(content, ctx.POPUP_TYPE.TEXT, '', { wide: true });
+    await scrollingPopup(ctx, content, ctx.POPUP_TYPE.TEXT, '', { wide: true });
 }
 
 function renderRecallDiagnostics() {
@@ -9496,14 +9753,14 @@ function fmtPct(x) { return `${Math.round(x * 100)}%`; }
 /** 삭제 전 확인 팝업 — 실수 방지. 확인하면 true */
 async function confirmDelete(what) {
     const ctx = getContext();
-    const result = await ctx.callGenericPopup(`${what}을(를) 삭제할까요?`, ctx.POPUP_TYPE.CONFIRM, '', { okButton: '삭제' });
+    const result = await scrollingPopup(ctx, `${what}을(를) 삭제할까요?`, ctx.POPUP_TYPE.CONFIRM, '', { okButton: '삭제' });
     return result === ctx.POPUP_RESULT.AFFIRMATIVE || result === true;
 }
 
 /** 예/아니오 확인 팝업. 확인하면 true */
 async function confirmYes(message, okButton = '진행') {
     const ctx = getContext();
-    const result = await ctx.callGenericPopup(escapeHtml(message), ctx.POPUP_TYPE.CONFIRM, '', { okButton, cancelButton: '취소' });
+    const result = await scrollingPopup(ctx, escapeHtml(message), ctx.POPUP_TYPE.CONFIRM, '', { okButton, cancelButton: '취소' });
     return result === ctx.POPUP_RESULT.AFFIRMATIVE || result === true;
 }
 
@@ -10308,7 +10565,7 @@ async function openSideSorter() {
             </div>`).join('')}</div>
     </div>`);
     $dlg.on('click', '.mmv-jump', function () { jumpToMessage(Number($(this).data('mes'))); });
-    const ok = await ctx.callGenericPopup($dlg, ctx.POPUP_TYPE.CONFIRM, '', { okButton: '저장', cancelButton: '닫기', wide: true, allowVerticalScrolling: true });
+    const ok = await scrollingPopup(ctx, $dlg, ctx.POPUP_TYPE.CONFIRM, '', { okButton: '저장', cancelButton: '닫기', wide: true, allowVerticalScrolling: true });
     if (!ok) return;
     let toSide = 0;
     let toStory = 0;
@@ -10560,7 +10817,7 @@ async function editTieDialog(b) {
     $dlg.find('.mm-yn-find').on('input', function () { st.query = String($(this).val() || ''); paint(); });
     paint();
     const ctx = getContext();
-    const ok = await ctx.callGenericPopup($dlg, ctx.POPUP_TYPE.CONFIRM, '', { okButton: '저장', cancelButton: '취소', wide: false, allowVerticalScrolling: true });
+    const ok = await scrollingPopup(ctx, $dlg, ctx.POPUP_TYPE.CONFIRM, '', { okButton: '저장', cancelButton: '취소', wide: false, allowVerticalScrolling: true });
     if (!ok) return;
     const store = getStore(), row = store.bonds.find(x => x.id === b.id);
     if (!row) return;
@@ -10678,7 +10935,7 @@ async function openBundleManager() {
         draw();
     };
     const askName = async (title, initial = '') => {
-        const v = await ctx.callGenericPopup(title, ctx.POPUP_TYPE.INPUT, initial, { rows: 1 });
+        const v = await scrollingPopup(ctx, title, ctx.POPUP_TYPE.INPUT, initial, { rows: 1 });
         return typeof v === 'string' ? v.replace(/\s+/g, ' ').trim().slice(0, 40) : '';
     };
     const draw = () => {
@@ -10727,7 +10984,7 @@ async function openBundleManager() {
     $dlg.on('click', '.memoria-bundle-new', async () => {
         const name = await askName('새 세트 이름 (예: 시뮬봇, 1인봇)');
         if (!name) return;
-        if (settings.bundles[name] && !await ctx.callGenericPopup(`"${name}" 세트가 이미 있습니다. 지금 설정으로 덮어쓸까요?`, ctx.POPUP_TYPE.CONFIRM)) return;
+        if (settings.bundles[name] && !await scrollingPopup(ctx, `"${name}" 세트가 이미 있습니다. 지금 설정으로 덮어쓸까요?`, ctx.POPUP_TYPE.CONFIRM)) return;
         saveBundle(settings, name, DEFAULT_SETTINGS);
         saveSettingsDebounced();
         toastr.success(`"${name}" 세트를 저장했습니다. 위에서 채팅이나 캐릭터에 붙이면 적용됩니다.`, 'Memoria');
@@ -10735,7 +10992,7 @@ async function openBundleManager() {
     });
     $dlg.on('click', '.memoria-bundle-save', async function () {
         const name = rowName(this);
-        if (!await ctx.callGenericPopup(`"${name}" 세트를 지금 설정으로 덮어쓸까요?`, ctx.POPUP_TYPE.CONFIRM)) return;
+        if (!await scrollingPopup(ctx, `"${name}" 세트를 지금 설정으로 덮어쓸까요?`, ctx.POPUP_TYPE.CONFIRM)) return;
         saveBundle(settings, name, DEFAULT_SETTINGS);
         saveSettingsDebounced();
         refreshAll();
@@ -10778,7 +11035,7 @@ async function openBundleManager() {
         $file.trigger('click');
     });
     draw();
-    await ctx.callGenericPopup($dlg, ctx.POPUP_TYPE.TEXT, '', { wide: true, allowVerticalScrolling: true });
+    await scrollingPopup(ctx, $dlg, ctx.POPUP_TYPE.TEXT, '', { wide: true, allowVerticalScrolling: true });
 }
 
 /* ============================================================
@@ -10852,7 +11109,7 @@ async function openRepeatFinder() {
             $btn.removeClass('disabled').find('span').text('AI 추천');
         }
     });
-    const ok = await ctx.callGenericPopup($dlg, ctx.POPUP_TYPE.CONFIRM, '', { okButton: '삼갈 표현에 넣기', cancelButton: '닫기', allowVerticalScrolling: true });
+    const ok = await scrollingPopup(ctx, $dlg, ctx.POPUP_TYPE.CONFIRM, '', { okButton: '삼갈 표현에 넣기', cancelButton: '닫기', allowVerticalScrolling: true });
     if (!ok) return;
     // 조사만 다른 꼴도 함께 넣는다 — 한 꼴만 막으면 모델은 옆 꼴로 같은 말을 쓴다
     const picked = [...new Set($dlg.find('input:checked').map(function () { const f = found[Number($(this).data('i'))]; return f ? (f.forms?.length ? f.forms : [f.phrase]) : []; }).get().flat().filter(Boolean))]
@@ -11141,7 +11398,7 @@ function bindUI() {
         const text = String($('#memoria_packet_preview').val() || '').trim();
         if (!text || text.startsWith('(주입할 내용이 없습니다')) { toastr.warning('고정할 내용이 비어 있습니다.', 'Memoria'); return; }
         const ctx = getContext();
-        const ok = await ctx.callGenericPopup(
+        const ok = await scrollingPopup(ctx, 
             '지금 미리보기 내용을 이 채팅에 계속 고정합니다.\n\n' +
             '· 해제할 때까지 매 턴 이 내용이 그대로 주입됩니다\n' +
             '· 그동안 새로 쌓이는 기억·상태·요약은 주입에 반영되지 않습니다 (기록은 계속 쌓입니다)\n' +
@@ -11368,7 +11625,7 @@ function bindUI() {
         const m = findMemory($(this).closest('.memoria__mem-card').data('id'));
         if (!m) return;
         const ctx = getContext();
-        const edited = await ctx.callGenericPopup('기억 내용 수정', ctx.POPUP_TYPE.INPUT, m.summary, { rows: 4 });
+        const edited = await scrollingPopup(ctx, '기억 내용 수정', ctx.POPUP_TYPE.INPUT, m.summary, { rows: 4 });
         if (!edited || typeof edited !== 'string') return;
         m.summary = cleanStr(edited, MANUAL_TEXT_MAX);
         m.manual = true; // 사용자가 다듬은 기억은 스와이프 롤백·상한 정리·서고 정리에서 보호 (인물 편집과 동일)
@@ -11380,7 +11637,7 @@ function bindUI() {
 
     $('#memoria_memory_add').on('click', async function () {
         const ctx = getContext();
-        const text = await ctx.callGenericPopup('추가할 기억 내용 (수동 기억은 자동 정리에서 제외됩니다)', ctx.POPUP_TYPE.INPUT, '', { rows: 4 });
+        const text = await scrollingPopup(ctx, '추가할 기억 내용 (수동 기억은 자동 정리에서 제외됩니다)', ctx.POPUP_TYPE.INPUT, '', { rows: 4 });
         if (!text || typeof text !== 'string') return;
         const store = getStore();
         store.memories.push({
@@ -11425,7 +11682,7 @@ function bindUI() {
         const c = store.characters.find(x => x.id === $(this).closest('.memoria__char-card').data('id'));
         if (!c) return;
         const ctx = getContext();
-        const edited = await ctx.callGenericPopup(`${c.name} — 인물 정보 수정 (관계는 "이름=관계; 이름=관계", 변화·남긴 말은 " / "로 구분)`, ctx.POPUP_TYPE.INPUT, characterToEditText(c), { rows: 12 });
+        const edited = await scrollingPopup(ctx, `${c.name} — 인물 정보 수정 (관계는 "이름=관계; 이름=관계", 변화·남긴 말은 " / "로 구분)`, ctx.POPUP_TYPE.INPUT, characterToEditText(c), { rows: 12 });
         if (!edited || typeof edited !== 'string') return;
         applyCharacterEdit(c, edited);
         c.manual = true; // 사용자가 다듬은 프로필은 롤백에서 보호
@@ -11450,7 +11707,7 @@ function bindUI() {
             return;
         }
         const ctx = getContext();
-        const name = await ctx.callGenericPopup(
+        const name = await scrollingPopup(ctx, 
             `"${keep.name}" 카드로 접을 이름을 입력하세요.
 · 같은 인물이 두 카드로 나뉜 경우 → 카드를 합칩니다
 · 카드는 하나인데 상태 보드가 다른 표기로 갈라진 경우(예: kkang) → 별칭으로 묶고 상태·기억을 이 카드로 접습니다
@@ -11482,7 +11739,7 @@ function bindUI() {
     });
     $('#memoria_character_add').on('click', async function () {
         const ctx = getContext();
-        const name = await ctx.callGenericPopup('추가할 인물 이름', ctx.POPUP_TYPE.INPUT, '', { rows: 1 });
+        const name = await scrollingPopup(ctx, '추가할 인물 이름', ctx.POPUP_TYPE.INPUT, '', { rows: 1 });
         if (!name || typeof name !== 'string') return;
         const store = getStore();
         upsertCharacter(store, {
@@ -11525,7 +11782,7 @@ function bindUI() {
     $('#memoria_item_add').on('click', async function () {
         const ctx = getContext();
         const template = '이름: \n의미: \n소유자: \n상태: ';
-        const raw = await ctx.callGenericPopup('아이템 추가 — 이름만 필수, 나머지는 비워도 됩니다.', ctx.POPUP_TYPE.INPUT, template, { rows: 6 });
+        const raw = await scrollingPopup(ctx, '아이템 추가 — 이름만 필수, 나머지는 비워도 됩니다.', ctx.POPUP_TYPE.INPUT, template, { rows: 6 });
         if (!raw || typeof raw !== 'string') return;
         const pick = (label) => {
             const m = raw.match(new RegExp(`^${label}\\s*[:：]\\s*(.*)$`, 'm'));
@@ -11574,7 +11831,7 @@ function bindUI() {
                     <option value="3">P3 — 참고</option>
                 </select>
             </div>`);
-        const ok = await ctx.callGenericPopup($dlg, ctx.POPUP_TYPE.CONFIRM, '', { okButton: '추가', cancelButton: '취소' });
+        const ok = await scrollingPopup(ctx, $dlg, ctx.POPUP_TYPE.CONFIRM, '', { okButton: '추가', cancelButton: '취소' });
         if (!ok) return;
         const summary = cleanStr($dlg.find('.memoria__lock-add-summary').val(), 200);
         if (!summary) { toastr.warning('내용이 비어 있습니다.', 'Memoria'); return; }
@@ -11614,9 +11871,9 @@ function bindUI() {
     $('#memoria_dossier_add').on('click', async function () {
         if (!getCurrentChatId()) { toastr.warning('열린 채팅이 없습니다.', 'Memoria'); return; }
         const ctx = getContext();
-        const title = await ctx.callGenericPopup('문서 이름 (예: 원작 1권 요약, 세계관 설정집)', ctx.POPUP_TYPE.INPUT, '', { rows: 1 });
+        const title = await scrollingPopup(ctx, '문서 이름 (예: 원작 1권 요약, 세계관 설정집)', ctx.POPUP_TYPE.INPUT, '', { rows: 1 });
         if (!title || !String(title).trim()) return;
-        const text = await ctx.callGenericPopup('문서 내용을 붙여넣으세요. 문단 단위로 나뉘어 저장되고, 매 턴 관련 대목만 주입됩니다.', ctx.POPUP_TYPE.INPUT, '', { rows: 14 });
+        const text = await scrollingPopup(ctx, '문서 내용을 붙여넣으세요. 문단 단위로 나뉘어 저장되고, 매 턴 관련 대목만 주입됩니다.', ctx.POPUP_TYPE.INPUT, '', { rows: 14 });
         if (!text || !String(text).trim()) return;
         const store = getStore();
         if (dossierTotalChars(store) + String(text).length > DOSSIER_MAX_TOTAL) {
@@ -11745,7 +12002,7 @@ function bindUI() {
         const s = store.chunkSummaries.find(x => x.id === id) || store.arcSummaries.find(x => x.id === id);
         if (!s) return;
         const ctx = getContext();
-        const edited = await ctx.callGenericPopup('요약 수정', ctx.POPUP_TYPE.INPUT, s.text, { rows: 8 });
+        const edited = await scrollingPopup(ctx, '요약 수정', ctx.POPUP_TYPE.INPUT, s.text, { rows: 8 });
         if (!edited || typeof edited !== 'string') return;
         s.text = cleanMultiline(edited, 4000);
         s.avec = null; // 본문이 바뀌었으니 챕터 API 임베딩은 다음 회상 때 재계산
@@ -11786,7 +12043,7 @@ function bindUI() {
         const t = store.turns.find(x => x.turnIndex === turnIndex);
         if (!t) return;
         const ctx = getContext();
-        const edited = await ctx.callGenericPopup('턴 기록 수정 (이후 요약 생성에 반영됩니다)', ctx.POPUP_TYPE.INPUT, t.summary, { rows: 4 });
+        const edited = await scrollingPopup(ctx, '턴 기록 수정 (이후 요약 생성에 반영됩니다)', ctx.POPUP_TYPE.INPUT, t.summary, { rows: 4 });
         if (!edited || typeof edited !== 'string') return;
         t.summary = cleanStr(edited, MANUAL_TEXT_MAX);
         persistStore(); renderSummariesPanel();
@@ -11829,7 +12086,7 @@ function bindUI() {
         const n = Math.max(3, getSettings().chunkTurns);
         const calls = Math.ceil(store.turnCounter / n);
         const ctx = getContext();
-        const ok = await ctx.callGenericPopup(
+        const ok = await scrollingPopup(ctx, 
             `이 채팅의 요약·연대기를 모두 지우고, 턴 기록(${store.turnCounter}턴)에서 처음부터 다시 만듭니다.\n\n` +
             `· 사서 호출 약 ${calls}번 (+ 연대기 정리 몇 번)\n` +
             `· 도중에 중단하거나 실패하면 원래 요약으로 되돌립니다\n` +
@@ -12177,7 +12434,7 @@ function bindUI() {
     };
     const saveBondForm = async (title, existing) => {
         const ctx = getContext();
-        const raw = await ctx.callGenericPopup(title, ctx.POPUP_TYPE.INPUT, bondForm(existing), { rows: 11 });
+        const raw = await scrollingPopup(ctx, title, ctx.POPUP_TYPE.INPUT, bondForm(existing), { rows: 11 });
         if (!raw || typeof raw !== 'string') return;
         const form = readBondForm(raw);
         if (existing) { form.from = existing.from; form.to = existing.to; } // 방향은 줄의 정체다 — 바꾸려면 새 줄을 만든다
@@ -12239,7 +12496,7 @@ function bindUI() {
         const store = getStore(), plan = tieScanPlan(store);
         if (!plan.rows) return toastr.info('되짚어 채울 것이 없었어요.', 'Memoria');
         const ctx = getContext();
-        const ok = await ctx.callGenericPopup(`요약 ${plan.rows}묶음을 되짚어 인연과 전환점을 채울까요? 모델을 많아야 ${plan.calls}번 불러요. 대화 원문은 펼치지 않아요.`, ctx.POPUP_TYPE.CONFIRM, '', { okButton: '되짚기', cancelButton: '취소' });
+        const ok = await scrollingPopup(ctx, `요약 ${plan.rows}묶음을 되짚어 인연과 전환점을 채울까요? 모델을 많아야 ${plan.calls}번 불러요. 대화 원문은 펼치지 않아요.`, ctx.POPUP_TYPE.CONFIRM, '', { okButton: '되짚기', cancelButton: '취소' });
         if (!ok) return;
         const $btn = $(this).addClass('is-busy'), $label = $btn.find('span'), was = $label.text();
         const work = workToast('지난 기록을 되짚는 중이에요…');
@@ -12447,7 +12704,7 @@ function bindUI() {
         const ctx = getContext();
         const chatId = getCurrentChatId();
         if (!chatId) return toastr.warning('먼저 채팅을 열어 주세요.', 'Memoria');
-        const ok = await ctx.callGenericPopup('이 채팅의 모든 기억(기억·인물·캐논·상태·서약·요약)을 비웁니다.\n숨겨 둔 메시지도 모두 표시로 되돌립니다 (재색인 가능하도록).\n초기화 직전의 서고는 복구 지점에 보관합니다. 계속할까요?', ctx.POPUP_TYPE.CONFIRM, '', { okButton: '전부 비우기' });
+        const ok = await scrollingPopup(ctx, '이 채팅의 모든 기억(기억·인물·캐논·상태·서약·요약)을 비웁니다.\n숨겨 둔 메시지도 모두 표시로 되돌립니다 (재색인 가능하도록).\n초기화 직전의 서고는 복구 지점에 보관합니다. 계속할까요?', ctx.POPUP_TYPE.CONFIRM, '', { okButton: '전부 비우기' });
         if (ok !== ctx.POPUP_RESULT.AFFIRMATIVE && ok !== true) return;
         if (getCurrentChatId() !== chatId) return;
         try {
@@ -12593,10 +12850,43 @@ function registerCommands() {
  * ============================================================ */
 
 const castNames = (store) => store.characters.flatMap(c => [c.name, ...(c.aliases || [])]).filter(Boolean);
+/**
+ * 서고 글꼴(본문 Pretendard · 머리 Outfit). 예전에는 style.css 맨 위의 @import 로 받아, 글꼴 CSS가 올 때까지 서고 스타일 전체가 기다렸고
+ * (느린 망 · 막힌 주소에서는 한참 동안 서고가 맨 모양으로 보였다), 서랍을 처음 열면 한글 글꼴 조각이 하나씩 도착할 때마다 화면을 다시 짰다.
+ * 이제 스타일과 따로 불러오고, 한가할 때 서고 화면에 쓰인 글자의 조각만 미리 받아 둔다. 생김새는 그대로다.
+ */
+const FONT_SHEETS = [
+    'https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css',
+    'https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800&display=swap',
+];
+function loadFonts() {
+    if (typeof document === 'undefined') return;
+    const warm = () => {
+        if (!document.fonts?.load) return;
+        const text = document.getElementById('memoria_settings')?.textContent || '';
+        const glyphs = [...new Set(text.replace(/\s+/g, ''))].join('');
+        if (glyphs) document.fonts.load('400 16px "Pretendard Variable"', glyphs).catch(() => {});
+        document.fonts.load('700 16px Outfit', 'MEMORIA0123456789').catch(() => {});
+    };
+    const later = (fn) => (typeof requestIdleCallback === 'function' ? requestIdleCallback(fn, { timeout: 6000 }) : setTimeout(fn, 1500));
+    for (const href of FONT_SHEETS) {
+        if ([...document.querySelectorAll('link[data-memoria-font]')].some(l => l.href === href)) continue;
+        const link = document.createElement('link');
+        link.rel = 'stylesheet';
+        link.href = href;
+        link.dataset.memoriaFont = '1';
+        if (href === FONT_SHEETS[0]) link.addEventListener('load', () => later(warm), { once: true });
+        document.head.append(link);
+    }
+}
 const popupCtx = () => getContext();
+/** 이 확장이 여는 창은 모두 스크롤되게 연다 — 내용이 긴 확인 · 입력 창이 휴대폰에서 아래가 잘려 단추를 누를 수 없었다 */
+function scrollingPopup(ctx, content, type, value = '', opts = {}) {
+    return ctx.callGenericPopup(content, type, value, { allowVerticalScrolling: true, ...opts });
+}
 async function showPopup(html, opts = {}) {
     const ctx = popupCtx();
-    return ctx.callGenericPopup(html, opts.type ?? ctx.POPUP_TYPE.TEXT, '', { wide: true, allowVerticalScrolling: true, okButton: '닫기', ...opts });
+    return scrollingPopup(ctx, html, opts.type ?? ctx.POPUP_TYPE.TEXT, '', { wide: true, allowVerticalScrolling: true, okButton: '닫기', ...opts });
 }
 const esc = (v) => escapeHtml(String(v ?? ''));
 
@@ -12830,7 +13120,7 @@ async function fixStoryDate() {
     const store = getStore();
     if (!store.turns.length) return toastr.info('아직 기록된 턴이 없습니다.', 'Memoria');
     const ctx = popupCtx();
-    const raw = await ctx.callGenericPopup(`날짜를 고칠 메시지 번호와 날짜를 적어 주세요. 그 메시지부터 그 날짜로 이어집니다.\n예: 120 2024-10-18 (날짜를 비우면 고친 것을 지웁니다)`, ctx.POPUP_TYPE.INPUT, `${chat.length - 1} ${storyToday(store) || ''}`.trim(), { rows: 1 });
+    const raw = await scrollingPopup(ctx, `날짜를 고칠 메시지 번호와 날짜를 적어 주세요. 그 메시지부터 그 날짜로 이어집니다.\n예: 120 2024-10-18 (날짜를 비우면 고친 것을 지웁니다)`, ctx.POPUP_TYPE.INPUT, `${chat.length - 1} ${storyToday(store) || ''}`.trim(), { rows: 1 });
     if (!raw || typeof raw !== 'string') return;
     const [no, date = ''] = raw.trim().split(/\s+/);
     const n = Number(String(no).replace(/^#/, ''));
@@ -12910,7 +13200,7 @@ async function editVeil(id) {
     const l = store.locks.find(x => x.id === id);
     if (!l) return;
     const ctx = popupCtx();
-    const v = await ctx.callGenericPopup(`AI에게는 이 줄만 갑니다. 계획의 답(누가·왜·어떻게)을 쓰지 말고, 아직 밝히지 말 것만 적어 주세요.\n\n계획: ${l.summary}`, ctx.POPUP_TYPE.INPUT, l.veil || '', { rows: 2 });
+    const v = await scrollingPopup(ctx, `AI에게는 이 줄만 갑니다. 계획의 답(누가·왜·어떻게)을 쓰지 말고, 아직 밝히지 말 것만 적어 주세요.\n\n계획: ${l.summary}`, ctx.POPUP_TYPE.INPUT, l.veil || '', { rows: 2 });
     if (typeof v !== 'string') return;
     const veil = cleanStr(v, 200);
     if (veil && veilLeaks(veil, l.summary, castNames(store))) return toastr.warning('이 줄은 계획의 답을 흘립니다. 다른 말로 적어 주세요.', 'Memoria');
@@ -12971,7 +13261,7 @@ async function openWipe() {
 /* ---------- 회상 시험 ---------- */
 async function openRecallTest() {
     const ctx = popupCtx();
-    const q = await ctx.callGenericPopup('이 말을 보내면 무엇이 떠오르는지 봅니다. 모델은 부르지 않고, 회상 기록에도 남지 않습니다.', ctx.POPUP_TYPE.INPUT, String($('#send_textarea').val() || ''), { rows: 3 });
+    const q = await scrollingPopup(ctx, '이 말을 보내면 무엇이 떠오르는지 봅니다. 모델은 부르지 않고, 회상 기록에도 남지 않습니다.', ctx.POPUP_TYPE.INPUT, String($('#send_textarea').val() || ''), { rows: 3 });
     if (!q || typeof q !== 'string' || !q.trim()) return;
     const store = getStore();
     const parts = await buildPacketSections(q.trim(), null);
@@ -13262,7 +13552,7 @@ async function cutRecordsAfter(n) {
     const gone = store.turns.filter(t => t.mesId >= n).sort((a, b) => b.turnIndex - a.turnIndex);
     if (!gone.length) { toastr.info(`#${n} 뒤로 기록이 없습니다.`, 'Memoria'); return 0; }
     const ctx = popupCtx();
-    const ok = await ctx.callGenericPopup(`#${n}부터의 기록 ${gone.length}턴을 걷어 내고 그 앞 모습으로 되돌릴까요? 메시지는 그대로이고, 걷어 낸 구간은 자동 기록이나 색인이 새로 적습니다.`, ctx.POPUP_TYPE.CONFIRM);
+    const ok = await scrollingPopup(ctx, `#${n}부터의 기록 ${gone.length}턴을 걷어 내고 그 앞 모습으로 되돌릴까요? 메시지는 그대로이고, 걷어 낸 구간은 자동 기록이나 색인이 새로 적습니다.`, ctx.POPUP_TYPE.CONFIRM);
     if (!ok) return 0;
     checkpointBeforeChange(store, `#${n} 뒤 기록 걷기`);
     const idx = gone.map(t => t.turnIndex);
@@ -13493,6 +13783,7 @@ jQuery(async () => {
         const baseUrl = new URL('.', import.meta.url).href;
         const html = await $.get(`${baseUrl}templates/settings.html`);
         $('#extensions_settings2').append(html);
+        loadFonts();
         try {
             const manifest = await $.getJSON(`${baseUrl}manifest.json`);
             if (manifest?.version) {
