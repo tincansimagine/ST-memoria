@@ -1693,8 +1693,8 @@ function forgotHtml(store, settings) {
         const meta = [x.again ? `메웠는데 아직 ${c.label}` : c.label, x.said && x.held !== 'blank' ? `서고는 “${escapeHtml(cleanStr(x.said, 60))}”` : ''].filter(Boolean).join(' · ');
         return `<li class="memoria-fg-row${x.done ? ' is-done' : ''}" data-id="${x.id}">
             <p class="memoria-fg-fact">${escapeHtml(x.fact)}</p>
-            <div class="memoria-fg-act">${x.done ? '<span class="memoria-fg-ok">메움</span>' : `<button type="button" class="memoria-au-btn memoria-fg-mend" title="${escapeHtml(c.tip)}">메우기</button><button type="button" class="memoria-fg-skip" title="넘기기" aria-label="넘기기">×</button>`}</div>
             <p class="memoria-fg-meta"><button type="button" class="memoria-fg-go" data-mes="${x.from}" title="그 장면으로">#${x.from}</button>${meta}</p>
+            <div class="memoria-fg-act">${x.done ? '<span class="memoria-fg-ok">메웠어요</span>' : `<button type="button" class="memoria-au-btn memoria-fg-mend" title="${escapeHtml(c.tip)}">메우기</button><button type="button" class="memoria-fg-skip">넘기기</button>`}</div>
         </li>`;
     }).join('')}</ul>`;
     else if (st) h += `<p class="memoria-fg-empty">이번에 훑은 ${st.last}곳은 모두 기억해요.</p>`;
