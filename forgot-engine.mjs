@@ -6,11 +6,14 @@ const clip = (s, n) => String(s ?? '').replace(/\s+/g, ' ').trim().slice(0, n);
 
 /** 잊은 까닭 — 까닭마다 고치는 길이 하나씩 있다 */
 export const FORGOT_CAUSE = Object.freeze({
-    unfiled: { label: '처음부터 안 적힘', fix: 'file', tip: '그 장면을 기록할 때 이 사실을 적지 않았어요.' },
-    dropped: { label: '요약하며 빠짐', fix: 'file', tip: '턴 기록에는 있었는데 요약으로 합쳐지며 빠졌어요.' },
-    unrecalled: { label: '있는데 안 떠오름', fix: 'pin', tip: '기억으로 적혀 있는데 이 일을 물었을 때 장부에 오르지 않았어요.' },
-    misread: { label: '적힌 글이 어긋남', fix: 'edit', tip: '그 기억이 장부에 올랐는데도 다르게 답했어요. 기억 글이 모호하거나 틀렸을 수 있어요.' },
+    unfiled: { label: '기록 안 됨', fix: 'file', tip: '그 장면을 기록할 때 빠졌어요 — 메우면 그 장면의 기억으로 적어요' },
+    dropped: { label: '요약에서 빠짐', fix: 'file', tip: '턴 기록에는 있었는데 요약으로 합쳐지며 빠졌어요 — 메우면 따로 기억으로 적어요' },
+    unrecalled: { label: '안 떠오름', fix: 'pin', tip: '기억은 있는데 이 일을 물었을 때 떠오르지 않았어요 — 메우면 늘 장부에 실어요' },
+    misread: { label: '잘못 적힘', fix: 'edit', tip: '그 기억이 장부에 올랐는데도 다르게 답했어요 — 메우면 기억 글을 고쳐요' },
 });
+
+/** 사실의 갈래 → 서고에 적을 기억 종류와 무게 (약속 · 비밀 · 관계는 회상에서 더 무겁게) */
+export const FACT_KINDS = Object.freeze({ promise: 0.85, secret: 0.85, relationship: 0.85, event: 0.75, item: 0.75, place: 0.7, fact: 0.75 });
 
 /**
  * 이번에 훑을 옛 장면을 고른다.
@@ -64,7 +67,8 @@ export function readFacts(raw, scenes, notes) {
         if (!scenes[k] || used.has(k) || !fact || ask.length < 6) continue;
         used.add(k);
         const src = notes.get(String(x.held ?? x.in ?? x.source ?? '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '')) || null;
-        out.push({ scene: k, fact, ask, note: note || fact, src });
+        const kind = String(x.kind ?? '').trim().toLowerCase();
+        out.push({ scene: k, fact, ask, note: note || fact, src, kind: FACT_KINDS[kind] ? kind : 'fact' });
     }
     return out;
 }

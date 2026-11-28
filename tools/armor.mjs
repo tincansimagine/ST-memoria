@@ -18,7 +18,7 @@ const END = '/* ⟦armor:end⟧ */';
 const CONTROL_CLASSES = [
     'menu_button', 'text_pole', 'memoria__tab', 'memoria__kindchip', 'memoria__filt-btn', 'memoria__source-button', 'memoria__library-launcher', 'memoria__kind-select',
     'memoria__lock-add-kind', 'memoria__lock-add-priority', 'memoria__lock-add-summary',
-    'memoria-au-btn', 'memoria-au-input', 'memoria-au-link', 'memoria-au-mode', 'memoria-au-textbtn', 'memoria-gap-fill', 'memoria-checkpoint-restore',
+    'memoria-au-btn', 'memoria-au-input', 'memoria-fg-all', 'memoria-fg-go', 'memoria-fg-skip', 'memoria-au-link', 'memoria-au-mode', 'memoria-au-textbtn', 'memoria-gap-fill', 'memoria-checkpoint-restore',
     'memoria-conflict-ignore', 'memoria-conflict-keep', 'memoria-bundle-chat', 'memoria-bundle-owner', 'memoria-pop__lang', 'memoria-pop__person', 'memoria-source',
     'mm-link', 'mm-ti-btn', 'mm-ti-chip', 'mm-yn-btn', 'mm-yn-hrow', 'mm-yn-jump', 'mm-yn-mini', 'mm-yn-ownbtn', 'mm-yn-owngroup', 'mm-yn-pick', 'mm-yn-wf', 'mm-yn-who', 'mm-yn-whof',
     'mmv-change-kind', 'mmv-change-who', 'mmv-export', 'mmv-jump', 'mmv-person-chip', 'mmv-stars-min',

@@ -47,8 +47,8 @@ import { isOocText, looksOocReply, attributeQuote, addressTermsIn, tallyAddress,
 import { parseStoryDate, storyDatesOf, isIsoDate, trackerText, trackerLineOf, pickBeats, beatLines, veilLeaks } from './calendar-engine.mjs';
 import { peopleList, matchPerson, personPage, nameSuggestions, planMerge, pairKey, WIPE_KINDS, wipeCounts, NOW_ORDER, strayPeople, mentions } from './people-engine.mjs';
 import { readerSystem, readerUser, readerKey, needsReading, packBatches, replyBudget, readReply, trimItems, READER_LANGS } from './reader-engine.mjs';
-import { checkModeOf, checkEveryOf, gradeEveryOf, NOTE_REPLIES, auditHash, sumSecs, whenOf, evidenceRows, readFindings, liveFindings, repliesSince, driftNoteLines, sumChecks, applySumFix, excerptsFor, readGrade, readRepair, repairBad } from './audit-engine.mjs';
-import { FORGOT_CAUSE, pickScenes, readFacts, readReplies, readJudgments, saidBlank, forgotCause } from './forgot-engine.mjs';
+import { checkModeOf, checkEveryOf, gradeEveryOf, NOTE_REPLIES, auditHash, sumSecs, whenOf, evidenceRows, readFindings, liveFindings, repliesSince, driftNoteLines, sumChecks, applySumFix, excerptsFor, readGrade, readRepair, repairBad, turnSpans } from './audit-engine.mjs';
+import { FORGOT_CAUSE, FACT_KINDS, pickScenes, readFacts, readReplies, readJudgments, saidBlank, forgotCause } from './forgot-engine.mjs';
 import { KNOW_DIRECTIVE, LEARN_DIRECTIVE, BEATS_DIRECTIVE, FEELING_DIRECTIVE, WHEN_DIRECTIVE, EVIDENCE_DIRECTIVE, THREAD_KIND_NOTE, VOICE_LINES, PLAN_HEAD, VEIL_PROMPT } from './directives.mjs';
 import { findStatusBars, statusOneLine, isPauseDirective, isPauseMessage, buildTimelineRows, filterTimelineRows, timelineMarkdown, timelineCsv, layoutTimelineGraph, verifyIssues, applyVerdicts } from './scene-engine.mjs';
 import { heroHtml, pulseSvg, flowHtml, railHtml, tableHtml, bondMapSvg, bondCardsHtml, statusListHtml, bondLegendHtml, bondPeopleHtml, buildChanges, changesHtml } from './story-view.mjs';
@@ -1479,14 +1479,15 @@ function setCheckMode(mode, every) {
  * ------------------------------------------------------------ */
 const FORGOT_FACT_PROMPT = `You are checking the archive of a long roleplay for things it has lost.
 Each scene below, tagged [S1], [S2] and so on, is an old exchange the chat model can no longer read. Under it are the notes the archive filed for that moment, tagged [N1], [N2] and so on.
-For each scene pick the ONE fact the rest of the story most depends on: what happened, who did it, a promise or a decision, an object and who holds it, a name or a place, a feeling said aloud and its reason. Skip exact wording, small talk, a passing look, and anything that would be true of any story.
+For each scene pick the ONE fact the rest of the story most depends on: what happened, who did it, a promise or a decision, an object and who holds it, a name or a place, a feeling said aloud and its reason. Skip exact wording, small talk, a passing look, and anything that would be true of any story.{FOCUS}
 For each give:
 - "fact": that fact as one short Korean sentence that names the people
 - "ask": a Korean question whose answer is this fact and that reads on its own without the scene
 - "note": the fact as one archive sentence written in {LANG}
+- "kind": one of event, promise, relationship, secret, item, place, fact
 - "held": the tag of the note that already states this fact, or "" when no note does (a note that only hints at it does not count)
 Reply with one JSON object and nothing else:
-{"facts":[{"scene":"S1","fact":"...","ask":"...","note":"...","held":"N2"}]}`;
+{"facts":[{"scene":"S1","fact":"...","ask":"...","note":"...","kind":"event","held":"N2"}]}`;
 
 const FORGOT_REPLY_PROMPT = `You are the memory of a long roleplay. First come the archive records the chat model receives every turn; then numbered questions, each followed by the notes recalled for it.
 Reply to each question from the records and that question's own notes only. When they do not hold it, reply exactly "모름": never guess, and never fill a gap with what usually happens in stories.
@@ -1501,24 +1502,49 @@ const FORGOT_JUDGE_PROMPT = `Each item has a FACT from a story and what the stor
 Reply with one JSON object and nothing else: {"judgments":[{"id":"A1","held":"kept"}]}`;
 
 const FORGOT_SCENES = 8;
-/** 한 번 훑는 데 드는 호출 수 (사실 뽑기 다섯 곳씩 · 답 다섯 곳씩 · 견주기 한 번) */
+/** 한 번 훑는 데 드는 호출 수 (사실 뽑기 다섯 곳씩 · 답 다섯 개씩 · 견주기 한 번) */
 const forgotCalls = (n) => Math.ceil(n / 5) * 2 + 1;
 const forgotNoteLang = () => ({ ko: 'Korean', en: 'English', hybrid: 'English', ja: 'Japanese' }[getSettings().summaryLanguage] || 'the language of the scene');
-const FORGOT_DONE = { filed: '적어 뒀어요', pinned: '늘 싣게 했어요', edited: '고쳤어요', skipped: '넘겼어요' };
-const FORGOT_FIX = { file: '적어 두기', pin: '늘 싣기', edit: '고치기' };
+/** 고른 인물 (''이면 모든 장면) — 탭을 다시 그려도 남는다 */
+let forgotWho = '';
 
-/** 원문이 보이지 않는 옛 장면 (기록된 것만) */
-function forgotPool(store = getStore()) {
-    return store.turns.filter(t => t.summary && !t.failed).map(t => ({ turnIndex: t.turnIndex, mesId: t.mesId, importance: t.importance, star: !!(t.star || chat[t.mesId]?.extra?.memoria_star) }));
+/** 원문이 보이지 않는 옛 장면 (기록된 것만). who: 그 인물이 나온 장면만 */
+function forgotPool(store = getStore(), who = '') {
+    const card = who ? store.characters.find(c => c.name === who) : null;
+    const names = who ? [who, ...(card?.aliases || [])].filter(n => n && String(n).trim()).map(n => String(n).toLowerCase()) : [];
+    const spans = names.length ? turnSpans(store, chat) : null;
+    const hasWho = (t) => {
+        if (!names.length) return true;
+        if (names.some(n => String(t.summary || '').toLowerCase().includes(n))) return true;
+        const span = spans.get(t.turnIndex);
+        if (!span) return false;
+        for (let i = span[0]; i <= span[1]; i++) if (names.some(n => String(chat[i]?.mes || '').toLowerCase().includes(n))) return true;
+        return false;
+    };
+    return store.turns.filter(t => t.summary && !t.failed && hasWho(t))
+        .map(t => ({ turnIndex: t.turnIndex, mesId: t.mesId, importance: t.importance, star: !!(t.star || chat[t.mesId]?.extra?.memoria_star) }));
 }
 
-function sweepForgotten() {
+/** 인물 고르기 칸에 올릴 사람 — 옛 장면에 두 번 넘게 나온 사람만, 많이 나온 순 */
+function forgotPeople(store = getStore()) {
+    const before = visibleFrom(store);
+    return store.characters.filter(c => !c.disabled && c.name)
+        .map(c => ({ name: c.name, n: forgotPool(store, c.name).filter(t => t.mesId < before).length }))
+        .filter(x => x.n >= 2).sort((a, b) => b.n - a.n).slice(0, 12);
+}
+
+/**
+ * 훑기 — 안 훑은 옛 장면 몇 곳에서 사실을 뽑고, 서고만으로 답하게 해 견준다.
+ * 지난번에 메운 것도 같은 호출에 끼워 다시 묻는다: 이제 기억하면 목록에서 빠지고, 아직이면 다음 처리(적기 → 늘 싣기 → 고치기)로 다시 올라온다.
+ */
+function sweepForgotten(who = '') {
     return queueAuditJob('잊은 것 찾는 중…', async () => {
         const store = getStore(), prev = store.forgot || {};
-        const { picks, total, fresh } = pickScenes(forgotPool(store), { before: visibleFrom(store), n: FORGOT_SCENES, swept: prev.swept || [], marks: (store.milestones || []).map(x => x.turnIndex) });
-        if (!picks.length) throw new Error('원문이 안 보이는 옛 장면이 아직 없어요');
+        const pool = forgotPool(store, who);
+        const { picks, total, fresh } = pickScenes(pool, { before: visibleFrom(store), n: FORGOT_SCENES, swept: prev.swept || [], marks: (store.milestones || []).map(x => x.turnIndex) });
+        if (!picks.length) throw new Error(who ? `${who}이(가) 나온 옛 장면이 아직 없어요` : '원문이 안 보이는 옛 장면이 아직 없어요');
         const spans = turnSpans(store, chat), clean = (m) => visibleProse(m.mes || '');
-        // 1. 장면마다 가장 중요한 사실 하나와, 그 사실이 이미 어느 기록에 있었는지
+        const focus = who ? `\nPrefer a fact about ${who}: who they are to the others, how they and the others address each other, what passed between them, and anything about them that was settled or ended.` : '';
         const facts = [];
         for (let i = 0; i < picks.length; i += 5) {
             const group = picks.slice(i, i + 5), notes = new Map();
@@ -1533,19 +1559,22 @@ function sweepForgotten() {
                 }
                 return `[S${k + 1}]\n${excerptsFor(chat, span[0], span[1], 1800, speakerOf, clean).join('\n')}\nNotes filed for it:\n${lines.join('\n') || '(none)'}`;
             });
-            const out = await callAuxLLM(FORGOT_FACT_PROMPT.replace('{LANG}', forgotNoteLang()), `${hostNoteOf(store)}${blocks.join('\n\n────────\n\n')}`, { task: 'summary', maxTokens: auxTokens(1800) });
+            const sys = FORGOT_FACT_PROMPT.replace('{LANG}', forgotNoteLang()).replace('{FOCUS}', focus);
+            const out = await callAuxLLM(sys, `${hostNoteOf(store)}${blocks.join('\n\n────────\n\n')}`, { task: 'summary', maxTokens: auxTokens(1800) });
             if (getStore() !== store) return null;
             for (const f of readFacts(parseJsonLoose(out), group, notes)) {
                 const p = group[f.scene], span = spans.get(p.turnIndex) || [p.mesId, p.mesId];
-                facts.push({ id: uuidv4().slice(0, 8), turn: p.turnIndex, from: span[0], to: span[1], fact: f.fact, ask: f.ask, note: f.note, src: f.src });
+                facts.push({ id: uuidv4().slice(0, 8), turn: p.turnIndex, from: span[0], to: span[1], fact: f.fact, ask: f.ask, note: f.note, kind: f.kind, src: f.src });
             }
         }
         if (!facts.length) throw new Error('장면에서 사실을 뽑지 못했어요 — 받은 답을 읽지 못했어요');
-        // 2. 서고만 보고 답하기 — 장부의 고정된 몸통은 한 번만, 물음마다 그 물음으로 떠오른 기억만 따로 붙인다
+        // 지난번에 메운 것 — 다시 물어 확인한다 (사실을 다시 뽑지 않으니 답 · 견주기 호출에 끼울 뿐이다)
+        const recheck = (prev.holes || []).filter(h => h.done && h.done !== 'skipped').slice(0, 10);
+        const asked = [...facts, ...recheck];
         const pinned = store.memories.filter(m => m.pinned && !m.disabled).map(m => m.id);
         const rows = [];
         let base = '';
-        for (const f of facts) {
+        for (const f of asked) {
             const parts = await buildPacketSections(f.ask, null);
             if (getStore() !== store) return null;
             const recalled = [...(parts.publicRecall || []), ...(parts.protectedRecall || [])];
@@ -1563,37 +1592,39 @@ function sweepForgotten() {
             if (getStore() !== store) return null;
             group.forEach((r, k) => { r.said = got.get(k) || ''; });
         }
-        // 3. 사실과 견주기 (모른다고 한 것은 견줄 것 없이 잊은 것)
         const ask = rows.filter(r => !saidBlank(r.said));
         if (ask.length) {
             const user = ask.map((r, k) => `[A${k + 1}]\nFACT: ${r.f.fact}\nSAID: ${r.said}`).join('\n\n');
-            const got = readJudgments(parseJsonLoose(await callAuxLLM(FORGOT_JUDGE_PROMPT, user, { task: 'check', maxTokens: auxTokens(500) })), ask.length);
+            const got = readJudgments(parseJsonLoose(await callAuxLLM(FORGOT_JUDGE_PROMPT, user, { task: 'check', maxTokens: auxTokens(600) })), ask.length);
             if (getStore() !== store) return null;
             ask.forEach((r, k) => { r.held = got.get(k) || 'wrong'; });
         }
         const alive = new Set(store.memories.filter(m => !m.disabled).map(m => m.id));
-        const holes = [], kept = [];
+        const holes = [];
+        let kept = 0, mended = 0;
         for (const r of rows) {
             const held = saidBlank(r.said) ? 'blank' : r.held;
             const cause = forgotCause(r.f.src, held, { has: (id) => alive.has(id), seen: r.seen });
-            if (!cause) { kept.push({ turn: r.f.turn, from: r.f.from, fact: r.f.fact }); continue; }
-            holes.push({ ...r.f, said: held === 'blank' ? '' : cleanStr(r.said, 300), held, cause });
+            const again = recheck.includes(r.f);
+            if (!cause) { if (again) mended++; else kept++; continue; }
+            // 메웠는데도 못 떠올리면 다음 처리로: 적어 둔 것은 늘 싣기, 늘 실었는데 어긋나면 고치기
+            holes.push({ ...r.f, said: held === 'blank' ? '' : cleanStr(r.said, 200), held, cause, done: '', again });
         }
         const sweptNow = picks.map(p => p.turnIndex);
+        const poolTurns = new Set(pool.map(t => t.turnIndex));
+        const oldSwept = fresh ? (prev.swept || []).filter(t => !poolTurns.has(t)) : (prev.swept || []);
         store.forgot = {
-            at: Date.now(), total, last: picks.length,
-            swept: fresh ? sweptNow : [...new Set([...(prev.swept || []), ...sweptNow])],
-            // 아직 손대지 않은 지난 것은 남기고, 이번 것을 앞에
-            holes: [...holes, ...(prev.holes || []).filter(h => !h.done && !sweptNow.includes(h.turn))].slice(0, 40),
-            kept,
+            at: Date.now(), last: picks.length, kept, mended,
+            swept: [...new Set([...oldSwept, ...sweptNow])],
+            holes: [...holes, ...(prev.holes || []).filter(h => !h.done && !holes.some(x => x.id === h.id) && !sweptNow.includes(h.turn))].slice(0, 30),
         };
         persistStore();
-        logActivity('check', `잊은 것 찾기: 옛 장면 ${picks.length}곳 가운데 ${holes.length}곳의 일을 잊고 있어요`);
-        return { holes: holes.length, scenes: picks.length };
+        logActivity('check', `잊은 것 찾기${who ? ` (${who})` : ''}: 옛 장면 ${picks.length}곳 가운데 ${holes.filter(h => !h.again).length}곳의 일을 잊고 있어요${recheck.length ? ` · 메운 것 ${recheck.length}개 중 ${mended}개 확인` : ''}`);
+        return { holes: holes.length, scenes: picks.length, mended, rechecked: recheck.length };
     });
 }
 
-/** 잊은 사실을 그 장면의 기억으로 적는다 */
+/** 잊은 사실을 그 장면의 기억으로 적는다 (약속 · 비밀 · 관계는 그 종류로) */
 async function fileForgotten(h) {
     const store = getStore();
     const summary = cleanStr(h.note || h.fact, 300);
@@ -1601,7 +1632,7 @@ async function fileForgotten(h) {
     const hay = `${h.fact} ${summary}`;
     const m = {
         id: uuidv4(), turnIndex: h.turn, mesId: chat[h.to] ? h.to : -1,
-        kind: 'fact', summary, excerpt: null, importance: 0.8,
+        kind: normKind(h.kind || 'fact'), summary, excerpt: null, importance: FACT_KINDS[h.kind] || 0.75,
         entities: store.characters.filter(c => [c.name, ...(c.aliases || [])].some(n => n && String(n).length >= 2 && hay.includes(n))).map(c => c.name).slice(0, 4),
         tags: ['manual'], hints: [], visibility: 'public', owner: null,
         pinned: false, disabled: false, manual: true, trigger: '',
@@ -1609,36 +1640,64 @@ async function fileForgotten(h) {
     m.vec = encodeVec(embedText(memoryIndexText(m)));
     m.cvec = memoryCueText(m).length >= 4 ? encodeVec(embedText(memoryCueText(m))) : '';
     store.memories.push(m);
+    h.src = { kind: 'memory', id: m.id };
     h.done = 'filed';
     await attachApiEmbeddings([m]);
     return true;
 }
 
+/** 메우기 — 까닭에 맞는 일을 한다. 반환: 했는가 */
+async function mendForgotten(h) {
+    const store = getStore();
+    const m = h.src?.kind === 'memory' ? store.memories.find(x => x.id === h.src.id && !x.disabled) : null;
+    const fix = FORGOT_CAUSE[h.cause]?.fix;
+    if (fix === 'pin' && m) { m.pinned = true; h.done = 'pinned'; return true; }
+    if (fix === 'edit' && m) {
+        const ctx = getContext();
+        const edited = await scrollingPopup(ctx, `기억 고치기 — 그 장면에서는: ${escapeHtml(h.fact)}`, ctx.POPUP_TYPE.INPUT, m.summary, { rows: 4 });
+        if (!edited || typeof edited !== 'string' || !edited.trim() || edited.trim() === m.summary) return false;
+        m.summary = cleanStr(edited, 300);
+        m.vec = encodeVec(embedText(memoryIndexText(m)));
+        m.cvec = memoryCueText(m).length >= 4 ? encodeVec(embedText(memoryCueText(m))) : '';
+        m.avec = null;
+        await attachApiEmbeddings([m]);
+        h.done = 'edited';
+        return true;
+    }
+    return fileForgotten(h); // 기록 안 됨 · 요약에서 빠짐, 또는 가리키던 기억이 사라진 것
+}
+
 function forgotHtml(store, settings) {
     const st = store.forgot || null, busy = !!auditBusy;
-    const total = st?.total ?? pickScenes(forgotPool(store), { before: visibleFrom(store), n: 1 }).total;
-    const swept = Math.min(total, st?.swept?.length || 0);
-    const btn = `<button type="button" class="memoria-au-btn is-primary"${settings.enabled && !busy && total ? '' : ' disabled'} id="memoria_fg_sweep" title="안 훑은 옛 장면 ${FORGOT_SCENES}곳을 서고만으로 기억하는지 봐요 (호출 약 ${forgotCalls(FORGOT_SCENES)}번)"><i class="fa-solid fa-magnifying-glass"></i><span>찾기</span></button>`;
-    if (!total) return `<div class="memoria-au-row">${btn}</div><p class="memoria-au-foot">아직 원문이 다 보이는 채팅이에요. 옛 장면이 원문에서 밀려나기 시작하면 찾을 수 있어요.</p>`;
-    if (!st) return `<div class="memoria-au-row">${btn}<span class="memoria-au-foot">옛 장면 ${total}곳</span></div>
-        <p class="memoria-au-foot">누를 때마다 안 훑은 장면 ${FORGOT_SCENES}곳을 이어서 봐요. 호출 약 ${forgotCalls(FORGOT_SCENES)}번.</p>`;
-    let h = `<div class="memoria-au-row">${btn}<span class="memoria-au-foot">옛 장면 <b>${swept}</b>/${total}곳 훑음 · ${auditWhen(st.at)}</span></div>`;
-    const open = (st.holes || []).filter(x => !x.done);
-    const fileable = open.filter(x => FORGOT_CAUSE[x.cause]?.fix === 'file');
-    if ((st.holes || []).length) {
-        h += `<h5 class="memoria-au-sub">잊은 것 <b>${open.length}</b>${fileable.length > 1 ? `<button type="button" class="memoria-au-textbtn memoria-fg-all" title="안 적혔거나 요약하며 빠진 ${fileable.length}개를 모두 기억으로 적어요">모두 적어 두기</button>` : ''}</h5>
-            <div class="memoria-au-issues">${st.holes.map(x => {
-                const c = FORGOT_CAUSE[x.cause] || FORGOT_CAUSE.unfiled;
-                const act = x.done ? `<span class="memoria-au-tag is-ok">${FORGOT_DONE[x.done] || ''}</span>`
-                    : `<button type="button" class="memoria-au-btn memoria-fg-fix" data-id="${x.id}">${FORGOT_FIX[c.fix]}</button><button type="button" class="memoria-au-textbtn memoria-fg-skip" data-id="${x.id}">넘기기</button>`;
-                return `<div class="memoria-au-issue memoria-fg-hole${x.done ? ' is-done' : ''}">
-                    <p>${escapeHtml(x.fact)}</p>
-                    <small class="memoria-fg-said">서고: ${x.said ? `“${escapeHtml(x.said)}”` : '모름'}</small>
-                    <div class="memoria-au-acts"><span class="memoria-au-meta">${auditJump(x.from)}<span class="memoria-fg-cause" title="${escapeHtml(c.tip)}">${c.label}</span></span><span class="memoria-au-btns">${act}</span></div>
-                </div>`;
-            }).join('')}</div>`;
-    } else h += `<p class="memoria-au-foot">이번에 훑은 ${st.last}곳은 모두 서고만으로 기억해요.</p>`;
-    if (st.kept?.length) h += `<details class="memoria-au-aside"><summary>이번에 기억한 것 ${st.kept.length}</summary><ul class="memoria-fg-kept">${st.kept.map(k => `<li>${auditJump(k.from)} ${escapeHtml(k.fact)}</li>`).join('')}</ul></details>`;
+    const people = forgotPeople(store);
+    if (forgotWho && !people.some(p => p.name === forgotWho)) forgotWho = '';
+    const { total } = pickScenes(forgotPool(store, forgotWho), { before: visibleFrom(store), n: 1 });
+    const swept = total ? forgotPool(store, forgotWho).filter(t => (st?.swept || []).includes(t.turnIndex) && t.mesId < visibleFrom(store)).length : 0;
+    const who = people.length ? `<select class="memoria-au-input memoria-fg-who" id="memoria_fg_who" aria-label="훑을 장면">
+            <option value="">모든 장면</option>${people.map(p => `<option value="${escapeHtml(p.name)}"${p.name === forgotWho ? ' selected' : ''}>${escapeHtml(p.name)}이(가) 나온 장면</option>`).join('')}</select>` : '';
+    const bar = `<div class="memoria-fg-bar">${who}<button type="button" class="memoria-au-btn is-primary"${settings.enabled && !busy && total ? '' : ' disabled'} id="memoria_fg_sweep" title="안 훑은 옛 장면 ${FORGOT_SCENES}곳을 서고만으로 기억하는지 봐요 · 호출 약 ${forgotCalls(FORGOT_SCENES)}번">찾기</button></div>`;
+    const open = (st?.holes || []).filter(h => !h.done), done = (st?.holes || []).filter(h => h.done);
+    const auto = open.filter(h => FORGOT_CAUSE[h.cause]?.fix !== 'edit');
+    let line;
+    if (!total) line = forgotWho ? '이 사람이 나온 옛 장면이 아직 없어요.' : '아직 원문이 다 보이는 채팅이에요.';
+    else if (!st) line = `옛 장면 ${total}곳 · 누를 때마다 ${FORGOT_SCENES}곳씩 이어서 봐요`;
+    else {
+        const parts = [`${swept}/${total}곳 훑음`];
+        parts.push(open.length ? `잊은 것 ${open.length}` : '잊은 것 없음');
+        line = parts.join(' · ');
+    }
+    let h = `${bar}<div class="memoria-fg-status"><span>${escapeHtml(line)}</span>${auto.length > 1 ? `<button type="button" class="memoria-fg-all" title="고치기 말고는 한 번에 메워요">모두 메우기</button>` : ''}</div>`;
+    const rows = [...open, ...done];
+    if (rows.length) h += `<ul class="memoria-fg-list">${rows.map(x => {
+        const c = FORGOT_CAUSE[x.cause] || FORGOT_CAUSE.unfiled;
+        const meta = [x.again ? `메웠는데 아직 ${c.label}` : c.label, x.said && x.held !== 'blank' ? `서고는 “${escapeHtml(cleanStr(x.said, 60))}”` : ''].filter(Boolean).join(' · ');
+        return `<li class="memoria-fg-row${x.done ? ' is-done' : ''}" data-id="${x.id}">
+            <p class="memoria-fg-fact">${escapeHtml(x.fact)}</p>
+            <div class="memoria-fg-act">${x.done ? '<span class="memoria-fg-ok">메움</span>' : `<button type="button" class="memoria-au-btn memoria-fg-mend" title="${escapeHtml(c.tip)}">메우기</button><button type="button" class="memoria-fg-skip" title="넘기기" aria-label="넘기기">×</button>`}</div>
+            <p class="memoria-fg-meta"><button type="button" class="memoria-fg-go" data-mes="${x.from}" title="그 장면으로">#${x.from}</button>${meta}</p>
+        </li>`;
+    }).join('')}</ul>`;
+    else if (st) h += `<p class="memoria-fg-empty">이번에 훑은 ${st.last}곳은 모두 기억해요.</p>`;
     return h;
 }
 
@@ -1693,49 +1752,38 @@ function bindAuditPanel() {
         } catch (e) { work.done('error', `요약을 고치지 못했어요: ${e?.message || e}`); }
         renderAuditPanel();
     });
-    const holeOf = (el) => getStore().forgot?.holes?.find(h => h.id === String($(el).data('id')));
+    const holeOf = (el) => getStore().forgot?.holes?.find(h => h.id === String($(el).closest('.memoria-fg-row').data('id')));
+    $root.on('click', '.memoria-fg-go', function () { jumpToMessage(Number($(this).data('mes'))); });
+    $root.on('change', '#memoria_fg_who', function () { forgotWho = String($(this).val() || ''); renderAuditPanel(); });
     $root.on('click', '#memoria_fg_sweep', async function () {
         if ($(this).prop('disabled') || auditBusy) return;
-        const work = workToast(`옛 장면 ${FORGOT_SCENES}곳을 훑는 중이에요…`);
+        const who = forgotWho;
+        const work = workToast(`${who ? `${who}이(가) 나온 ` : ''}옛 장면 ${FORGOT_SCENES}곳을 훑는 중이에요…`);
         try {
-            const r = await sweepForgotten();
-            work.done(!r ? 'info' : r.holes ? 'warning' : 'success', !r ? '채팅이 바뀌어 멈췄어요' : r.holes ? `잊은 것 ${r.holes}개를 찾았어요 — 대조 탭에서 메울 수 있어요` : `훑은 ${r.scenes}곳 모두 기억하고 있어요`);
+            const r = await sweepForgotten(who);
+            const msg = !r ? '채팅이 바뀌어 멈췄어요' : [r.holes ? `잊은 것 ${r.holes}개를 찾았어요` : `훑은 ${r.scenes}곳 모두 기억해요`, r.rechecked ? `지난번 메운 것 ${r.rechecked}개 중 ${r.mended}개는 이제 기억해요` : ''].filter(Boolean).join(' · ');
+            work.done(!r ? 'info' : r.holes ? 'warning' : 'success', msg);
         } catch (e) { work.done('error', `찾지 못했어요: ${e?.message || e}`); }
         renderAuditPanel();
     });
-    $root.on('click', '.memoria-fg-fix', async function () {
-        const h = holeOf(this), store = getStore();
+    $root.on('click', '.memoria-fg-mend', async function () {
+        const h = holeOf(this);
         if (!h || h.done) return;
-        const fix = FORGOT_CAUSE[h.cause]?.fix;
-        const m = h.src?.kind === 'memory' ? store.memories.find(x => x.id === h.src.id) : null;
-        if (fix === 'file') await fileForgotten(h);
-        else if (fix === 'pin' && m) { m.pinned = true; h.done = 'pinned'; }
-        else if (fix === 'edit' && m) {
-            const ctx = getContext();
-            const edited = await scrollingPopup(ctx, `기억 고치기 — 장면에서는: ${escapeHtml(h.fact)}`, ctx.POPUP_TYPE.INPUT, m.summary, { rows: 4 });
-            if (!edited || typeof edited !== 'string' || !edited.trim() || edited.trim() === m.summary) return;
-            m.summary = cleanStr(edited, 300);
-            m.vec = encodeVec(embedText(memoryIndexText(m)));
-            m.cvec = memoryCueText(m).length >= 4 ? encodeVec(embedText(memoryCueText(m))) : '';
-            m.avec = null;
-            await attachApiEmbeddings([m]);
-            h.done = 'edited';
-        } else await fileForgotten(h); // 가리키던 기억이 사라졌으면 새로 적는다
+        if (!await mendForgotten(h)) return;
         persistStore(); scheduleLocalSync(); renderMemoriesPanel(); updateInjection({ quiet: true });
         renderAuditPanel();
     });
     $root.on('click', '.memoria-fg-all', async function () {
-        const st = getStore().forgot;
-        const list = (st?.holes || []).filter(h => !h.done && FORGOT_CAUSE[h.cause]?.fix === 'file');
-        for (const h of list) await fileForgotten(h);
+        const list = (getStore().forgot?.holes || []).filter(h => !h.done && FORGOT_CAUSE[h.cause]?.fix !== 'edit');
+        for (const h of list) await mendForgotten(h);
         persistStore(); scheduleLocalSync(); renderMemoriesPanel(); updateInjection({ quiet: true });
-        if (list.length) toastr.success(`${list.length}개를 기억으로 적어 뒀어요`, 'Memoria');
+        if (list.length) toastr.success(`${list.length}개를 메웠어요 — 다음에 찾기를 누르면 함께 확인해요`, 'Memoria');
         renderAuditPanel();
     });
     $root.on('click', '.memoria-fg-skip', function () {
-        const h = holeOf(this);
-        if (!h) return;
-        h.done = 'skipped';
+        const st = getStore().forgot, h = holeOf(this);
+        if (!st || !h) return;
+        st.holes = st.holes.filter(x => x !== h);
         persistStore(); renderAuditPanel();
     });
     $root.on('click', '.memoria-au-restore', function () {
@@ -8421,7 +8469,6 @@ function renumberTurns(store) {
         // 잊은 것 찾기: 장면이 사라진 것은 뺀다 (지운 · 되감은 이야기의 일이므로)
         store.forgot.swept = (store.forgot.swept || []).filter(t => map.has(t)).map(t => map.get(t));
         store.forgot.holes = (store.forgot.holes || []).filter(h => map.has(h.turn)).map(h => ({ ...h, turn: map.get(h.turn) }));
-        store.forgot.kept = (store.forgot.kept || []).filter(k => map.has(k.turn)).map(k => ({ ...k, turn: map.get(k.turn) }));
     }
     delete store.gapMiss;
     if (store.eraFoldHeld) store.eraFoldHeld = remap(store.eraFoldHeld);

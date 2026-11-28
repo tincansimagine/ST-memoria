@@ -1816,17 +1816,27 @@ body[data-memoria-paper="dark"] :is(#memoria_settings.memoria, .memoria-library,
 #memoria_settings .memoria-au-sub small { font-weight: 400; font-size: .82em; color: var(--dim); }
 
 /* 어긋난 곳 · 채점 결과 */
-#memoria_settings .memoria-fg-hole { gap: 6px; }
-#memoria_settings #memoria_audit_forgot > .memoria-au-sub { margin-bottom: 6px; }
-#memoria_settings .memoria-fg-hole > p { font-weight: 600; }
-#memoria_settings .memoria-fg-said { display: block; font-size: .86em; line-height: 1.55; color: var(--dim); overflow-wrap: anywhere; word-break: keep-all; }
-#memoria_settings .memoria-fg-cause { font-size: .84em; color: var(--dim); text-decoration: underline dotted; text-underline-offset: 3px; cursor: help; }
-#memoria_settings .memoria-fg-hole .memoria-au-btns { align-items: center; gap: 12px; }
-#memoria_settings .memoria-fg-hole.is-done > p, #memoria_settings .memoria-fg-hole.is-done .memoria-fg-said { opacity: .55; }
-#memoria_settings .memoria-au-sub .memoria-au-textbtn { margin-left: auto; font-size: .84em; font-weight: 500; }
-#memoria_settings .memoria-fg-kept { margin: 0; padding: 0; list-style: none; display: grid; gap: 6px; font-size: .88em; line-height: 1.55; color: var(--text); }
-#memoria_settings .memoria-fg-kept li { overflow-wrap: anywhere; word-break: keep-all; }
-#memoria_settings .memoria-fg-kept .memoria-au-link { margin-right: 6px; }
+#memoria_settings .memoria-fg-bar { display: flex; align-items: center; gap: 8px; }
+#memoria_settings .memoria-fg-bar .memoria-fg-who { flex: 1 1 auto; min-width: 0; max-width: 260px; }
+#memoria_settings .memoria-fg-bar .memoria-au-btn { margin-left: auto; min-width: 76px; justify-content: center; }
+#memoria_settings .memoria-fg-status { display: flex; align-items: baseline; gap: 10px; margin: 10px 0 0; font-size: .86em; color: var(--dim); }
+#memoria_settings .memoria-fg-status > span { flex: 1; min-width: 0; word-break: keep-all; overflow-wrap: anywhere; }
+#memoria_settings .memoria-fg-all { flex-shrink: 0; margin: 0; padding: 0; min-height: 0; border: 0; background: none; font: inherit; color: var(--text); cursor: pointer; }
+#memoria_settings .memoria-fg-all:hover, #memoria_settings .memoria-fg-all:focus-visible { text-decoration: underline; text-underline-offset: 3px; }
+#memoria_settings .memoria-fg-list { list-style: none; margin: 8px 0 0; padding: 0; border-top: 1px solid var(--ink-line); }
+#memoria_settings .memoria-fg-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: 12px; row-gap: 3px; align-items: center; padding: 12px 0; border-bottom: 1px solid var(--ink-line); }
+#memoria_settings .memoria-fg-fact { margin: 0; font-size: .95em; line-height: 1.55; color: var(--text); overflow-wrap: anywhere; word-break: keep-all; }
+#memoria_settings .memoria-fg-act { grid-row: 1 / span 2; grid-column: 2; display: flex; align-items: center; gap: 2px; }
+#memoria_settings .memoria-fg-act .memoria-au-btn { padding-left: 12px; padding-right: 12px; }
+@media (max-width: 480px) { #memoria_settings .memoria-fg-row { column-gap: 8px; } #memoria_settings .memoria-fg-skip { width: 26px; } }
+#memoria_settings .memoria-fg-meta { grid-column: 1; margin: 0; font-size: .8em; line-height: 1.5; color: var(--dim); overflow-wrap: anywhere; word-break: keep-all; }
+#memoria_settings .memoria-fg-go { display: inline; margin: 0 6px 0 0; padding: 0; min-height: 0; border: 0; background: none; font: inherit; color: var(--dim); font-variant-numeric: tabular-nums; cursor: pointer; }
+#memoria_settings .memoria-fg-go:hover, #memoria_settings .memoria-fg-go:focus-visible { color: var(--text); text-decoration: underline; text-underline-offset: 2px; }
+#memoria_settings .memoria-fg-skip { width: 30px; height: 30px; margin: 0; padding: 0; min-height: 0; border: 0; background: none; font-size: 1.15em; line-height: 1; color: var(--faint); cursor: pointer; }
+#memoria_settings .memoria-fg-skip:hover, #memoria_settings .memoria-fg-skip:focus-visible { color: var(--text); }
+#memoria_settings .memoria-fg-row.is-done .memoria-fg-fact { color: var(--dim); }
+#memoria_settings .memoria-fg-ok { font-size: .82em; color: var(--dim); }
+#memoria_settings .memoria-fg-empty { margin: 10px 0 0; font-size: .88em; color: var(--dim); }
 #memoria_settings .memoria-au-card { display: flex; flex-direction: column; gap: 8px; margin: 0; padding: 12px 14px; border: 1px solid var(--ink-line); border-radius: 4px; background: var(--surface); min-width: 0; }
 #memoria_settings .memoria-au-card.is-off { opacity: .7; }
 #memoria_settings .memoria-au-card header { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
@@ -2675,8 +2685,15 @@ select.mm-yn-whof { width: 100%; min-height: 36px; max-width: none; }
 #memoria_settings .memoria-au-mode.is-on { background: var(--ink) !important; color: var(--surface) !important; }
 #memoria_settings .inline-drawer-content .memoria-au-every input, #memoria_settings .inline-drawer-content .memoria-au-every select { width: auto !important; min-width: 0 !important; height: 36px !important; min-height: 36px !important; margin: 0 !important; padding: 0 10px !important; border: 1px solid var(--ink-line) !important; border-radius: 4px !important; background: var(--surface) !important; box-shadow: none !important; color: var(--text) !important; font-size: 1em !important; }
 #memoria_settings .inline-drawer-content .memoria-au-every input { width: 64px !important; text-align: center !important; }
-#memoria_settings .memoria-au-sub .memoria-au-textbtn { margin-left: auto !important; font-size: .84em !important; font-weight: 500 !important; }
-#memoria_settings .memoria-fg-kept .memoria-au-link { margin-right: 6px !important; }
+#memoria_settings .memoria-fg-bar .memoria-au-btn { margin-left: auto !important; min-width: 76px !important; }
+#memoria_settings .memoria-fg-all { margin: 0 !important; padding: 0 !important; min-height: 0 !important; border: 0 !important; background: none !important; font: inherit !important; color: var(--text) !important; cursor: pointer !important; }
+#memoria_settings .memoria-fg-all:hover, #memoria_settings .memoria-fg-all:focus-visible { text-decoration: underline !important; text-underline-offset: 3px !important; }
+#memoria_settings .memoria-fg-act .memoria-au-btn { padding-left: 12px !important; padding-right: 12px !important; }
+@media (max-width: 480px) { #memoria_settings .memoria-fg-skip { width: 26px !important; } }
+#memoria_settings .memoria-fg-go { margin: 0 6px 0 0 !important; padding: 0 !important; min-height: 0 !important; border: 0 !important; background: none !important; font: inherit !important; color: var(--dim) !important; cursor: pointer !important; }
+#memoria_settings .memoria-fg-go:hover, #memoria_settings .memoria-fg-go:focus-visible { color: var(--text) !important; text-decoration: underline !important; text-underline-offset: 2px !important; }
+#memoria_settings .memoria-fg-skip { width: 30px !important; height: 30px !important; margin: 0 !important; padding: 0 !important; min-height: 0 !important; border: 0 !important; background: none !important; font-size: 1.15em !important; line-height: 1 !important; color: var(--faint) !important; cursor: pointer !important; }
+#memoria_settings .memoria-fg-skip:hover, #memoria_settings .memoria-fg-skip:focus-visible { color: var(--text) !important; }
 #memoria_settings .memoria-au-link.mmv-jump { min-height: 0 !important; padding: 2px 1px !important; margin: 0 !important; border: 0 !important; border-radius: 0 !important; background: none !important; color: var(--accent-ink, var(--accent)) !important; font: 600 .9em var(--font) !important; text-decoration: underline !important; text-underline-offset: 3px !important; cursor: pointer !important; }
 #memoria_settings .memoria-au-textbtn { min-height: 0 !important; padding: 0 !important; margin: 0 !important; border: 0 !important; background: none !important; color: var(--accent-ink, var(--accent)) !important; font: inherit !important; text-decoration: underline !important; text-underline-offset: 3px !important; cursor: pointer !important; }
 #memoria_settings #memoria_audit_drift .menu_button, #memoria_settings #memoria_audit_sums .menu_button { min-height: 36px !important; padding: 0 14px !important; border: 1px solid var(--ink-line) !important; border-radius: 4px !important; background: var(--surface) !important; font-size: .88em !important; }
