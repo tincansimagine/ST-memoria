@@ -120,7 +120,7 @@ export function wordStem(word) {
 }
 
 /** 회상 낱말 축용 느슨한 줄기 — 조사와 체언에 붙는 '-야 · -이야 · -이랑 · -하고'를 한 글자가 남을 때까지 뗀다 (낱말 그대로와 함께 쓴다) */
-const LOOSE_TAILS = ['이었지', '이었어', '이에요', '에게서', '한테서', '으로부터', '이라고', '이랑', '하고', '이야', '예요', '였지', '였어', '이다', ...KO_PARTICLES, '랑', '야', '다'];
+const LOOSE_TAILS = ['이었지', '이었어', '이에요', '에게서', '한테서', '으로부터', '이라고', '이랑', '하고', '이야', '예요', '였지', '였어', '이다', '마다', ...KO_PARTICLES, '랑', '야', '다'];
 export function looseStem(word) {
     let w = String(word || '').toLowerCase();
     if (!/^[가-힣]{2,}$/.test(w)) return w;
@@ -130,6 +130,127 @@ export function looseStem(word) {
         w = w.slice(0, -p.length);
     }
     return w;
+}
+
+/*
+ * 용언 줄기 — 사전 없이 활용형에서 어간 후보를 뽑는다 ("빚졌다" → 빚지 · 빚, "지낸다" → 지내, "다퉜다" → 다투, "갔었다" → 가).
+ * 조사만 떼는 looseStem 으로는 "빚이 / 빚졌다", "지내 / 지낸다", "싸웠던 / 싸우다"가 서로 남남이었다.
+ * 오탐을 막는 규칙:
+ *   · 받침 ㅆ(었 · 았 · 였 · 했 · 졌 …)은 거의 용언에만 붙는다 — 이것을 풀 때만 한 글자 줄기를 낸다 ("샀다" → 사). 있 · 없 · 겠은 풀지 않는다.
+ *   · 받침 ㄴ은 "-ㄴ다 · -ㄴ다고"처럼 용언 어미가 뒤에 붙어 있을 때만 푼다 ("지낸다" → 지내). 맨 낱말 "사건 · 주인 · 사진"은 건드리지 않는다.
+ *   · 과거 표지 없이 어미만 뗄 때는 두 글자 이상 남아야 한다 ("사고" → 사 ✗, "지내고" → 지내 ✓).
+ * 반환: 낱말 자신과 다른 후보들 (없으면 빈 배열)
+ */
+const HANGUL0 = 0xAC00;
+const sylOf = (ch) => { const c = ch.charCodeAt(0) - HANGUL0; return c >= 0 && c < 11172 ? { cho: Math.floor(c / 588), jung: Math.floor((c % 588) / 28), jong: c % 28 } : null; };
+const sylMake = (cho, jung, jong = 0) => String.fromCharCode(HANGUL0 + (cho * 21 + jung) * 28 + jong);
+// 과거 표지(받침 ㅆ) 뒤에 오는 어미 — 긴 것부터
+const PAST_ENDS = ['습니다', '는데', '더니', '다고', '다는', '다가', '다며', '다면', '지만', '으니', '으면', '어요', '어서', '어도', '다', '어', '지', '죠', '네', '고', '던', '나', '니', '냐', '는지', '을까', '을'];
+// 과거 표지 없이 용언 어간 뒤에 오는 어미 (명사 끝과 겹치는 한 글자 어미는 넣지 않는다)
+const PLAIN_ENDS = ['는다고', '는다면', '는다', '다고', '다는', '다가', '다며', '다면', '는데', '더니', '면서', '려고', '도록', '지만', '니까', '던', '고', '며', '면'];
+const PAST_SYL = new Set(['었', '았', '였']);
+export function verbStems(word) {
+    const w = String(word || '').toLowerCase();
+    if (!/^[가-힣]{2,}$/.test(w)) return [];
+    const out = new Set();
+    const add = (x, minLen = 1) => { if (x && x !== w && [...x].length >= minLen) out.add(x); };
+    // 하다 · 되다 · 지다로 끝나는 줄기는 앞의 말도 줄기다 ("약속하" → 약속, "빚지" → 빚)
+    const light = (stem) => {
+        add(stem);
+        if (/[하되]$/.test(stem) && stem.length >= 3) add(stem.slice(0, -1), 2);
+        else if (/지$/.test(stem) && stem.length === 2) add(stem.slice(0, -1));
+    };
+    // 받침 ㅆ을 푼다 — "다투었" → 다투, "갔" → 가, "다퉜" → 다투, "숨겼" → 숨기, "했" → 하
+    const openPast = (r) => {
+        const last = r.slice(-1), head = r.slice(0, -1), j = sylOf(last);
+        if (!j || j.jong !== 20 || last === '있' || last === '없' || last === '겠') return false;
+        if (PAST_SYL.has(last) && head) {
+            // "갔었" · "했었"처럼 과거가 겹치면 앞 글자를 다시 푼다
+            if (!openPast(head)) light(head);
+            return true;
+        }
+        if (last === '했') { light(`${head}하`); return true; }
+        if (last === '됐') { light(`${head}되`); return true; }
+        light(head + sylMake(j.cho, j.jung));
+        const unfused = { 6: 20, 14: 13, 9: 8, 4: 18 }[j.jung]; // ㅕ→ㅣ(숨겼→숨기) · ㅝ→ㅜ(다퉜→다투) · ㅘ→ㅗ(봤→보) · ㅓ→ㅡ(썼→쓰)
+        if (unfused !== undefined) light(head + sylMake(j.cho, unfused));
+        return true;
+    };
+    for (const end of PAST_ENDS) {
+        if (!w.endsWith(end) || w.length - end.length < 1) continue;
+        if (openPast(w.slice(0, -end.length))) return [...out];
+    }
+    // 해 · 해서 · 해요 · 해도 · 해야 — 하 + 어가 줄어든 꼴 ("좋아해" → 좋아하 · 좋아)
+    const hae = w.match(/^(.+)해(?:서|요|도|야|라)?$/);
+    if (hae && hae[1].length >= 1) { light(`${hae[1]}하`); return [...out]; }
+    // 하 + 짧은 어미 ("공부하지 · 약속하고 · 좋아하는") — 앞에 두 글자 이상 남을 때만
+    const ha = w.match(/^(.{2,})하(?:지|고|며|면|니|는|던|자|게|기|냐|나|려|러)$/);
+    if (ha) { light(`${ha[1]}하`); return [...out]; }
+    // 받침 ㄴ으로 끝난 꾸밈꼴 가운데 뜻이 분명한 둘 — 주(다) · 하(다): "빌려준" → 빌려주, "약속한" → 약속하 · 약속 (세 글자 이상만)
+    const nForm = w.match(/^(.{2,})([준한])$/);
+    if (nForm) { light(`${nForm[1]}${nForm[2] === '준' ? '주' : '하'}`); return [...out]; }
+    for (const end of PLAIN_ENDS) {
+        if (!w.endsWith(end)) continue;
+        const r = w.slice(0, -end.length);
+        if (!r) continue;
+        const j = sylOf(r.slice(-1));
+        // "-ㄴ다"류: 받침 ㄴ을 푼다 ("지낸다고" → 지내, "싸운다면" → 싸우)
+        if (/^다/.test(end) && j?.jong === 4) { light(r.slice(0, -1) + sylMake(j.cho, j.jung)); return [...out]; }
+        if ([...r].length >= 2) { light(r); return [...out]; }
+    }
+    // 맨 "-ㄴ다" ("지낸다" · "흥얼거린다" · "한다")
+    if (w.endsWith('다') && w.length >= 2) {
+        const r = w.slice(0, -1), j = sylOf(r.slice(-1));
+        if (j?.jong === 4) light(r.slice(0, -1) + sylMake(j.cho, j.jung));
+        else if ([...r].length >= 2) light(r); // 사전꼴 "지내다" · "약속하다" (받침 없는 이름씨 + "다"여도 줄기가 그 이름씨라 해가 없다)
+    }
+    return [...out];
+}
+
+/*
+ * 개념 묶음 — 임베딩 없이 "싸웠다 ↔ 다투었다", "노래 ↔ 자장가 · 흥얼거리다"를 잇는 작은 표. 낱말 축(어휘 점수)에만 "~c:묶음" 조각으로 들어간다.
+ * 그 채팅에서 얼마나 흔한지로 무게가 매겨지므로, 매 장면 나오는 묶음(로맨스 채팅의 "사랑")은 무게가 저절로 0에 가깝다.
+ * 줄기(조사 · 어미를 뗀 꼴)와 견준다: 한 글자 말은 그대로 같을 때만, 두 글자 이상은 그 말로 시작하면.
+ * 뜻이 여럿인 한 글자 말(차 · 살 · 배 · 안 · 화)은 넣지 않는다.
+ */
+const CONCEPT_TERMS = {
+    fight: ['싸우', '싸움', '다투', '다툼', '말다툼', '말싸움', '언쟁', '실랑이', '몸싸움', '시비', 'fight', 'argu', 'quarrel'],
+    music: ['노래', '자장가', '흥얼', '콧노래', '멜로디', '선율', '가락', '휘파람', '연주', 'song', 'sang', 'hum', 'humm', 'lullab', 'melod'],
+    fond: ['좋아하', '짝사랑', '호감', '설레', '반하', '연모', '사모', '사랑하', 'crush', 'fond'],
+    dislike: ['싫어하', '미워하', '질색', '혐오', '꺼리', 'hate', 'dislik', 'loath'],
+    debt: ['빚', '채무', '빌리', '갚', '외상', '이자', 'debt', 'owe', 'loan'],
+    fear: ['무섭', '무서워', '두렵', '두려', '공포', '겁', '떨리', '악몽', '트라우마', 'afraid', 'fear', 'scare', 'terrif', 'nightmare'],
+    hurt: ['흉터', '상처', '다치', '부상', '화상', '멍', 'scar', 'wound', 'injur', 'hurt'],
+    drink: ['마시', '홍차', '커피', '우유', '음료', '술', '와인', '맥주', 'drink', 'tea', 'coffee', 'wine'],
+    dwell: ['지내', '머물', '머무르', '거처', '숙소', '묵', 'lodg'],
+    gift: ['선물', '건네', '맡기', '증표', 'gift'],
+    vow: ['약속', '맹세', '서약', '다짐', '기약', 'promis', 'vow', 'swor', 'swear', 'oath'],
+    secret: ['비밀', '숨기', '감추', '몰래', '들키', 'secret', 'hide', 'hid', 'conceal'],
+    lie: ['거짓말', '거짓', '속이', 'lie', 'lied', 'deceiv'],
+    death: ['죽', '죽음', '사망', '숨지', '목숨', 'die', 'dead', 'death', 'kill'],
+    kiss: ['키스', '입맞추', '입맞춤', '뽀뽀', 'kiss'],
+    cry: ['울', '눈물', '흐느끼', '훌쩍', 'cry', 'cried', 'tear', 'sob'],
+    anger: ['화내', '화나', '분노', '짜증', '격분', 'angry', 'anger', 'furious', 'rage'],
+    part: ['떠나', '작별', '이별', '헤어지', 'farewell', 'goodbye'],
+    meet: ['만나', '만남', '재회', '마주치', 'meet', 'met', 'reunit'],
+};
+const CONCEPT_EXACT = new Map(), CONCEPT_PREFIX = new Map();
+for (const [key, terms] of Object.entries(CONCEPT_TERMS)) {
+    for (const t of terms) {
+        const short = [...t].length < 2 || /^[a-z]{1,3}$/.test(t);
+        const bag = short ? CONCEPT_EXACT : CONCEPT_PREFIX, k = short ? t : t.slice(0, 2);
+        if (!bag.has(k)) bag.set(k, []);
+        bag.get(k).push(short ? key : [t, key]);
+    }
+}
+/** 줄기 모음에 든 개념 묶음 조각 ("~c:fight" …) */
+export function conceptTags(stems) {
+    const out = new Set();
+    for (const st of stems) {
+        for (const key of CONCEPT_EXACT.get(st) || []) out.add(`~c:${key}`);
+        for (const [t, key] of CONCEPT_PREFIX.get(st.slice(0, 2)) || []) if (st.startsWith(t)) out.add(`~c:${key}`);
+    }
+    return out;
 }
 
 // 표현의 처음이나 끝에 오면 안 되는 말 — 그 자체로는 아무 버릇도 아닌 대명사·접속어·흔한 서술어

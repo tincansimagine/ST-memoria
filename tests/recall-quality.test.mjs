@@ -53,9 +53,14 @@ test('the one-line "now" is not read as a day; a flashback tie opens a line but 
     const row = up(store, x.bonds[0], 5);
     assert.ok(row, 'no line on file yet — the flashback is the first the story says of them');
     assert.equal(row.log[0].stage, '소꿉친구');
+    assert.equal(row.log[0].backstory, true);
     up(store, { from: '아리아', to: '보라', stage: '서먹한 사이' }, 6);
-    assert.equal(up(store, { from: '아리아', to: '보라', stage: '소꿉친구', backstory: true }, 7), null);
-    assert.equal(a.run('bondNow')(store.bonds[0]).stage, '서먹한 사이');
+    assert.equal(row.log.length, 2, 'the present tie a turn later is a new step, not a rewrite of the flashback one');
+    assert.equal(row.log[0].stage, '소꿉친구');
+    up(store, { from: '아리아', to: '보라', stage: '소꿉친구', calls: '리아', backstory: true }, 7);
+    const now = a.run('bondNow')(store.bonds[0]);
+    assert.equal(now.stage, '서먹한 사이', 'a flashback never moves the present tie');
+    assert.equal(now.calls, '리아', 'but a form of address seen for the first time fills the empty slot');
 });
 
 test('a settled incident is shown as background and its old line is dropped soon', async () => {
@@ -92,6 +97,34 @@ test('a merge that loses a recurring person is noticed without a model call', as
     assert.deepEqual(lost(store, src, '아리아가 등대에서 돌아왔다'), ['보라']);
     assert.deepEqual(lost(store, src, '아리아가 등대에서 돌아왔다', '미나는 옛 친구다'), ['보라', '미나']);
     assert.deepEqual(lost(store, src, '아리아와 보라가 등대에서 돌아왔다'), []);
+    // 두 글자 이름은 다른 낱말 속에 든 것을 사람으로 세지 않는다
+    assert.deepEqual(lost(store, ['보라색 커튼을 걷었다', '그녀는 하늘을 바라보라고 했다'], '커튼을 걷었다'), []);
+    assert.deepEqual(lost(store, ['보라가 웃었다', '보라야, 가자'], '보라색 하늘'), ['보라']);
+});
+
+test('the summary trim never lets more summaries through than the limit, and keeps the newest one when room is tight', async () => {
+    const a = await app();
+    const keep = (...xs) => [...a.run('keepRootsAndRecent')(...xs)].map(r => r.id);
+    const rows = [{ id: 'old', carried: true }, { id: 'saga', saga: true, level: 'arc' }, { id: 'a1', level: 'arc' }, { id: 'c1' }, { id: 'c2' }, { id: 'c3' }];
+    assert.deepEqual(keep(rows, 1), ['c3']);
+    assert.deepEqual(keep(rows, 2), ['saga', 'c3']);
+    assert.deepEqual(keep(rows, 3), ['old', 'saga', 'c3']);
+    assert.deepEqual(keep([{ id: 'saga', saga: true }], 1), ['saga']);
+});
+
+test('a reply that only repeats the two leads\' names does not count as using the memory', async () => {
+    const a = await app();
+    const store = a.getStore();
+    store.memories.push(memory('walk', { summary: '아리아와 여행자가 등대 근처를 걸으며 바람 이야기를 나눴다', entities: ['아리아', '여행자'], importance: 0.5 }));
+    const echo = (reply) => {
+        const mes = { is_user: false, mes: reply, name: '아리아' };
+        a.context.chat.push(mes);
+        a.run('recallAudit = { at: Date.now(), ids: ["walk"] };');
+        a.run('auditRecallEcho')(mes, a.context.chat.length - 1);
+        return store.memories[0];
+    };
+    assert.equal(echo('아리아는 여행자를 한참 바라보다가 아무 말 없이 고개를 끄덕였다. 창밖은 고요했다.').echoes || 0, 0);
+    assert.equal(echo('아리아가 여행자에게 그날 등대 근처에서 나눈 바람 이야기를 꺼냈다. 둘은 웃었다.').echoes, 1);
 });
 
 test('chunk summaries are handed the heavy facts their digests left out', async () => {
@@ -107,4 +140,66 @@ test('chunk summaries are handed the heavy facts their digests left out', async 
     assert.match(block, /미나 first appears \(등대지기의 딸\)/);
     assert.match(block, /보라 now calls 아리아 리아/);
     assert.equal(a.run('keyFactsBlock')(store, 20, 25, ''), '');
+});
+
+test('verb endings reduce to their stem without touching plain nouns', async () => {
+    const { verbStems } = await import('../craft-engine.mjs');
+    const has = (w, st) => assert.ok(verbStems(w).includes(st), `${w} → ${st} (got ${verbStems(w).join(', ')})`);
+    has('빚졌다', '빚'); has('지낸다', '지내'); has('다투었다', '다투'); has('다퉜다', '다투'); has('샀다', '사'); has('갔었다', '가');
+    has('숨겼다', '숨기'); has('싸웠던', '싸우'); has('부르던', '부르'); has('흥얼거린다', '흥얼거리'); has('약속했다', '약속');
+    has('좋아해', '좋아하'); has('공부하지', '공부'); has('빌려준', '빌려주'); has('건넸다', '건네');
+    for (const noun of ['사건', '편지', '단장', '주인', '사진', '사고', '바다', '아버지', '어머니', '고양이', '나침반', '은반지', '돛단배', '기준', '하늘', '하나', '달러', '시간']) {
+        assert.deepEqual(verbStems(noun), [], noun);
+    }
+    assert.deepEqual(verbStems('있었다'), ['있']);
+});
+
+test('a small concept table links words that mean the same thing', async () => {
+    const { conceptTags } = await import('../craft-engine.mjs');
+    const a = await app();
+    const tags = (t) => [...conceptTags(a.run('stemSet')(t))];
+    assert.ok(tags('둘이 왜 싸웠던 거야?').includes('~c:fight'));
+    assert.ok(tags('아리아와 보라가 시장에서 크게 다투었다').includes('~c:fight'));
+    assert.ok(tags('카엘은 고향 자장가를 흥얼거린다').includes('~c:music'));
+    assert.deepEqual(tags('몇 살이야? 차 타고 가자'), [], 'one-letter words with several meanings are left out');
+});
+
+test('a full question is not treated as a short input that leans on the scene', async () => {
+    const a = await app();
+    const store = a.getStore();
+    for (let i = 0; i < 3; i++) store.memories.push(withVec(a, memory(`m${i}`, { summary: `등대에서 있었던 일 ${i}` })));
+    const scene = '아리아가 등대 계단을 올라갔다.';
+    assert.equal((await a.retrieveMemories('응', [], scene)).shortQ, true);
+    assert.equal((await a.retrieveMemories('*고개를 끄덕인다*', [], scene)).shortQ, true);
+    assert.equal((await a.retrieveMemories('그래서?', [], scene)).shortQ, true);
+    assert.equal((await a.retrieveMemories('리아는 어디서 지내?', [], scene)).shortQ, false);
+    assert.equal((await a.retrieveMemories('나침반 어디 뒀더라', [], scene)).shortQ, false);
+});
+
+test('under a tight budget the scene leads keep their bond lines, whatever their names sort to', async () => {
+    const a = await app();
+    const bond = (from, to, stage) => ({ id: `${from}${to}`, from, to, log: [{ turn: 1, stage }], disabled: false });
+    // 장면 인물의 줄이 앞에 온다 (buildPacketSections 의 차례) — 이름 차례로는 뒤쪽
+    const parts = {
+        rules: [], characters: [], items: [], summaries: [], locks: [], banned: [], states: [], publicRecall: [], protectedRecall: [], milestones: [],
+        bonds: [bond('하린', '여행자', '깊은 신뢰'), bond('하린', '보라', '라이벌'), bond('가온', '나래', '옛 동료'), bond('나래', '가온', '서먹함')],
+    };
+    const text = a.renderPacket(parts, { charLimit: 2 });
+    assert.match(text, /하린 → 여행자: 깊은 신뢰/);
+    assert.match(text, /하린 → 보라: 라이벌/);
+    assert.doesNotMatch(text, /가온 → 나래/);
+});
+
+test('when the budget is tight, middle eras shrink to their WHEN and SHIFTS lines before any is dropped', async () => {
+    const a = await app();
+    const era = (id, extra) => ({ id, level: 'arc', fromTurn: 1, toTurn: 2, text: `WHEN: ${id}의 때\nPLOT:\n- ${id}의 긴 줄거리\nSHIFTS: ${id}에서 남은 변화`, ...extra });
+    const parts = {
+        rules: [], characters: [], bonds: [], items: [], locks: [], banned: [], states: [], publicRecall: [], protectedRecall: [], milestones: [],
+        summaries: [era('처음', { saga: true }), era('가운데'), { id: 'c1', fromTurn: 3, toTurn: 4, text: 'PLOT:\n- 최근 일' }],
+    };
+    const text = a.renderPacket(parts, { compactArcs: true });
+    assert.match(text, /가운데에서 남은 변화/);
+    assert.doesNotMatch(text, /가운데의 긴 줄거리/);
+    assert.match(text, /처음의 긴 줄거리/, 'the oldest part keeps its plot');
+    assert.match(text, /최근 일/);
 });
