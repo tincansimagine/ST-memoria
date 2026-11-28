@@ -76,6 +76,21 @@ export const chat_metadata = { memoria: { version: 1, lexiconRev: 5, turnCounter
         { id: 'chapter2', fromTurn: 9, toTurn: 16, text: 'WHEN: 2일째 낮 ~ 3일째 새벽 · 기차역, 정원, 해안\nPLOT:\n- 여행자가 새벽 기차표를 끊었지만 타지 않았다.\n- 아리아가 정원 우물에서 낡은 나침반을 건져 건넸다. "길 잃지 말라고요."\n- 해안에서 일출을 보며 여행자가 은빛 반지를 건넸다.\nSHIFTS: 아리아 → 여행자: 떠나보내기 싫은 사람 · 나침반은 여행자에게\nOPEN: 보라에게 전할 편지 · 닫힌 북문 너머' }],
     arcSummaries: [], milestones: [{ id: 'ms1', title: '등대의 약속', summary: '돌아오겠다고 약속했다', participants: [name2, name1], grade: 'major', turnIndex: 2 }, { id: 'ms2', title: '은빛 반지', summary: '해안에서 반지를 건넸다', participants: [name2, name1], grade: 'major', turnIndex: 15 }], items: [], dossier: [] } };
 
+// ?rows=1 — 세계 탭 줄 목록 확인용: 긴 서약 · 해소된 듯 · 휴면 · 끝난 서약 · 날 세기 · 아이템 · 문서 · 지나간 상태
+if (new URLSearchParams(location.search).get('rows') === '1') {
+    const m = chat_metadata.memoria;
+    m.locks.push(
+        { id: 'pl2', kind: 'keep_unresolved', summary: '아리아가 낮에 여행자의 손에 무엇이 닿았거나 발렸는지 유독 집요하게 묻는 이유', status: 'active', priority: 2, turnIndex: 11, suggestResolved: true, suggestHow: '아리아가 직접 털어놓았다' },
+        { id: 'pl3', kind: 'feeling', summary: '보라는 아리아가 편지를 뜯지 않은 일을 아직 마음에 담아 두고 있다', status: 'dormant', priority: 2, turnIndex: 6, cause: '답장이 없었다', needs: '아리아가 먼저 편지 이야기를 꺼내는 것' },
+        { id: 'pl4', kind: 'keep_secret', summary: '새벽 기차를 타지 않겠다', status: 'resolved', priority: 3, turnIndex: 12, outcome: 'kept', resolution: '기차역에서 표를 찢었다' },
+        { id: 'pl5', kind: 'author_plan', summary: '북문 너머에 보라의 옛 집이 있다', veil: '북문 너머에 무언가가 있다', status: 'active', priority: 2, turnIndex: 14 });
+    m.worldRules.push({ id: 'rule2', scope: 'world', key: 'alfie_wrist_pain_relief_condition', value: '손목 통증은 따뜻한 물에 담그면 잠깐 가라앉지만 밤이 되면 다시 도진다.', turnIndex: 12 });
+    m.entityStates.push({ id: 'st2', entity: name2, slot: 'outfit', value: '소매를 걷은 회색 작업복', prev: '젖은 외투', turnIndex: 16 }, { id: 'st3', entity: name1, slot: 'mood', value: '들뜸', expired: 9, turnIndex: 9 });
+    m.items.push({ id: 'it1', name: '은빛 반지', holder: name2, meaning: '여행자가 돌아오겠다는 약속의 증표', status: '왼손 약지', updatedTurn: 15 }, { id: 'it2', name: '낡은 나침반', holder: name1, meaning: '길 잃지 말라는 아리아의 당부', updatedTurn: 13, disabled: true });
+    m.dossier.push({ id: 'doc1', title: '등대 마을 설정집', chunks: ['등대 마을은 해안 절벽 위에 있다.', '북문은 겨울이면 닫힌다.'] });
+    m.trackers = [{ id: 'tk1', type: 'count', label: '여행자가 등대에 머문 지', people: [name1], from: '1일째' }];
+}
+
 // ?audit=1 — 검사 탭 화면 확인용: 겹친 요약 · 지난 검사 보고서 · 채점 결과를 깐다
 if (new URLSearchParams(location.search).get('audit') === '1') {
     const m = chat_metadata.memoria;

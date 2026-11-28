@@ -3,7 +3,8 @@
 //   node tools/recall-bench.mjs <다른 폴더>  다른 판(예: git worktree)과 견줄 때
 //   node tools/recall-bench.mjs . -v        물음마다 1~3등까지
 // 한국어 세 묶음: A는 회상을 다듬으며 본 물음, B는 다듬는 데 쓰지 않은 물음, C는 바깥에서 만든 물음(유형별 넷씩).
-// 다른 말 세 묶음: D 영어 · E 일본어 · F 중국어 (같은 이야기 틀, 유형별 셋씩), 바깥에서 만든 D2 · E2 · F2 (유형별 넷씩). 모두 직전 장면 없이 / 함께 각각 잰다.
+// 다른 말 세 묶음: D 영어 · E 일본어 · F 중국어 (같은 이야기 틀, 유형별 셋씩), 바깥에서 만든 D2 · E2 · F2 (유형별 넷씩).
+// 바깥에서 만든 X1 · X2(요약 언어가 영어인 한국어 · 일본어 채팅 — 회상 단서 있음 / 없음) · T1(번체 중국어) · M1(섞인 말). 모두 직전 장면 없이 / 함께 각각 잰다.
 import { fileURLToPath } from 'node:url';
 import { resolve } from 'node:path';
 const root = resolve(process.argv[2] && !process.argv[2].startsWith('-') ? process.argv[2] : fileURLToPath(new URL('..', import.meta.url)));
@@ -155,12 +156,13 @@ async function run(label, setup, qs, scene) {
 }
 
 // 다른 말 — 같은 틀(사실 12 · 평범한 장면 기억 20 · 물음 12)을 영어 · 일본어 · 중국어로. 유형: 그대로 · 활용(바꿔 말함) · 같은 뜻 · 별명/호칭
-async function langSet(label, { chars, bonds = [], facts, filler, fillTopics, qs, scene }) {
+async function langSet(label, { chars, bonds = [], facts, filler, fillTopics, qs, scene, bare = false }) {
     await run(label, (store, memory) => {
         store.turnCounter = 120;
         store.characters.push(...chars);
         store.bonds.push(...bonds);
-        for (const [id, summary, entities, t] of facts) store.memories.push(memory(id, { summary, entities, turnIndex: t, importance: 0.6 }));
+        // 다섯째 칸(선택): 기억에 함께 적힌 회상 단서 등 — bare면 빼고 잰다 (단서가 없을 때의 최악)
+        for (const [id, summary, entities, t, extra] of facts) store.memories.push(memory(id, { summary, entities, turnIndex: t, importance: 0.6, ...(bare ? {} : (extra || {})) }));
         for (let i = 0; i < 20; i++) store.memories.push(memory(`f${i}`, { summary: filler(fillTopics[i % fillTopics.length]), entities: [chars[0].name], turnIndex: 60 + i * 2, importance: 0.5 }));
     }, qs, scene);
 }
@@ -291,4 +293,102 @@ await langSet('F2 (중국어, 바깥에서 만든 물음)', {
         ['晴晴把地窖钥匙放哪儿了？', 'key2', '별명·호칭'], ['师傅早上在后院练什么？', 'sword2', '별명·호칭'], ['阿墨喜欢喝什么酒？', 'tea2', '별명·호칭'], ['队长在桌上留了什么信？', 'letter2', '별명·호칭'],
     ],
     scene: '细雨打湿了青石街。苏晴撑着油纸伞，和旅人并肩安静地走着。',
+});
+
+// 요약 언어(영어) ≠ 채팅 언어 — 기억 글은 영어, 회상 단서(recall)는 채팅 언어로 적혔다고 본다. "단서 없음"은 그 단서마저 없을 때
+const X1 = {
+    chars: [{ id: 'c1', name: '서윤', aliases: ['윤'] }, { id: 'c2', name: '지호', aliases: [] }, { id: 'c3', name: '하은', aliases: [] }, { id: 'c4', name: '민재', aliases: ['선배'] }],
+    bonds: [{ id: 'b1', from: '여행자', to: '민재', log: [{ turn: 2, stage: 'trusted senior', calls: '선배' }], disabled: false }],
+    facts: [
+        ['locket', '서윤 dropped a silver locket into the fountain at dusk', ['서윤'], 4, { hints: ['은목걸이', '분수대', '목걸이 어디 갔어?'] }],
+        ['key', '지호 hid the greenhouse spare key under a clay pot', ['지호'], 8, { hints: ['온실 열쇠', '화분 밑', '예비 열쇠'] }],
+        ['allergy', '하은 breaks out in hives whenever she eats walnuts', ['하은'], 12, { hints: ['호두 알레르기', '두드러기', '못 먹는 음식'] }],
+        ['violin', '민재 practiced a broken cello in the empty auditorium', ['민재'], 16, { hints: ['첼로', '강당', '악기 연습'] }],
+        ['vow', '서윤 promised to meet the traveler at the clock tower on New Year', ['서윤'], 20, { hints: ['시계탑', '새해 약속', '다시 만나기로'] }],
+        ['debt', '지호 owes the bookshop owner fifty silver coins', ['지호'], 24, { hints: ['서점 빚', '은화', '얼마 빌렸지?'] }],
+        ['quarrel', '서윤 and 하은 argued fiercely over the missing ledger', ['서윤', '하은'], 28, { hints: ['장부', '크게 싸움', '다툼'] }],
+        ['scar', '민재 got a long scar across his palm from a broken lantern', ['민재'], 32, { hints: ['손바닥 흉터', '깨진 등불', '다친 곳'] }],
+        ['letter', '하은 burned an unsigned letter in the fireplace', ['하은'], 36, { hints: ['편지 태움', '벽난로', '익명 편지'] }],
+        ['cat', '서윤 feeds a stray ginger cat behind the bakery', ['서윤'], 40, { hints: ['길고양이', '치즈냥', '빵집 뒤'] }],
+        ['poison', '지호 bought dried nightshade from a traveling peddler', ['지호'], 44, { hints: ['독초', '보부상', '뭘 샀더라'] }],
+        ['escape', '민재 fled the manor guards through the cellar tunnel', ['민재'], 48, { hints: ['지하 통로', '도망', '경비병 피함'] }],
+    ],
+    filler: (t) => `서윤 and the traveler walked along the canal discussing the ${t}`, fillTopics: ['rain', 'clouds', 'evening', 'bridge', 'tea'],
+    qs: [
+        ['서윤이가 분수대에 빠뜨린 목걸이 기억나?', 'locket', '단서'], ['온실 예비 열쇠 어디 숨겼더라?', 'key', '단서'], ['하은이가 먹으면 두드러기 나는 게 뭐야?', 'allergy', '단서'],
+        ['선배가 강당에서 연습하던 악기 뭐였지?', 'violin', '호칭+단서'], ['윤이랑 새해에 시계탑에서 보기로 한 약속', 'vow', '별명+개념'], ['지호가 서점에 빚진 돈 얼마였지?', 'debt', '개념+단서'],
+        ['서윤이랑 하은이 왜 싸웠던 거야?', 'quarrel', '개념'], ['민재 손바닥 흉터 왜 생긴 거야?', 'scar', '개념+단서'], ['하은이가 벽난로에서 태운 편지 말이야', 'letter', '개념+단서'],
+        ['서윤이가 빵집 뒤에서 챙기는 길고양이', 'cat', '단서'], ['지호가 보부상한테 독초 산 일 기억나?', 'poison', '개념+단서'], ['선배가 경비병 피해 어디로 달아났어?', 'escape', '호칭+개념'],
+    ],
+    scene: '서윤은 운하 다리 난간에 기대 빗소리를 들었다. 여행자가 우산을 기울여 그녀 옆에 섰다.',
+};
+await langSet('X1 (한국어 물음 · 영어 기억, 단서 있음)', X1);
+await langSet('X1- (한국어 물음 · 영어 기억, 단서 없음)', { ...X1, bare: true });
+const X2 = {
+    chars: [{ id: 'c1', name: '結衣', aliases: ['ゆい'] }, { id: 'c2', name: '翔', aliases: [] }, { id: 'c3', name: '凛', aliases: [] }, { id: 'c4', name: '悠真', aliases: ['ユウマ'] }],
+    bonds: [{ id: 'b1', from: '旅人', to: '悠真', log: [{ turn: 2, stage: 'trusted mentor', calls: '師匠' }], disabled: false }],
+    facts: [
+        ['compass', '結衣 gifted the traveler an old brass compass at the station', ['結衣'], 4, { hints: ['真鍮の羅針盤', '駅でもらった', 'コンパス'] }],
+        ['key', '翔 locked the attic trunk with a rusted iron padlock', ['翔'], 8, { hints: ['屋根裏', '南京錠', '錆びた鍵'] }],
+        ['tea', '凛 hates bitter green tea and prefers warm honey milk', ['凛'], 12, { hints: ['蜂蜜ミルク', '苦いお茶', '好きな飲み物'] }],
+        ['flute', '悠真 plays a bamboo flute on the shrine steps at dusk', ['悠真'], 16, { hints: ['竹笛', '神社の階段', '夕暮れの音'] }],
+        ['vow', '結衣 swore to return to the northern cape before spring', ['結衣'], 20, { hints: ['北の岬', '春までの約束', '戻る誓い'] }],
+        ['quarrel', '翔 and 凛 argued fiercely over the stolen map', ['翔', '凛'], 24, { hints: ['地図の口論', '激しく喧嘩'] }],
+        ['heal', "凛 bandaged 悠真's bruised ribs after the ambush", ['凛', '悠真'], 28, { hints: ['包帯', '肋骨の手当', '襲撃の怪我'] }],
+        ['prison', '翔 was locked in the watchtower cell on false charges', ['翔'], 32, { hints: ['見張り塔の牢', '冤罪で監禁'] }],
+        ['cat', '結衣 keeps a white kitten named Yuki in her studio', ['結衣'], 36, { hints: ['白猫ユキ', 'アトリエの子猫'] }],
+        ['letter', "凛 hid her brother's farewell letter inside a dictionary", ['凛'], 40, { hints: ['兄の手紙', '辞書の中', '書き置き'] }],
+        ['steal', "A thief snatched 結衣's embroidered pouch at the festival", ['結衣'], 44, { hints: ['祭りのスリ', '刺繍の巾着', '盗まれた'] }],
+        ['escape', '悠真 escaped the border patrol by crossing the frozen river', ['悠真'], 48, { hints: ['凍った川', '国境警備から逃走'] }],
+    ],
+    filler: (t) => `結衣 and the traveler strolled along the canal talking about the ${t}`, fillTopics: ['rain', 'wind', 'lanterns', 'clouds', 'autumn'],
+    qs: [
+        ['結衣が駅でくれた羅針盤どこ？', 'compass', '단서'], ['翔が屋根裏のトランクにかけた南京錠は？', 'key', '단서'], ['凛が好きな甘い飲み物って何？', 'tea', '단서'],
+        ['師匠が神社の階段で吹く竹笛のこと覚えてる？', 'flute', '호칭+단서'], ['ゆいと春までに北の岬で交わした約束', 'vow', '별명+개념'], ['翔と凛はどうして喧嘩したの？', 'quarrel', '개념'],
+        ['ユウマが襲撃されたとき手当したのは誰？', 'heal', '별명+개념'], ['翔が監禁されていた見張り塔の牢ってどこ？', 'prison', '개념+단서'], ['結衣のアトリエにいる白猫の名前は？', 'cat', '단서'],
+        ['凛が辞書に隠した兄の手紙はどこ？', 'letter', '개념+단서'], ['祭りで結衣の巾着を盗んだ泥棒のこと', 'steal', '개념+단서'], ['師匠が凍った川を渡って逃げた時の話', 'escape', '호칭+개념'],
+    ],
+    scene: '運河に細い雨が降っていた。結衣は橋の手すりに手を置き、旅人と静かに水面を見ていた。',
+};
+await langSet('X2 (일본어 물음 · 영어 기억, 단서 있음)', X2);
+await langSet('X2- (일본어 물음 · 영어 기억, 단서 없음)', { ...X2, bare: true });
+await langSet('T1 (번체 중국어)', {
+    chars: [{ id: 'c1', name: '林書瑤', aliases: ['瑤瑤'] }, { id: 'c2', name: '陳遠', aliases: [] }, { id: 'c3', name: '許嵐', aliases: ['阿嵐'] }, { id: 'c4', name: '張衡', aliases: [] }],
+    bonds: [{ id: 'b1', from: '旅人', to: '張衡', log: [{ turn: 2, stage: '可靠的前輩', calls: '前輩' }], disabled: false }],
+    facts: [
+        ['lamp', '林書瑤在燈塔頂層點亮了一盞舊銅燈', ['林書瑤'], 4], ['key', '陳遠把鐵門鑰匙藏在書櫃後面的暗格裡', ['陳遠'], 8],
+        ['soup', '許嵐冬天總會在廚房煮熱騰騰的麵湯', ['許嵐'], 12], ['sword', '張衡將祖傳的長劍鎖在木箱裡保存', ['張衡'], 16],
+        ['vow', '林書瑤發誓明年春天一定要回到海島', ['林書瑤'], 20], ['quarrel', '陳遠和許嵐為了帳本裡的銀兩大吵了一架', ['陳遠', '許嵐'], 24],
+        ['heal', '林書瑤替受傷的張衡換了藥並重新包紮', ['林書瑤', '張衡'], 28], ['prison', '陳遠曾被關在城東的地牢裡三天三夜', ['陳遠'], 32],
+        ['book', '許嵐每晚都在閣樓裡抄寫古書', ['許嵐'], 36], ['letter', '張衡在鐘錶店留下了一封寫給旅人的密信', ['張衡'], 40],
+        ['steal', '小偷在集市橋邊偷走了林書瑤的錢袋', ['林書瑤'], 44], ['escape', '張衡趁著雷雨夜從後窗逃出了莊園', ['張衡'], 48],
+    ],
+    filler: (t) => `林書瑤和旅人沿著石橋散步，聊著${t}`, fillTopics: ['細雨', '晚風', '茶香', '雲層', '鐘聲'],
+    qs: [
+        ['林書瑤在燈塔點亮的是什麼燈？', 'lamp', '번체'], ['陈远把铁门钥匙藏在书柜哪里了？', 'key', '간체→번체'], ['許嵐冬天在廚房煮什麼湯？', 'soup', '번체'],
+        ['張衡把長劍鎖在哪個箱子裡？', 'sword', '번체'], ['瑤瑤發誓明年春天要去哪裡？', 'vow', '별명'], ['陈远和许岚为什么争吵？', 'quarrel', '간체+개념'],
+        ['是誰幫張衡治療傷口的？', 'heal', '개념'], ['陈远曾经被关在哪个监狱里？', 'prison', '간체+개념'], ['阿嵐每晚在閣樓抄寫什麼書？', 'book', '별명'],
+        ['前輩在鐘錶店留下的密信是什麼？', 'letter', '호칭'], ['集市橋邊誰偷了林書瑤的錢袋？', 'steal', '번체'], ['前輩是怎麼從莊園逃跑的？', 'escape', '호칭+개념'],
+    ],
+    scene: '細雨落在石橋上，晚風帶著茶香。林書瑤靠在欄杆旁，旅人安靜地站在她身邊。',
+});
+await langSet('M1 (섞인 말 — 한국어 · 일본어 속 로마자 이름)', {
+    chars: [{ id: 'c1', name: 'Elena', aliases: ['Lena'] }, { id: 'c2', name: 'Marcus', aliases: [] }, { id: 'c3', name: 'Iris', aliases: [] }, { id: 'c4', name: 'Theo', aliases: [] }],
+    bonds: [{ id: 'b1', from: '여행자', to: 'Marcus', log: [{ turn: 2, stage: '믿는 선장', calls: 'Cap' }], disabled: false }],
+    facts: [
+        ['ko_ring', 'Elena가 부두에서 여행자에게 은반지를 건넸다', ['Elena'], 4], ['ko_key', 'Marcus의 외투 안주머니에 등대 창고 열쇠가 들어 있다', ['Marcus'], 8],
+        ['ko_tea', 'Iris에게는 뜨거운 꿀우유를 따로 챙겨 준다', ['Iris'], 12], ['ko_map', 'Theo랑 여행자가 지하 수로 지도를 같이 그렸다', ['Theo'], 16],
+        ['ko_fight', 'Elena와 Iris가 항구 시장에서 크게 다투었다', ['Elena', 'Iris'], 20], ['ko_vow', 'Marcus가 첫눈이 오면 북쪽 항구로 떠나기로 약속했다', ['Marcus'], 24],
+        ['ja_watch', 'Elenaは古い懐中時計を机の引き出しに隠した', ['Elena'], 28], ['ja_scar', 'Marcusの左肩には嵐の夜の火傷の跡がある', ['Marcus'], 32],
+        ['ja_herb', 'Irisは薬棚に乾燥ラベンダーをしまっている', ['Iris'], 36], ['ja_violin', 'Theoは雨の夜に屋根裏でバイオリンを弾く', ['Theo'], 40],
+        ['ja_heal', 'Irisが負傷したTheoの腕に包帯を巻いた', ['Iris', 'Theo'], 44], ['ja_prison', 'Marcusは濡れ衣で地下牢に閉じ込められた', ['Marcus'], 48],
+    ],
+    filler: (t) => `Elena가 여행자와 항구를 걸으며 ${t} 이야기를 나눴다`, fillTopics: ['날씨', '바람', '저녁', '파도', '구름'],
+    qs: [
+        ['Elena가 부두에서 준 반지 기억나?', 'ko_ring', '한+영'], ['Cap 외투 주머니에 있는 창고 열쇠', 'ko_key', '한+호칭'], ['Iris가 좋아하는 꿀우유 말이야', 'ko_tea', '한+영'],
+        ['Theo랑 같이 그린 수로 지도 어디 있어?', 'ko_map', '한+영'], ['Lena랑 Iris 왜 싸웠어?', 'ko_fight', '한+별명'], ['Marcus랑 첫눈 오면 하기로 한 약속', 'ko_vow', '한+영'],
+        ['Elenaが引き出しに隠した懐中時計は？', 'ja_watch', '일+영'], ['Marcusの左肩の火傷ってどうしたの？', 'ja_scar', '일+영'], ['Irisが薬棚にしまってるラベンダー', 'ja_herb', '일+영'],
+        ['Theoは雨の夜に屋根裏で何を弾くの？', 'ja_violin', '일+영'], ['Theoの腕を手当したのは誰？', 'ja_heal', '일+개념'], ['Marcusが監禁された地下牢はどこ？', 'ja_prison', '일+개념'],
+    ],
+    scene: 'Elena가 난간에 기대 바다를 바라보았다. 바람이 불었고 여행자는 그녀 옆에 섰다.',
 });

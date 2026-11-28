@@ -42,7 +42,7 @@ import { NARRATOR_PERSPECTIVE, isSharedPerspective, hasChatPerspective, resolveP
 import { showArchiveLibrary } from './library-ui.mjs';
 import * as Ties from './ties-engine.mjs';
 import { yeonHtml, yeonView, tiePickerHtml, typeChipsHtml, typeName, clampZoom } from './yeon-view.mjs';
-import { withDeadline, parsePhraseList, stripPhrases, hasPhrase, findRepeatedPhrases, wordStem, looseStem, pickBundleValues, resolveBundleName, switchBundle, saveBundle, deleteBundle, renameBundle, exportBundle, parseBundleFile, diffStableEntries, shouldRefreeze, createActivityLog, findRivalExtensions, splitClosedLine, sleepStaleThreads, pickPledges, stripOpenLines, THREAD_KINDS, recallCooldown, pushRecallHistory, isEndedValue, ungroundedFigures, roughTokens, noteUsage, usageTotals, groundedIn, soundsHedged, noteThreadSightings, threadTouched, rareQueryWords, findConflicts, looksRefused, looksBlocked, strayHidden, pickTranscript, transcriptTerms, crossScriptPairs, crossScriptSame, pickPledgesToCheck, ensembleLabel, firstOf, listOf, joinValue, clampScore, splitPair, jsonRepairVariants, normalizeRecordLabels, BOND_KINDS, bondKindOf, summaryGaps, spanWindows, TIC_TYPES, readTicPicks, keptMilestones, sameTrait, mergeTraits, startsWithFieldLabel, looksLikeAlias, looksLikeAge, storyOnly, endsMidSentence, mergeLoss, sameText, cardVoicesMany, contentWords, verbStems, conceptTags, wordsOf, jaStems, cjkStop, enStems, enStop } from './craft-engine.mjs';
+import { withDeadline, parsePhraseList, stripPhrases, hasPhrase, findRepeatedPhrases, wordStem, looseStem, pickBundleValues, resolveBundleName, switchBundle, saveBundle, deleteBundle, renameBundle, exportBundle, parseBundleFile, diffStableEntries, shouldRefreeze, createActivityLog, findRivalExtensions, splitClosedLine, sleepStaleThreads, pickPledges, stripOpenLines, THREAD_KINDS, recallCooldown, pushRecallHistory, isEndedValue, ungroundedFigures, roughTokens, noteUsage, usageTotals, groundedIn, soundsHedged, noteThreadSightings, threadTouched, rareQueryWords, findConflicts, looksRefused, looksBlocked, strayHidden, pickTranscript, transcriptTerms, crossScriptPairs, crossScriptSame, pickPledgesToCheck, ensembleLabel, firstOf, listOf, joinValue, clampScore, splitPair, jsonRepairVariants, normalizeRecordLabels, BOND_KINDS, bondKindOf, summaryGaps, spanWindows, TIC_TYPES, readTicPicks, keptMilestones, sameTrait, mergeTraits, startsWithFieldLabel, looksLikeAlias, looksLikeAge, storyOnly, endsMidSentence, mergeLoss, sameText, cardVoicesMany, contentWords, verbStems, conceptTags, wordsOf, jaStems, cjkStop, enStems, enStop, isNoSpaceCjk, toSimp } from './craft-engine.mjs';
 import { isOocText, looksOocReply, attributeQuote, addressTermsIn, tallyAddress, pickAddressLines, personNowLine } from './stage-engine.mjs';
 import { parseStoryDate, storyDatesOf, isIsoDate, trackerText, trackerLineOf, pickBeats, beatLines, veilLeaks } from './calendar-engine.mjs';
 import { peopleList, matchPerson, personPage, nameSuggestions, planMerge, pairKey, WIPE_KINDS, wipeCounts, NOW_ORDER, strayPeople, mentions } from './people-engine.mjs';
@@ -292,12 +292,12 @@ const PAST_DEFAULT_PROMPT_HASHES = {
 };
 
 const LANG_DIRECTIVES = {
-    auto: 'LANGUAGE: Write the output in the same language as the chat.',
-    ko: 'LANGUAGE (MANDATORY): Write ALL output in Korean (한국어). Quoted dialogue ("quote", "line") and the "said" snippets stay copied character for character in their original language — they are checked against the source text, and a translated one is thrown away.',
-    en: 'LANGUAGE (MANDATORY): Write ALL output in English. Quoted dialogue ("quote", "line") and the "said" snippets stay copied character for character in their original language — they are checked against the source text, and a translated one is thrown away. NAMES ARE NOT TRANSLATED: every proper name — people, places, factions — stays in the exact spelling already on file, in its original script. Never romanize or transliterate a name.',
-    ja: 'LANGUAGE (MANDATORY): Write ALL output in Japanese (日本語). Quoted dialogue ("quote", "line") and the "said" snippets stay copied character for character in their original language — they are checked against the source text, and a translated one is thrown away. NAMES ARE NOT TRANSLATED: every proper name stays in the exact spelling already on file, in its original script.',
-    zh: 'LANGUAGE (MANDATORY): Write ALL output in Chinese (中文), in the same script as the chat (Simplified or Traditional). Quoted dialogue ("quote", "line") and the "said" snippets stay copied character for character in their original language — they are checked against the source text, and a translated one is thrown away. NAMES ARE NOT TRANSLATED: every proper name stays in the exact spelling already on file, in its original script.',
-    hybrid: 'LANGUAGE (MANDATORY, HYBRID MODE): Write narrative/summary text in English, but keep ALL quoted dialogue and the "said" snippets verbatim in their ORIGINAL language — never translate them. NAMES ARE NOT TRANSLATED EITHER: every proper name — people, places, factions — stays in the exact spelling the story and the cast list use, in its original script. Romanizing a name splits one character into two records that then drift apart; the English is for sentences, never for names.',
+    auto: 'LANGUAGE: Write the output in the main language of the chat. A few stray words in another language (a model glitch, a borrowed term) do not change it.',
+    ko: 'LANGUAGE (MANDATORY): Write ALL output in Korean (한국어). Quoted dialogue ("quote", "line") and the "said" snippets stay copied character for character in their original language — they are checked against the source text, and a translated one is thrown away. The "recall" cues stay in the chat\'s own language too, so later chat messages can find the memory.',
+    en: 'LANGUAGE (MANDATORY): Write ALL output in English. Quoted dialogue ("quote", "line") and the "said" snippets stay copied character for character in their original language — they are checked against the source text, and a translated one is thrown away. The "recall" cues stay in the chat\'s own language too, so later chat messages can find the memory. NAMES ARE NOT TRANSLATED: every proper name — people, places, factions — stays in the exact spelling already on file, in its original script. Never romanize or transliterate a name.',
+    ja: 'LANGUAGE (MANDATORY): Write ALL output in Japanese (日本語). Quoted dialogue ("quote", "line") and the "said" snippets stay copied character for character in their original language — they are checked against the source text, and a translated one is thrown away. The "recall" cues stay in the chat\'s own language too, so later chat messages can find the memory. NAMES ARE NOT TRANSLATED: every proper name stays in the exact spelling already on file, in its original script.',
+    zh: 'LANGUAGE (MANDATORY): Write ALL output in Chinese (中文), in the same script as the chat (Simplified or Traditional). Quoted dialogue ("quote", "line") and the "said" snippets stay copied character for character in their original language — they are checked against the source text, and a translated one is thrown away. The "recall" cues stay in the chat\'s own language too, so later chat messages can find the memory. NAMES ARE NOT TRANSLATED: every proper name stays in the exact spelling already on file, in its original script.',
+    hybrid: 'LANGUAGE (MANDATORY, HYBRID MODE): Write narrative/summary text in English, but keep ALL quoted dialogue and the "said" snippets verbatim in their ORIGINAL language, and write the "recall" cues in the chat\'s language — never translate them. NAMES ARE NOT TRANSLATED EITHER: every proper name — people, places, factions — stays in the exact spelling the story and the cast list use, in its original script. Romanizing a name splits one character into two records that then drift apart; the English is for sentences, never for names.',
 };
 
 /* ============================================================
@@ -501,7 +501,7 @@ function languageDirective() {
  */
 function languageTail() {
     const lang = getSettings().summaryLanguage;
-    return lang && lang !== 'auto' && LANG_DIRECTIVES[lang] ? `\n\n(${LANG_DIRECTIVES[lang]} This holds even where the material above is in another language: translate it, never copy sentences over — except the verbatim fields named above and proper names.)` : '';
+    return lang && lang !== 'auto' && LANG_DIRECTIVES[lang] ? `\n\n(${LANG_DIRECTIVES[lang]} This holds even where the material above is in another language: translate it, never copy sentences over — except the verbatim fields named above, the "recall" cues, and proper names.)` : '';
 }
 
 /** 이벤트/아이템 추적이 켜졌을 때 사서 프롬프트에 덧붙일 지시 */
@@ -663,9 +663,9 @@ function getStore() {
         s.lexiconRev = 5;
     }
     // 내장 벡터에 줄기 조각이 생겼다 (v2.17) — 저장된 기억 벡터를 한 번 다시 만든다 (모델 호출 없음)
-    // v2: 용언 줄기가 내장 문장 벡터의 조각에 들어갔다 · v3: 줄기 규칙을 더했다 · v4: 일본어 · 중국어를 낱말로 쪼갠다 — 저장된 벡터를 한 번 다시 만든다 (모델 호출 없음)
-    if ((s.vecRev || 0) < 4 && s.memories.length) { rebuildLocalVectors(s); s.vecRev = 4; }
-    else if (!s.vecRev) s.vecRev = 4;
+    // v2: 용언 줄기가 내장 문장 벡터의 조각에 들어갔다 · v3: 줄기 규칙을 더했다 · v4: 일본어 · 중국어를 낱말로 쪼갠다 · v5: 번체를 간체로 맞춘다 — 저장된 벡터를 한 번 다시 만든다 (모델 호출 없음)
+    if ((s.vecRev || 0) < 5 && s.memories.length) { rebuildLocalVectors(s); s.vecRev = 5; }
+    else if (!s.vecRev) s.vecRev = 5;
     return s;
 }
 
@@ -2042,14 +2042,18 @@ function cosine(a, b) {
 
 /** 기억을 색인할 때 임베딩·어휘 매칭에 쓰는 텍스트 (검색 힌트 포함) */
 function memoryIndexText(m) {
-    return `${m.summary} ${(m.entities || []).join(' ')} ${(m.tags || []).join(' ')} ${(m.hints || []).join(' ')}`;
+    // 요약 언어가 채팅 언어와 다르면(영어 요약 · 한국어 채팅) 원문 대사와 채팅 말 단서도 낱말 축에 넣는다 — 채팅 말로 물어도 찾게.
+    // 같은 말로 쓰인 채팅에서는 예전과 똑같다
+    const cues = Array.isArray(m.cues) && m.cues.length ? ` ${m.cues.join(' ')}` : '';
+    const quote = m.excerpt && !(m.tags || []).includes('episode_raw') && mainScript(m.excerpt) !== mainScript(m.summary) ? ` ${m.excerpt}` : '';
+    return `${m.summary} ${(m.entities || []).join(' ')} ${(m.tags || []).join(' ')} ${(m.hints || []).join(' ')}${cues}${quote}`;
 }
 
 /** 회상 큐 전용 텍스트 — 원문 인용·회상 단서·개체명만.
  * 요약은 사서의 문체로 쓰이지만 인용·단서는 장면의 언어 그대로라서,
  * 유저의 미래 입력과 닿는 결이 다르다. 요약 벡터에 뭉개지 않게 별도 축으로 둔다. */
 function memoryCueText(m) {
-    return `${m.excerpt || ''} ${(m.hints || []).join(' ')} ${(m.entities || []).join(' ')}`.trim();
+    return `${m.excerpt || ''} ${(m.hints || []).join(' ')} ${(m.cues || []).join(' ')} ${(m.entities || []).join(' ')}`.trim();
 }
 
 /* ============================================================
@@ -2446,7 +2450,7 @@ function embedQuery(text, L) {
 
 /** 질의를 2글자 조각 집합으로 (charGramOverlap용 — 회상 한 번에 한 번만 만든다) */
 function toCharGrams(text) {
-    const s = String(text || '').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '');
+    const s = toSimp(String(text || '').toLowerCase()).replace(/[^\p{L}\p{N}]+/gu, ''); // 번체 · 간체를 같은 조각으로
     const g = new Set();
     for (let i = 0; i < s.length - 1; i++) g.add(s.slice(i, i + 2));
     return g;
@@ -4054,7 +4058,7 @@ function entityKey(s) {
     let k = entityKeyCache.get(raw);
     if (k === undefined) {
         if (entityKeyCache.size > 4000) entityKeyCache.clear();
-        k = raw.normalize('NFKC').toLowerCase().replace(/[\s._\-'"`・·]+/g, '').trim(); // 전각 · 반각을 한 이름으로 (ｱﾘｱ = アリア)
+        k = toSimp(raw.normalize('NFKC').toLowerCase()).replace(/[\s._\-'"`・·]+/g, '').trim(); // 전각 · 반각, 번체 · 간체를 한 이름으로 (ｱﾘｱ = アリア, 陳遠 = 陈远)
         entityKeyCache.set(raw, k);
     }
     return k;
@@ -4333,7 +4337,7 @@ function upsertCharacter(store, c, turnIndex) {
     if (c.line && keepsLinesFor(existing)) addCharacterLine(existing, c.line, turnIndex);
     for (const rel of (c.relationships || [])) {
         const list = existing.relationships || (existing.relationships = []);
-        const idx = list.findIndex(r => r.target.toLowerCase() === rel.target.toLowerCase());
+        const idx = list.findIndex(r => entityKey(r.target) === entityKey(rel.target)); // 전각 · 반각 · 띄어쓰기만 다른 이름도 같은 사람
         if (idx >= 0) {
             const old = list[idx];
             // 바뀐 관계는 그 전 관계를 품고 있다 — 이 턴을 되돌리면 그 전 관계로 돌아간다 (같은 말이면 그대로)
@@ -4834,7 +4838,7 @@ function standingMemoriesNear(store, text, beforeTurn, cap = 8) {
     return store.memories
         .filter(m => STANDING_KINDS.has(m.kind) && !m.retired && !m.disabled && !m.manual && !m.pinned
             && (m.turnIndex || 0) > 0 && m.turnIndex < beforeTurn && !(m.tags || []).includes('episode_raw'))
-        .map(m => ({ m, near: cover(m.summary), named: (m.entities || []).some(e => String(e).length >= 2 && hay.includes(String(e).toLowerCase())) }))
+        .map(m => ({ m, near: cover(m.summary), named: (m.entities || []).some(e => String(e).length >= 2 && nameIn(hay, String(e).toLowerCase())) }))
         // 이름만 같다고 올리지 않는다 — 내용이 닿아야 한다 (이름이 겹치면 문턱을 조금 낮춘다)
         .filter(x => x.near >= (x.named ? 0.34 : 0.5))
         .sort((a, b) => (b.near + (b.m.shown || 0) * 0.02) - (a.near + (a.m.shown || 0) * 0.02))
@@ -5335,6 +5339,7 @@ async function commitTurns(mesIds, { silent = true, force = false, retry = 1 } =
     } else delete turn.beats;
 
     for (const m of rows) {
+        if (!m._episode) { const cues = crossLangCues(m, `${m.unit.userText || ''}\n${m.unit.text || ''}`, store); if (cues.length) m.cues = cues; }
         store.memories.push({
             id: uuidv4(),
             turnIndex: m.unit.turn.turnIndex,
@@ -5346,6 +5351,7 @@ async function commitTurns(mesIds, { silent = true, force = false, retry = 1 } =
             entities: (m.entities || []).map(e => canonEntityName(store, e)),
             tags: m.tags || [],
             hints: m.hints || [],
+            ...(m.cues?.length ? { cues: m.cues } : {}), // 요약 언어 ≠ 채팅 언어일 때만 — 채팅 말로 된 찾기 낱말
             visibility: m.visibility || 'public',
             owner: m.owner || null,
             knowers: (m.visibility || 'public') === 'public' ? [] : (m.knowers || []).map(e => canonEntityName(store, e)),
@@ -5902,20 +5908,41 @@ function mainScript(text) {
     const counts = [['hangul', n(/[가-힣]/g)], ['latin', n(/[a-z]/gi) / 3], ['cjk', n(/[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}]/gu)]];
     return counts.sort((a, b) => b[1] - a[1])[0][1] > 0 ? counts[0][0] : '';
 }
+/**
+ * 요약 언어가 채팅 언어와 다를 때(한국어 채팅 · 영어 요약) 기억에 채팅 말로 된 찾기 낱말을 몇 개 남긴다 (모델 호출 없음).
+ * 사서가 회상 단서를 채팅 말로 적었으면 그것으로 충분하다. 아니면 근거 글귀(said) · 원문 대사에서, 그래도 모자라면 그 교환 원문에서 고른다.
+ * 같은 말로 쓰인 채팅에서는 아무것도 남기지 않는다
+ */
+function crossLangCues(m, source, store) {
+    const src = mainScript(source);
+    if (!src || src === mainScript(m.summary)) return [];
+    const inSrc = (w) => mainScript(w) === src && !store.characters.some(c => cardNamedIn(String(w).toLowerCase(), c) && [...String(w)].length <= [...String(c.name)].length + 2);
+    if ((m.hints || []).filter(inSrc).length >= 2) return [];
+    // 활용된 용언("넣었다 · 入れた")과 대명사는 찾기 낱말로 쓸모가 적다 — 사람들이 묻는 것은 물건 · 곳 · 일의 이름이다
+    const nounish = (w) => !verbStems(w).length && !(/\p{Script=Han}/u.test(w) && jaStems(w).length) && !CUE_SKIP.has(w);
+    const evidence = [...contentWords(`${m.said || ''} ${m.excerpt || ''}`)].filter(w => inSrc(w) && nounish(w));
+    if (evidence.length >= 3) return evidence.slice(0, 6);
+    // 그래도 모자라면 그 교환 원문에서 나온 차례대로 (답 글을 먼저 — 일어난 일이 거기 적힌다)
+    const extra = [...contentWords(source.split('\n').reverse().join('\n'))].filter(w => inSrc(w) && nounish(w) && !evidence.includes(w) && [...w].length >= 2);
+    return [...evidence, ...extra].slice(0, 6);
+}
+const CUE_SKIP = new Set(['그', '그녀', '그는', '그들', '우리', '나', '너', '당신', '자신', '여기', '거기', '저기', '지금', '그때', '이제', '오늘', '정말', '진짜', '조금', '다시', '모두', '서로', '무엇', '누구', 'she', 'her', 'his', 'him', 'they', 'them', 'here', 'there']);
 /** 합치기 · 접기로 사라진 사람 — 넣은 글 둘 이상에(또는 기준 글에) 나온 카드 인물이 새 글 어디에도 없으면 (모델 호출 없음) */
 const NAME_TAIL = '(?:은|는|이|가|을|를|의|에|에서|에게서|한테서|도|만|와|과|랑|이랑|하고|에게|한테|께|처럼|보다|까지|부터|로|으로|네|씨|님|군|양|아|야|이야|이가|이는|이를|이의|이와|이도|이하고|이에게|이한테|이처럼|이보다|이네)?';
 /** 글에 그 이름이 나오는가 — 두 글자 이하 이름은 낱말 경계를 본다 ("보라"가 "보라색 · 바라보라"에, "유리"가 "유리창"에 걸리지 않게. 뒤에 붙는 조사는 허용) */
+const nameInRx = new Map();
+const nameRx = (key, make) => { let rx = nameInRx.get(key); if (!rx) { if (nameInRx.size > 600) nameInRx.clear(); rx = make(); nameInRx.set(key, rx); } return rx; };
 function nameIn(hay, name) {
     if (!hay || !name) return false;
     const esc = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     // 로마자 이름: 넉 자 이상은 그대로, 짧은 것("al · li")은 낱말 경계로 ("finally · like" 속에 걸리지 않게)
-    if (/^[a-z0-9 ]+$/.test(name)) return name.length >= 4 ? hay.includes(name) : new RegExp(`(?:^|[^a-z0-9])${esc}(?![a-z0-9])`).test(hay);
+    if (/^[a-z0-9 ]+$/.test(name)) return name.length >= 4 ? hay.includes(name) : nameRx(`l:${name}`, () => new RegExp(`(?:^|[^a-z0-9])${esc}(?![a-z0-9])`)).test(hay);
     // 한 글자 한자 이름("蓮 · 葵")은 다른 한자 낱말 속("睡蓮")이 아닐 때만
-    if (/^\p{Script=Han}$/u.test(name)) return new RegExp(`(?:^|[^\\p{Script=Han}])${esc}(?:$|[^\\p{Script=Han}])`, 'u').test(hay);
+    if (/^\p{Script=Han}$/u.test(name)) return nameRx(`h:${name}`, () => new RegExp(`(?:^|[^\\p{Script=Han}])${esc}(?:$|[^\\p{Script=Han}])`, 'u')).test(hay);
     // 한자 · 가나 이름은 띄어 쓰지 않는 글에 붙어 나온다 (「美奈は」 · 「李明笑了」) — 낱말 경계를 볼 수 없어 그대로 찾는다
     if ([...name].length >= 3 || /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}]/u.test(name)) return hay.includes(name);
     // 조사가 둘 겹쳐도 ("보라랑은 · 리아한테도") 그 사람이다
-    return new RegExp(`(?:^|[^\\p{L}\\p{N}])${esc}${NAME_TAIL}(?:은|는|도|만|의|요)?(?![\\p{L}\\p{N}])`, 'u').test(hay);
+    return nameRx(`k:${name}`, () => new RegExp(`(?:^|[^\\p{L}\\p{N}])${esc}${NAME_TAIL}(?:은|는|도|만|의|요)?(?![\\p{L}\\p{N}])`, 'u')).test(hay);
 }
 /** 인물 카드의 이름 · 별명이 글에 나오는가 — 두 글자 이하는 낱말 경계로, 한 글자 한글 별명도 ("보라"가 "보라색"에, "린"이 "기린"에 걸리지 않게) */
 function cardNamedIn(hay, c) {
@@ -6751,12 +6778,13 @@ function knowsMemory(m, auth) {
 function raisedDirectly(m, queryLower, names = []) {
     const own = (m.entities || []).map(e => String(e).toLowerCase());
     const isName = (t) => [...names, ...own].some(n => n.includes(t) || t.includes(n));
+    const hay = toSimp(queryLower); // 낱말은 간체로 쪼개졌다 — 번체로 쓴 물음도 같은 글자로 견준다
     let hits = 0;
     for (const t of new Set(wordsOf(m.summary).filter(w => [...w].length >= 2 && !cjkStop(w)))) {
         const latin = /^[a-z0-9]+$/.test(t);
         if ((latin && t.length < 4) || isName(t)) continue;
         const stem = !latin && t.length >= 3 ? t.slice(0, t.length - 1) : t;
-        if (queryLower.includes(stem) && ++hits >= 2) return true;
+        if (hay.includes(stem) && ++hits >= 2) return true;
     }
     return false;
 }
@@ -6852,7 +6880,7 @@ async function retrieveMemories(queryText, recentUserTexts, sceneText = '') {
     // "그래서 뭐야?" · "진짜 왜?"처럼 맞장구 말만 있는 물음은 짧은 입력 그대로 — 내용 낱말이 하나는 있어야 한다.
     // 띄어 쓰지 않는 일본어 · 중국어는 "指輪はどこ？" · "戒指在哪里？"처럼 내용 낱말 하나에 의문 표지면 온전한 물음이다
     const askWords = [...contentWords(queryText)], realAsk = askWords.filter(w => !ASK_FILLER.has(w));
-    const noSpace = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}]/u.test(bare) && !/[가-힣]/.test(bare);
+    const noSpace = isNoSpaceCjk(bare);
     const pointedAsk = asks && realAsk.length >= 1 && (noSpace || askWords.length >= 2);
     // 물음이 아닌 짧은 입력: 일본어 · 중국어는 여섯 자 미만("うん · そうだね · 嗯 · 好的")만, 띄어 쓰는 말은 예전 기준
     const shortQ = tune && !!String(sceneText || '').trim() && !intent && !pointedAsk && (noSpace ? bare.length < 6 : (bare.length < 12 || queryTokens.size < 3));
@@ -6904,14 +6932,14 @@ async function retrieveMemories(queryText, recentUserTexts, sceneText = '') {
     const presentEntities = new Set();
     for (const c of store.characters || []) {
         if (c.disabled) continue;
-        if (cardNamedIn(presenceText, c)) presentEntities.add(String(c.name).toLowerCase());
+        if (cardNamedIn(presenceText, c)) presentEntities.add(entityKey(c.name));
     }
 
     // 드문 낱말: 입력의 낱말 가운데 서고 전체에서 몇 기억에만 나오는 것 — 그 기억을 가리키는 강한 단서
-    const indexLower = new Map(active.map(m => [m.id, memoryIndexText(m).toLowerCase()]));
+    const indexLower = new Map(active.map(m => [m.id, toSimp(memoryIndexText(m).toLowerCase())])); // 드문 낱말(간체로 쪼갠 것)과 같은 글자로
     // 드문 낱말: 기억 글에서도, 대화 원문에서도 드물어야 한다 — 기억 한 곳에만 적힌 "받은 · 했던"이 직접 가리킨 것으로 잡혀 엉뚱한 기억을 밀어 올렸다
     // 이름의 일부일 뿐인 말("리아"가 "아리아" 속에)은 드문 낱말로 치지 않는다 — 그 이름이 든 기억이 모두 "직접 가리킴"이 됐다 (이름 · 별명 자체는 인물 일치가 맡는다)
-    const allNames = [name1, name2, ...(store.characters || []).flatMap(c => [c.name, ...(c.aliases || [])])].map(n => String(n || '').toLowerCase()).filter(Boolean);
+    const allNames = [name1, name2, ...(store.characters || []).flatMap(c => [c.name, ...(c.aliases || [])])].map(n => toSimp(String(n || '').toLowerCase())).filter(Boolean);
     const isNameBit = (w) => { const st = looseStem(w); return allNames.some(n => n.includes(st) || n.includes(w)); };
     const rareWords = rareQueryWords(queryText, [...indexLower.values()]).filter(r => (lexW.wordDf.get(r.word) || 0) <= Math.max(2, lexW.n * 0.02) && !isNameBit(r.word));
     // 서고에 드문 말로 무언가를 콕 집어 물었으면("나침반 어디 뒀더라") 그 물음이 앞선다 — 장면을 닮은 흔한 기억이 끼어들지 않게
@@ -6927,7 +6955,10 @@ async function retrieveMemories(queryText, recentUserTexts, sceneText = '') {
     // 한 글자 이름씨("배 · 검 · 빚")가 붙어 쓴 겹낱말 끝("돛단배 · 장검")에 든 기억 — 드물 때만 드문 낱말처럼 친다
     const oneCharHits = new Map();
     // 한자 한 글자 이름씨도 같다 — 일본어 · 중국어 겹낱말은 뒤 글자가 머리다 ("船" ↔ "帆船", "伞" ↔ "雨伞")
-    const oneCharQuery = [...queryTokens].map(looseStem).filter(w => ((/^[가-힣]$/.test(w) && !ONE_CHAR_SKIP.has(w)) || (/^\p{Script=Han}$/u.test(w) && !cjkStop(w))) && !isNameBit(w));
+    // 드문 낱말로 이미 센 한 글자는 다시 세지 않는다 (일본어 · 중국어는 한 글자 한자도 내용 낱말이라 두 번 더해졌다). 때 · 크기 같은 흔한 한자는 빼고
+    const rareWordSet = new Set(rareWords.map(r => r.word));
+    const oneCharQuery = [...queryTokens].map(looseStem).filter(w => ((/^[가-힣]$/.test(w) && !ONE_CHAR_SKIP.has(w)) || (/^\p{Script=Han}$/u.test(w) && !cjkStop(w) && !CJK_ONE_CHAR_SKIP.has(w)))
+        && !isNameBit(w) && !rareWordSet.has(w));
     for (const ch of new Set(oneCharQuery)) {
         const han = /^\p{Script=Han}$/u.test(ch), script = han ? /^\p{Script=Han}+$/u : /^[가-힣]+$/;
         const ids = [];
@@ -6942,6 +6973,10 @@ async function retrieveMemories(queryText, recentUserTexts, sceneText = '') {
     }
     // 드문 낱말 · 드문 개념 묶음 · 한 글자 이름씨 가운데 하나라도 닿으면 무언가를 콕 집은 입력이다 ("카엘이 부르던 노래") — 장면 쪽(문맥 · 직전 장면 끝의 낱말)을 덜 믿는다. "응", "그래서?"에는 어느 것도 없어 그대로다
     const pointed = rareWords.length > 0 || rareConcepts.length > 0 || oneCharHits.size > 0;
+    // 물음에 사람 이름 말고 다른 내용(낱말 · 개념 · 한 글자 이름씨)이 있는가 — 같은 사람의 기억끼리 동점일 때 내용이 맞은 쪽이 이기게 쓴다
+    const topicWords = [...contentWords(queryText)].filter(w => !isNameBit(w) && !ASK_FILLER.has(w) && !HINT_FILLER.has(w));
+    const topicForms = topicWords.flatMap(w => [w, looseStem(w), ...verbStems(w), ...enStems(w), ...jaStems(w)]);
+    const hasTopic = topicWords.length > 0 || rareConcepts.length > 0 || oneCharHits.size > 0;
     if (pointed) sW = Math.min(sW, shortQ ? 0.55 : 0.35);
     // 의미 임베딩(API · 로컬)이 없으면 문맥 유사도는 내장 해시 벡터뿐이다 — 낱말 조각을 128칸에 접어 넣은 것이라, 아무 상관 없는 기억도 우연히 0.2~0.3을 받는다.
     // 그때는 같은 낱말을 겹침 없이 세는 낱말 축에 무게를 옮긴다. 맞장구("응")처럼 짧고 아무것도 콕 집지 않은 입력만 장면 문맥을 주 신호로 둔다
@@ -7039,11 +7074,12 @@ async function retrieveMemories(queryText, recentUserTexts, sceneText = '') {
         });
         // 장면 개체 사전확률: 질의에 이름은 없지만 지금 장면에 있는 인물과 얽힌 기억
         const presenceHit = !entityHit && presentEntities.size > 0
-            && (m.entities || []).some(e => presentEntities.has(String(e).toLowerCase()));
+            && (m.entities || []).some(e => presentEntities.has(keyOfEntity(e)));
         // 드문 낱말이 닿았는가 — 길고 드문 낱말 하나, 또는 드문 낱말 둘이면 "직접 가리킴"으로 친다
         const idxLower = indexLower.get(m.id) || '';
         const rareHits = rareWords.filter(r => { if (idxLower.includes(r.word)) return true; const st = looseStem(r.word); return st.length >= 2 && st !== r.word && idxLower.includes(st); });
-        const rareStrong = rareHits.length >= 2 || rareHits.some(r => r.word.length >= 3 && !/^[a-z0-9]+$/.test(r.word)) || rareHits.some(r => r.word.length >= 6);
+        // 한자 두 글자 낱말("勉強 · 治療 · 戒指")은 한국어 세 글자만큼 뜻이 좁다
+        const rareStrong = rareHits.length >= 2 || rareHits.some(r => (r.word.length >= 3 && !/^[a-z0-9]+$/.test(r.word)) || /^\p{Script=Han}{2,}$/u.test(r.word)) || rareHits.some(r => r.word.length >= 6);
         // 같은 개념 묶음 — 낱말은 달라도 같은 일을 말한다. 드문 낱말보다 조금 약하게, "직접 가리킴"으로는 치지 않는다
         const docWords = lexW.docs.get(m.id)?.words;
         const oneHits = oneCharHits.get(m.id) || [];
@@ -7077,11 +7113,14 @@ async function retrieveMemories(queryText, recentUserTexts, sceneText = '') {
         const quoteBonus = intent === 'detail' && m.excerpt ? 0.03 : 0;
         // 매듭지은 일은 직접 꺼내거나 옛일을 물을 때가 아니면 평소 회상의 자리를 조금 양보한다
         const settled = m.closed && !pastQuery && !direct && age > 8 ? 0.88 : 1;
+        // 물음에 내용이 있는데 이 기억은 사람 이름만 겹쳤다 — 같은 사람의 다른 기억이 이름과 우연한 겹침으로 내용이 맞은 기억을 이기지 않게 조금 뒤로
+        const topicHit = hintHit || rareHits.length > 0 || conceptHits.length > 0 || (!!docWords && topicForms.some(w => docWords.has(w)));
+        const nameOnly = entityHit && hasTopic && !topicHit ? 0.85 : 1;
         const score = (W.c * Math.max(0, cos) + W.lex * lex + W.imp * m.importance + W.rec * recency
-            + (entityHit ? 0.08 : 0) + (hintHit ? 0.07 : 0) + (presenceHit ? 0.05 : 0) + rareBoost + quoteBonus) * cool * era * settled * (m.retired ? 0.7 : 1);
+            + (entityHit ? 0.08 : 0) + (hintHit ? 0.07 : 0) + (presenceHit ? 0.05 : 0) + rareBoost + quoteBonus) * cool * era * settled * nameOnly * (m.retired ? 0.7 : 1);
         if (score < settings.minScore) continue;
         candidates.push({ m, score, vec });
-        trace.set(m.id, { reason: [rareHits.length && `드문 낱말: ${rareHits.map(r => r.word).join(', ')}`, conceptHits.length > oneHits.length && '같은 뜻의 말', oneHits.length && `한 글자 낱말: ${oneHits.map(r => r.word).join(', ')}`, cool < 0.8 && '연달아 실려 순서를 미룸', m.retired && '지나간 기억', gate < 0.8 && '어디에나 닮은 흔한 결이라 덜 믿음', era < 1 && '그때의 일이라 조금 뒤로', entityHit && '인물 일치', hintHit && '검색 힌트', presenceHit && '현재 장면의 인물', lex >= 0.035 && '어휘 일치', cos >= settings.minCosine && '문맥 유사도'].filter(Boolean).join(' · ') || '관련성 점수', score, mode: 'direct' });
+        trace.set(m.id, { reason: [rareHits.length && `드문 낱말: ${rareHits.map(r => r.word).join(', ')}`, conceptHits.length > oneHits.length && '같은 뜻의 말', nameOnly < 1 && '물음의 내용과 안 맞고 이름만 겹쳐 조금 뒤로', oneHits.length && `한 글자 낱말: ${oneHits.map(r => r.word).join(', ')}`, cool < 0.8 && '연달아 실려 순서를 미룸', m.retired && '지나간 기억', gate < 0.8 && '어디에나 닮은 흔한 결이라 덜 믿음', era < 1 && '그때의 일이라 조금 뒤로', entityHit && '인물 일치', hintHit && '검색 힌트', presenceHit && '현재 장면의 인물', lex >= 0.035 && '어휘 일치', cos >= settings.minCosine && '문맥 유사도'].filter(Boolean).join(' · ') || '관련성 점수', score, mode: 'direct' });
     }
 
     candidates.sort((a, b) => b.score - a.score);
@@ -7317,7 +7356,7 @@ function auditRecallEcho(mes, mesId = chat.indexOf(mes)) {
     if (Date.now() - audit.at > 30 * 60 * 1000) return; // 낡은 감사표는 폐기
     const replyLower = visibleProse(mes?.mes).toLowerCase();
     // 너무 짧은 응답은 판단 근거가 못 됨 — 띄어 쓰지 않는 일본어 · 중국어는 스무 자 남짓이면 두 문장이다
-    if (replyLower.length < (/[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}]/u.test(replyLower) && !/[가-힣]/.test(replyLower) ? 16 : 40)) return;
+    if (replyLower.length < (isNoSpaceCjk(replyLower) ? 16 : 40)) return;
 
     const store = getStore();
     let touched = false;
@@ -7330,6 +7369,7 @@ function auditRecallEcho(mes, mesId = chat.indexOf(mes)) {
         // 일본어 · 중국어는 쪼갠 낱말로, 기능어를 빼고 한자는 한 글자 내용어도 (한국어 · 영어는 예전 그대로 두 글자 이상의 줄기)
         const stems = (text) => wordsOf(text).flatMap(w => (/[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}]/u.test(w) && !/[가-힣]/.test(w)
             ? (cjkStop(w) || (!/\p{Script=Han}/u.test(w) && [...w].length < 2) ? [] : [jaStems(w)[0] || w])
+            : /^[a-z0-9]+$/.test(w) ? (w.length >= 3 && !enStop(w) ? [enStems(w)[0] || w] : []) // 영어는 굴절을 뗀 꼴로 ("lent" ↔ "lends")
             : [wordStem(w)].filter(t => [...t].length >= 2)));
         const toks = [...new Set(stems(`${m.summary} ${(m.entities || []).join(' ')}`))];
         if (toks.length < 3) continue;
@@ -7537,6 +7577,8 @@ function currentRecallQuery() {
  */
 /** 한 글자 이름씨로 겹낱말 끝을 맞출 때 쓰지 않는 말 (대명사 · 의존명사 · 부사 · 맞장구) */
 const ONE_CHAR_SKIP = new Set(['그', '이', '저', '것', '거', '걸', '게', '건', '수', '때', '데', '줄', '중', '말', '일', '한', '두', '세', '네', '더', '다', '안', '못', '왜', '뭐', '뭘', '날', '널', '난', '넌', '내', '너', '나', '또', '좀', '잘', '곧', '늘', '참', '꽤', '막', '딱', '응', '어', '아', '야', '음', '흠', '예', '채', '척', '듯', '뿐', '쯤', '셈', '바', '곳', '등', '분', '번', '개', '명', '살', '년', '월', '시', '쪽', '편', '측', '앞', '뒤', '위', '밑', '옆', '속', '밖']);
+/** 한 글자 한자로 겹낱말 끝을 맞출 때 쓰지 않는 말 (때 · 사람 · 크기 · 방향처럼 어디에나 붙는 글자) */
+const CJK_ONE_CHAR_SKIP = new Set(['日', '月', '年', '天', '夜', '时', '時', '人', '事', '手', '心', '目', '口', '家', '门', '門', '话', '話', '声', '聲', '色', '气', '氣', '力', '次', '回', '番', '点', '點', '面', '边', '邊', '方', '处', '處', '样', '樣', '种', '種', '大', '小', '老', '新', '旧', '舊', '好', '长', '長', '短', '高', '低', '多', '少', '早', '晚', '快', '慢', '冷', '热', '熱', '中', '前', '后', '後', '今', '本', '分', '物', '者', '子']);
 /** 물음이라도 이것만 있으면 무엇을 콕 집은 물음이 아니다 (맞장구 · 이음말 · 의문사) */
 const ASK_FILLER = new Set(['그래서', '그럼', '그러면', '근데', '그런데', '진짜', '정말', '아니', '그래', '뭐야', '뭔데', '뭐해', '뭐라고', '거야', '건데', '어째서', '왜요', '어떻게', '어디', '언제', '누구', '누가', '무엇', '무슨', '얼마',
     'really', 'well', 'then', 'okay', 'right', 'what', 'where', 'when', 'who', 'why', 'how', 'that', 'this', 'there',
@@ -10263,6 +10305,23 @@ function escapeHtml(str) {
     return String(str ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 
+/** 줄 목록의 단추 — 진짜 단추라 키보드(Tab · Enter · Space)와 화면 낭독기로도 쓴다 */
+function rowBtn(cls, icon, label) {
+    const l = escapeHtml(label);
+    return `<button type="button" class="memoria__icon-btn ${cls}" title="${l}" aria-label="${l}"><i class="fa-solid ${icon}" aria-hidden="true"></i></button>`;
+}
+
+/**
+ * 세계 · 요약 탭의 줄 하나 — 글 옆에 단추를 끼우면 글이 좁아져 읽기 답답하므로,
+ * 윗줄에 종류 · 이름 · 때(meta)와 단추를 두고 본문은 그 아래 폭 전체로 쓴다.
+ */
+function cardRow({ cls = '', attrs = '', head = '', meta = '', actions = [], body = '' }) {
+    return `<div class="memoria__row memoria__row--card${cls}" ${attrs}>
+        <div class="memoria__row-head"><span class="memoria__row-title">${head}${meta ? `<small class="memoria__row-meta">${meta}</small>` : ''}</span><span class="memoria__row-actions">${actions.filter(Boolean).join('')}</span></div>${body ? `
+        <div class="memoria__row-text">${body}</div>` : ''}
+    </div>`;
+}
+
 function updateStatusUI(activity) {
     const store = getStore();
     const settings = getSettings();
@@ -10603,13 +10662,13 @@ function renderItemsPanel() {
         return;
     }
     for (const it of [...store.items].sort((a, b) => (b.updatedTurn || 0) - (a.updatedTurn || 0))) {
-        list.append($(`
-            <div class="memoria__row${it.disabled ? ' is-resolved' : ''}${it.dormant != null ? ' is-dormant' : ''}" data-id="${it.id}">
-                <span class="memoria__row-text">${it.dormant != null ? '<span class="memoria__badge memoria-item-revive" role="button" tabindex="0" title="이야기에서 더는 의미가 없어져 주입에서 뺐습니다. 본문에 다시 나오면 돌아옵니다 — 누르면 바로 되살립니다">지나감 ↺</span> ' : ''}<b>${escapeHtml(it.name)}</b>${it.holder ? ` <small>(${escapeHtml(it.holder)})</small>` : ''}${it.meaning ? ` — ${escapeHtml(it.meaning)}` : ''}${it.status ? ` <small>[${escapeHtml(it.status)}]</small>` : ''}</span>
-                <i class="fa-solid ${it.disabled ? 'fa-eye-slash' : 'fa-eye'} memoria-item-toggle" title="${it.disabled ? '주입에 포함' : '주입에서 제외'}"></i>
-                <i class="fa-solid fa-trash memoria-item-delete" title="삭제"></i>
-            </div>
-        `));
+        list.append($(cardRow({
+            cls: `${it.disabled ? ' is-resolved' : ''}${it.dormant != null ? ' is-dormant' : ''}`, attrs: `data-id="${escapeHtml(it.id)}"`,
+            head: `${it.dormant != null ? '<span class="memoria__badge memoria-item-revive" role="button" tabindex="0" title="이야기에서 더는 의미가 없어져 주입에서 뺐습니다. 본문에 다시 나오면 돌아옵니다 — 누르면 바로 되살립니다">지나감 ↺</span>' : ''}<b>${escapeHtml(it.name)}</b>`,
+            meta: it.holder ? escapeHtml(it.holder) : '',
+            body: [it.meaning ? escapeHtml(it.meaning) : '', it.status ? `<small>[${escapeHtml(it.status)}]</small>` : ''].filter(Boolean).join(' '),
+            actions: [rowBtn('memoria-item-toggle', it.disabled ? 'fa-eye-slash' : 'fa-eye', it.disabled ? '주입에 포함' : '주입에서 제외'), rowBtn('memoria-item-delete', 'fa-trash', '삭제')],
+        })));
     }
 }
 
@@ -10625,13 +10684,11 @@ function renderDossierPanel() {
     }
     for (const d of store.dossier) {
         const chars = d.chunks.reduce((n, c) => n + c.length, 0);
-        list.append($(`
-            <div class="memoria__row${d.disabled ? ' is-resolved' : ''}" data-id="${d.id}">
-                <span class="memoria__row-text"><b>${escapeHtml(d.title)}</b> <small>(${d.chunks.length}개 대목 · ${chars.toLocaleString()}자)</small></span>
-                <i class="fa-solid ${d.disabled ? 'fa-eye-slash' : 'fa-eye'} memoria-dossier-toggle" title="${d.disabled ? '주입에 포함' : '주입에서 제외'}"></i>
-                <i class="fa-solid fa-trash memoria-dossier-delete" title="삭제"></i>
-            </div>
-        `));
+        list.append($(cardRow({
+            cls: d.disabled ? ' is-resolved' : '', attrs: `data-id="${escapeHtml(d.id)}"`,
+            head: `<b>${escapeHtml(d.title)}</b>`, meta: `${d.chunks.length}개 대목 · ${chars.toLocaleString()}자`,
+            actions: [rowBtn('memoria-dossier-toggle', d.disabled ? 'fa-eye-slash' : 'fa-eye', d.disabled ? '주입에 포함' : '주입에서 제외'), rowBtn('memoria-dossier-delete', 'fa-trash', '삭제')],
+        })));
     }
 }
 
@@ -10726,12 +10783,12 @@ function renderStatePanel() {
     $rules.empty();
     if (!store.worldRules.length) $rules.append('<div class="memoria__empty">기록된 캐논이 없습니다.</div>');
     for (const r of store.worldRules) {
-        $rules.append($(`
-            <div class="memoria__row" data-id="${r.id}">
-                <span class="memoria__row-text"><b>${escapeHtml(r.key)}</b> = ${escapeHtml(r.value)} <small>(${escapeHtml(r.scope)}${r.scopeName ? `:${escapeHtml(r.scopeName)}` : ''} · t${r.turnIndex})</small></span>
-                <i class="fa-solid fa-trash memoria-rule-delete" title="삭제"></i>
-            </div>
-        `));
+        $rules.append($(cardRow({
+            attrs: `data-id="${escapeHtml(r.id)}"`,
+            head: `<b>${escapeHtml(r.key)}</b>`, meta: `${escapeHtml(r.scope)}${r.scopeName ? `:${escapeHtml(r.scopeName)}` : ''} · t${r.turnIndex}`,
+            body: escapeHtml(r.value),
+            actions: [rowBtn('memoria-rule-delete', 'fa-trash', '삭제')],
+        })));
     }
 
     const scene = getSceneSnapshot(store);
@@ -10750,12 +10807,13 @@ function renderStatePanel() {
     if (!store.entityStates.length) $states.append('<div class="memoria__empty">기록된 개체 상태가 없습니다.</div>');
     for (const s of store.entityStates) {
         const prevBit = s.prev != null ? ` <small class="memoria__prev">(이전: ${escapeHtml(String(s.prev))})</small>` : '';
-        $states.append($(`
-            <div class="memoria__row${s.expired != null ? ' is-dormant' : ''}" data-id="${s.id}">
-                <span class="memoria__row-text">${s.expired != null ? '<span class="memoria__badge memoria-state-revive" role="button" tabindex="0" title="요약할 때 더는 맞지 않는 상태로 보아 주입에서 뺐습니다. 이야기에서 다시 적히면 돌아옵니다 — 누르면 바로 되살립니다">지나감 ↺</span> ' : ''}<b>${escapeHtml(s.entity)}.${escapeHtml(s.slot)}</b> = ${escapeHtml(s.value)}${prevBit} <small>(${s.claim === 'belief' ? `믿음${s.owner ? `:${escapeHtml(s.owner)}` : ''}` : '객관'} · t${s.turnIndex})</small></span>
-                <i class="fa-solid fa-trash memoria-state-delete" title="삭제"></i>
-            </div>
-        `));
+        $states.append($(cardRow({
+            cls: s.expired != null ? ' is-dormant' : '', attrs: `data-id="${escapeHtml(s.id)}"`,
+            head: `${s.expired != null ? '<span class="memoria__badge memoria-state-revive" role="button" tabindex="0" title="요약할 때 더는 맞지 않는 상태로 보아 주입에서 뺐습니다. 이야기에서 다시 적히면 돌아옵니다 — 누르면 바로 되살립니다">지나감 ↺</span>' : ''}<b>${escapeHtml(s.entity)}.${escapeHtml(s.slot)}</b>`,
+            meta: `${s.claim === 'belief' ? `믿음${s.owner ? `:${escapeHtml(s.owner)}` : ''}` : '객관'} · t${s.turnIndex}`,
+            body: `${escapeHtml(s.value)}${prevBit}`,
+            actions: [rowBtn('memoria-state-delete', 'fa-trash', '삭제')],
+        })));
     }
 
     $locks.empty();
@@ -10768,14 +10826,17 @@ function renderStatePanel() {
         const outcome = l.status === 'resolved'
             ? ` <span class="memoria__badge memoria-lock-outcome memoria-outcome--${l.outcome || 'none'}" role="button" tabindex="0" title="어떻게 끝났는지 — 누르면 바뀌어요. '어김'은 장부에 남아 그 일을 당한 사람이 잊지 않아요">${l.outcome ? PLEDGE_OUTCOMES[l.outcome] : '결말 ?'}</span>`
             : '';
-        $locks.append($(`
-            <div class="memoria__row${l.status === 'resolved' ? ' is-resolved' : ''}${l.status === 'dormant' ? ' is-dormant' : ''}" data-id="${l.id}">
-                <span class="memoria__row-text"><span class="memoria__badge memoria__badge--lock">${LOCK_LABELS[l.kind] || l.kind}</span>${l.status === 'dormant' ? ' <span class="memoria__badge" title="오래 진전이 없어 주입에서 뺐습니다. 다시 언급되면 깨어납니다">휴면</span>' : ''} ${escapeHtml(l.summary)} <small>(P${l.priority} · t${l.turnIndex})</small>${l.latest?.text && l.status !== 'resolved' ? ` <small class="memoria__lock-now">지금: ${escapeHtml(l.latest.text)}</small>` : ''}${outcome}${l.resolution && l.status === 'resolved' ? ` <small>— ${escapeHtml(l.resolution)}</small>` : ''}${lockExtraHtml(store, l)}${suggest}</span>
-                ${normLockKind(l.kind) === 'author_plan' ? '<i class="fa-solid fa-mask memoria-lock-veil" title="가린 줄 고치기 — AI에게는 이 줄만 갑니다"></i>' : ''}
-                <i class="fa-solid ${l.status === 'active' ? 'fa-check' : 'fa-rotate-left'} memoria-lock-toggle" title="${l.status === 'active' ? '해결됨으로 표시' : '다시 활성화'}"></i>
-                <i class="fa-solid fa-trash memoria-lock-delete" title="삭제"></i>
-            </div>
-        `));
+        $locks.append($(cardRow({
+            cls: `${l.status === 'resolved' ? ' is-resolved' : ''}${l.status === 'dormant' ? ' is-dormant' : ''}`, attrs: `data-id="${escapeHtml(l.id)}"`,
+            head: `<span class="memoria__badge memoria__badge--lock">${escapeHtml(LOCK_LABELS[l.kind] || l.kind)}</span>${l.status === 'dormant' ? '<span class="memoria__badge" title="오래 진전이 없어 주입에서 뺐습니다. 다시 언급되면 깨어납니다">휴면</span>' : ''}${outcome}`,
+            meta: `P${l.priority} · t${l.turnIndex}`,
+            body: `<span class="memoria__row-main">${escapeHtml(l.summary)}</span>${l.resolution && l.status === 'resolved' ? ` <small class="memoria__resolution">— ${escapeHtml(l.resolution)}</small>` : ''}${l.latest?.text && l.status !== 'resolved' ? ` <small class="memoria__lock-now">지금: ${escapeHtml(l.latest.text)}</small>` : ''}${lockExtraHtml(store, l)}${suggest}`,
+            actions: [
+                normLockKind(l.kind) === 'author_plan' ? rowBtn('memoria-lock-veil', 'fa-mask', '가린 줄 고치기 — AI에게는 이 줄만 갑니다') : '',
+                rowBtn('memoria-lock-toggle', l.status === 'active' ? 'fa-check' : 'fa-rotate-left', l.status === 'active' ? '해결됨으로 표시' : '다시 활성화'),
+                rowBtn('memoria-lock-delete', 'fa-trash', '삭제'),
+            ],
+        })));
     }
 }
 
@@ -10791,12 +10852,12 @@ function renderTurnDigests() {
         return;
     }
     for (const t of turns) {
-        list.append($(`
-            <div class="memoria__row" data-turn="${t.turnIndex}">
-                <span class="memoria__row-text"><b title="채팅 메시지 번호">${(t.mesId ?? -1) >= 0 ? `#${t.mesId}` : `t${t.turnIndex}`}</b> ${escapeHtml(t.summary)}${t.failed ? ' <small>⚠ 실패</small>' : ''}</span>
-                <i class="fa-solid fa-pen memoria-digest-edit" title="편집"></i>
-            </div>
-        `));
+        list.append($(cardRow({
+            attrs: `data-turn="${t.turnIndex}"`,
+            head: `<b title="채팅 메시지 번호">${(t.mesId ?? -1) >= 0 ? `#${t.mesId}` : `t${t.turnIndex}`}</b>${t.failed ? '<small class="memoria__row-warn">⚠ 실패</small>' : ''}`,
+            body: escapeHtml(t.summary),
+            actions: [rowBtn('memoria-digest-edit', 'fa-pen', '편집')],
+        })));
     }
 }
 
@@ -10820,8 +10881,7 @@ function renderMilestonesPanel() {
                 <div class="memoria__mile-top">
                     <span class="memoria__badge ${e.grade === 'major' ? 'memoria__badge--arc' : ''}">${e.grade === 'major' ? '전환점' : '사건'}</span>${e.pinned ? '<span class="memoria__badge">늘 실림</span>' : ''}
                     <small class="memoria__mile-meta">${meta}</small>
-                    <i class="fa-solid fa-thumbtack memoria-milestone-pin${e.pinned ? ' is-on' : ''}" title="${e.pinned ? '고정 풀기' : '고정 — 오래돼도 장부에서 밀려나지 않게 (여섯까지)'}"></i>
-                    <i class="fa-solid fa-trash memoria-milestone-delete" title="삭제"></i>
+                    <span class="memoria__row-actions">${rowBtn(`memoria-milestone-pin${e.pinned ? ' is-on' : ''}`, 'fa-thumbtack', e.pinned ? '고정 풀기' : '고정 — 오래돼도 장부에서 밀려나지 않게 (여섯까지)').replace('<button ', `<button aria-pressed="${e.pinned ? 'true' : 'false'}" `)}${rowBtn('memoria-milestone-delete', 'fa-trash', '삭제')}</span>
                 </div>
                 <b class="memoria__mile-title">${escapeHtml(e.title)}</b>
                 ${e.summary ? `<p class="memoria__mile-desc">${escapeHtml(e.summary)}</p>` : ''}
@@ -12398,6 +12458,13 @@ function bindUI() {
         persistStore(); renderDossierPanel(); updateInjection();
     });
 
+    // 줄 안의 누름 배지(지나감 ↺ · 결말)도 키보드로 — Enter · Space 를 누름으로
+    $('#memoria_settings').on('keydown', '.memoria__row [role="button"]:not(button)', function (e) {
+        if (e.key !== 'Enter' && e.key !== ' ') return;
+        e.preventDefault();
+        $(this).trigger('click');
+    });
+
     // ── 캐논/상태/서약
     $('#memoria_settings').on('click', '.memoria-rule-delete', async function () {
         const id = $(this).closest('.memoria__row').data('id');
@@ -13549,11 +13616,12 @@ function renderTrackersPanel() {
     if (!(store.trackers || []).length) { $list.append('<div class="memoria__empty">날 세기가 없습니다.</div>'); return; }
     for (const t of store.trackers) {
         const text = trackerText(t, today).replace(/^[^:]*:\s*/, '');
-        $list.append($(`<div class="memoria__row${t.disabled ? ' is-dormant' : ''}" data-id="${esc(t.id)}">
-            <span class="memoria__row-text"><span class="memoria__badge">${TRACKER_KIND[t.type]}</span> <b>${esc(t.label)}</b>${(t.people || []).length ? ` <small>${esc(t.people.join(' & '))}</small>` : ''} ${text ? `<small class="memoria__lock-now">${esc(text)}</small>` : ''}</span>
-            <i class="fa-solid fa-pen memoria-tracker-edit" title="고치기"></i>
-            <i class="fa-solid fa-trash memoria-tracker-delete" title="삭제"></i>
-        </div>`));
+        $list.append($(cardRow({
+            cls: t.disabled ? ' is-dormant' : '', attrs: `data-id="${esc(t.id)}"`,
+            head: `<span class="memoria__badge">${TRACKER_KIND[t.type]}</span>`, meta: (t.people || []).length ? esc(t.people.join(' & ')) : '',
+            body: `<b>${esc(t.label)}</b>${text ? ` <small class="memoria__lock-now">${esc(text)}</small>` : ''}`,
+            actions: [rowBtn('memoria-tracker-edit', 'fa-pen', '고치기'), rowBtn('memoria-tracker-delete', 'fa-trash', '삭제')],
+        })));
     }
 }
 

@@ -88,7 +88,7 @@ export function validateArchive(value) {
         characters: ['name', 'role', 'age', 'occupation', 'appearance', 'voice', 'core'], bonds: ['from', 'to'], milestones: ['title', 'summary', 'grade'],
         items: ['name', 'meaning', 'holder', 'status'], dossier: ['title'],
     };
-    const arrayFields = { memories: ['entities', 'tags', 'hints', 'knowers'], characters: ['aliases', 'traits'], milestones: ['participants'], dossier: ['chunks'] };
+    const arrayFields = { memories: ['entities', 'tags', 'hints', 'knowers', 'cues'], characters: ['aliases', 'traits'], milestones: ['participants'], dossier: ['chunks'] };
     const requiredText = { memories: ['summary'], worldRules: ['key', 'value'], entityStates: ['entity', 'slot', 'value'], locks: ['kind', 'summary', 'status'], chunkSummaries: ['text'], arcSummaries: ['text'], characters: ['name'], milestones: ['title'], items: ['name'], dossier: ['title'] };
     for (const shelf of lists) for (const row of copy[shelf]) {
         for (const key of requiredText[shelf] || []) if (typeof row[key] !== 'string') throw new Error(`${shelf}.${key}가 없습니다.`);

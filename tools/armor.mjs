@@ -16,7 +16,7 @@ const END = '/* ⟦armor:end⟧ */';
 
 /** 누르는 것 · 고르는 것 · 쓰는 칸을 가리키는 이름 (화면 코드에 실제로 쓰인 것) */
 const CONTROL_CLASSES = [
-    'menu_button', 'text_pole', 'memoria__tab', 'memoria__kindchip', 'memoria__filt-btn', 'memoria__source-button', 'memoria__library-launcher', 'memoria__kind-select',
+    'menu_button', 'text_pole', 'memoria__icon-btn', 'memoria__tab', 'memoria__kindchip', 'memoria__filt-btn', 'memoria__source-button', 'memoria__library-launcher', 'memoria__kind-select',
     'memoria__lock-add-kind', 'memoria__lock-add-priority', 'memoria__lock-add-summary',
     'memoria-au-btn', 'memoria-au-input', 'memoria-fg-all', 'memoria-fg-go', 'memoria-fg-skip', 'memoria-au-link', 'memoria-au-mode', 'memoria-au-textbtn', 'memoria-gap-fill', 'memoria-checkpoint-restore',
     'memoria-conflict-ignore', 'memoria-conflict-keep', 'memoria-bundle-chat', 'memoria-bundle-owner', 'memoria-pop__lang', 'memoria-pop__person', 'memoria-source',

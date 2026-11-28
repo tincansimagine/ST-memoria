@@ -148,22 +148,62 @@ function segmenter(lang) {
         return segZh || (segZh = new Intl.Segmenter('zh', { granularity: 'word' }));
     } catch { return null; }
 }
-const cjkFallback = (s) => s.match(/\p{Script=Han}+|[\p{Script=Katakana}ー]+|\p{Script=Hiragana}+|[가-힣]+|[\p{L}\p{N}]+/gu) || [];
+// Intl.Segmenter가 없는 브라우저: 글자 종류 경계로, 중국어는 흔한 허사(的 · 了 · 在 …)에서도 끊는다
+const cjkFallback = (s) => s.replace(/([的了在是把被给着过吗呢吧啊呀和跟与])/g, ' $1 ').match(/\p{Script=Han}+|[\p{Script=Katakana}ー]+|\p{Script=Hiragana}+|[가-힣]+|[\p{L}\p{N}]+/gu) || [];
+// 영어 소유격 · 줄임 ("marcus's" → marcus, "didn't" → did, "can't" → can, "won't" → will) — 's · t 같은 한두 글자 찌꺼기가 낱말로 남지 않게
+const enContract = (s) => (/['’]/.test(s) ? s.replace(/\bcan['’]t\b/g, 'can').replace(/\bwon['’]t\b/g, 'will').replace(/\b([a-z]{2,})n['’]t\b/g, '$1').replace(/\b([a-z]+)['’](?:s|re|ve|ll|d|m)\b/g, '$1') : s);
+// 로마자 이름 + 한글 조사가 붙은 낱말("elena가 · marcus의")은 이름을 따로 낸다 — 뒤 한글이 조사면 버리고, 내용 낱말이면 함께
+const LATIN_HANGUL = /^([a-z0-9]{2,})([가-힣]+)$/;
+/**
+ * 글이 정말 띄어 쓰지 않는 일본어 · 중국어 위주인가 — 한 글자가 있는지가 아니라 비율로 본다.
+ * 모델이 가끔 한국어 · 영어 글에 엉뚱한 한자 · 가나 낱말을 섞어 내도("少し · 感觉") 그 글을 일본어 · 중국어로 다루지 않게.
+ * 한글이 든 글은 한자 · 가나가 한글보다 많을 때만, 로마자 글은 한자 · 가나 한 글자를 로마자 두 글자로 쳐서 견준다 ("Elenaは古い時計を隠した"는 일본어)
+ */
+export function isNoSpaceCjk(text) {
+    const s = String(text ?? '');
+    if (!HAS_CJK.test(s)) return false;
+    const cjk = (s.match(/[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}]/gu) || []).length;
+    const hangul = (s.match(/[가-힣]/g) || []).length;
+    if (hangul > 0 && cjk <= hangul) return false;
+    const latin = (s.match(/[a-z]/gi) || []).length;
+    return cjk * 2 >= latin;
+}
+/*
+ * 번체 → 간체 (자주 쓰는 글자만, 한 글자씩) — 번체로 쓴 채팅과 간체로 쓴 물음 · 기억이 같은 낱말로 맞게.
+ * 저장된 글은 바꾸지 않고, 낱말 · 조각 · 이름 열쇠를 만들 때만 쓴다. 가나가 든 일본어 글에는 쓰지 않는다 (일본 한자는 따로 쓴다)
+ */
+const T2S = new Map(`燈灯 裡里 裏里 鑰钥 鎖锁 門门 開开 關关 間间 樓楼 橋桥 車车 馬马 鳥鸟 魚鱼 龍龙 樹树 葉叶 藥药 麵面 餅饼 湯汤 鹽盐 燭烛 煙烟 風风 雲云 電电 霧雾 島岛 嶺岭 廳厅 廟庙 獄狱 劍剑 槍枪 鎧铠 傷伤 醫医 癒愈 殺杀 屍尸 禮礼 約约 諾诺 語语 話话 說说 讀读 寫写 聽听 見见 觀观 買买 賣卖 錢钱 銀银 鐵铁 銅铜 鋼钢 鏡镜 書书 畫画 圖图 這这 誰谁 麼么 嗎吗 個个 們们 為为 與与 從从 對对 給给 讓让 問问 請请 謝谢 許许 願愿 覺觉 發发 髮发 現现 尋寻 歸归 離离 別别 會会 護护 幫帮 綁绑 毀毁 燒烧 滅灭 愛爱 戀恋 歡欢 厭厌 憤愤 淚泪 聲声 樂乐 詞词 紙纸 筆笔 寶宝 環环 鍊链 帶带 傘伞 櫃柜 鐘钟 錶表 歲岁 節节 溫温 熱热 陰阴 晝昼 夢梦 憶忆 舊旧 長长 遠远 輕轻 軟软 強强 貧贫 貴贵 勝胜 戰战 鬥斗 陳陈 張张 劉刘 楊杨 趙赵 黃黄 吳吴 鄭郑 孫孙 馮冯 蘇苏 盧卢 蔣蒋 韓韩 閻阎 顧顾 瑤瑶 嵐岚 衛卫 頭头 臉脸 腳脚 體体 東东 雖虽 機机 處处 號号 員员 學学 習习 題题 實实 驗验 經经 歷历 準准 備备 義义 務务 華华 麗丽 鳳凤 鎮镇 鄉乡 縣县 國国 區区 帳帐 兩两 莊庄 園园 閣阁 盜盗 竊窃 騙骗 謊谎 偽伪 戲戏 劇剧 藝艺 術术 錄录 記记 該该 認认 識识 誤误 試试 訴诉 證证 幾几 塊块 條条 隻只 雙双 頂顶 層层 齊齐 雜杂 難难 親亲 媽妈 爺爷 兒儿 婦妇 師师 傳传 統统 隊队 軍军 將将 營营 職职 業业 價价 貨货 賬账 債债 費费 貸贷 錯错 補补 換换 後后 邊边 進进 過过 還还 運运 達达 遞递 遲迟 適适 選选 連连 涼凉 凍冻 飯饭 飲饮 餓饿 飽饱 雞鸡 豬猪 貓猫 蝦虾 龜龟 蟲虫 鴿鸽 鷹鹰 鶴鹤 獅狮 陽阳 濕湿 漢汉 灣湾 灘滩 礦矿 鍋锅 盤盘 壺壶 繩绳 線线 網网 紅红 綠绿 藍蓝 點点 盞盏 騰腾 總总 廚厨 並并 紮扎 錘锤 衝冲 擊击 鬱郁 蓋盖 鹹咸 聞闻 顏颜 純纯 復复 憐怜 蕭萧 輩辈 歎叹 嘆叹 聯联 擔担 憂忧 驚惊 懼惧 嚇吓 夠够 喚唤 啞哑 鬧闹 賴赖 暫暂 敵敌 揮挥 獲获 誘诱 罰罚 審审`.split(' ').map(p => [p[0], p[1]]));
+const HAS_T2S = new RegExp(`[${[...T2S.keys()].join('')}]`);
+export function toSimp(text) {
+    const s = String(text ?? '');
+    if (!HAS_T2S.test(s) || HAS_KANA.test(s)) return s;
+    let out = '';
+    for (const ch of s) out += T2S.get(ch) || ch;
+    return out;
+}
 const wordsCache = new Map();
 export function wordsOf(text) {
     const lower = String(text ?? '').toLowerCase();
     // 한글이 든 글(한자가 조금 섞여도)과 띄어 쓰는 말은 예전 그대로 — 한국어 낱말 축은 한 글자도 바뀌지 않는다
-    if (!HAS_CJK.test(lower) || (HAS_HANGUL.test(lower) && !HAS_KANA.test(lower))) return lower.match(/[\p{L}\p{N}]+/gu) || [];
-    const hit = wordsCache.get(lower);
+    if (!isNoSpaceCjk(lower)) {
+        const raw = enContract(lower).match(/[\p{L}\p{N}]+/gu) || [];
+        if (!/[a-z0-9][가-힣]/.test(lower)) return raw; // 로마자에 한글이 붙은 데가 없으면 낱말마다 보지 않는다
+        return raw.flatMap(w => { const m = w.match(LATIN_HANGUL); return !m ? [w] : (m[2].length >= 2 && !LOOSE_TAILS.includes(m[2]) ? [m[1], m[2]] : [m[1]]); });
+    }
+    const key = toSimp(lower); // 중국어(가나 없음)는 간체로 맞춰 쪼갠다
+    const hit = wordsCache.get(key);
     if (hit) return hit;
-    const sg = segmenter(HAS_KANA.test(lower) ? 'ja' : 'zh');
+    const sg = segmenter(HAS_KANA.test(key) ? 'ja' : 'zh');
     let out;
     if (sg) {
         out = [];
-        for (const seg of sg.segment(lower)) if (seg.isWordLike) out.push(seg.segment);
-    } else out = cjkFallback(lower);
-    if (wordsCache.size > 6000) wordsCache.clear();
-    wordsCache.set(lower, out);
+        for (const seg of sg.segment(key)) if (seg.isWordLike) out.push(seg.segment);
+    } else out = cjkFallback(key);
+    // 짧은 글만 담는다(긴 글은 기억 · 대화별 캐시가 따로 있다). 넘치면 통째로 비우지 않고 오래된 것부터 조금씩
+    if (lower.length <= 400) {
+        if (wordsCache.size >= 4000) { let drop = 800; for (const k of wordsCache.keys()) { wordsCache.delete(k); if (--drop <= 0) break; } }
+        wordsCache.set(key, out);
+    }
     return out;
 }
 /** 일본어 한자 + 히라가나 꼴의 한자 뿌리 ("隠し · 隠す" → 隠, "貸し · 貸す" → 貸) — 쪼갠 낱말의 활용 차이를 잇는다 */
@@ -208,16 +248,18 @@ export function enStems(word) {
     if (/(?:ches|shes|sses)$/.test(w) && w.length >= 6) { add(w.slice(0, -2)); return [...out]; }
     if (/(?:xes|zes)$/.test(w) && w.length >= 5) { add(w.slice(0, -2)); return [...out]; }
     if (w.endsWith('s') && !/(?:ss|us|is|os)$/.test(w)) { add(w.slice(0, -1)); return [...out]; }
-    // 겹친 닿소리를 하나로 줄였으면(running → run) -e 꼴을 내지 않는다 ("rune · stope" 같은 엉뚱한 말이 생긴다)
+    // 겹친 닿소리를 하나로 줄였으면(running → run) -e 꼴을 내지 않는다 ("rune · stope" 같은 엉뚱한 말이 생긴다).
+    // -e는 홀소리 + 닿소리 하나(hid → hide, escap → escape)이거나 rg · nc · rs · nv(forg → forge, danc → dance)로 끝날 때만 ("working → worke"가 되지 않게)
+    const needsE = (r) => /(?:[aeiouy][bcdfghjklmnpqrstvwxz]|[rln]g|[rn]c|[rln]s|[rn]v)$/.test(r) && !/[aeiouy]{2}[bcdfghjklmnpqrstvwxz]$/.test(r);
     if (w.endsWith('ing') && w.length >= 6) {
         const r0 = w.slice(0, -3), r = undouble(r0);
-        if (/[aeiouy]/.test(r)) { add(r); if (r === r0 && /[bcdfghjklmnpqrstvwxz]$/.test(r) && !/[aeiouy]{2}[bcdfghjklmnpqrstvwxz]$/.test(r)) add(`${r}e`); }
+        if (/[aeiouy]/.test(r)) { add(r); if (r === r0 && needsE(r)) add(`${r}e`); }
         return [...out];
     }
     if (w.endsWith('ied') && w.length >= 5) { add(`${w.slice(0, -3)}y`); return [...out]; }
     if (w.endsWith('ed') && w.length >= 5) {
         const r0 = w.slice(0, -2), r = undouble(r0);
-        if (/[aeiouy]/.test(r)) { add(r); if (r === r0 && /[bcdfghjklmnpqrstvwxz]$/.test(r)) add(`${r}e`); }
+        if (/[aeiouy]/.test(r)) { add(r); if (r === r0 && needsE(r)) add(`${r}e`); }
     }
     return [...out];
 }
@@ -427,7 +469,7 @@ export function findRepeatedPhrases(replies, { minShare = 0.2, minReplies = 3, m
         const seenForm = new Set();
         for (const sentence of doc.split(/[\n.!?…。！？"“”「」『』]+/)) {
             // 띄어 쓰지 않는 일본어 · 중국어: 쉼표에서도 끊고 쪼갠 낱말을 붙여서 잇는다 (표현이 글 속 그대로의 꼴이 되게)
-            const noSpace = HAS_CJK.test(sentence) && !HAS_HANGUL.test(sentence);
+            const noSpace = isNoSpaceCjk(sentence);
             for (const clause of noSpace ? sentence.split(/[、，,；;：:]+/) : [sentence]) {
             const words = noSpace ? wordsOf(clause) : (clause.match(/[\p{L}\p{N}'’]+/gu) || []);
             for (let n = 1; n <= (noSpace ? 8 : 4); n++) {
@@ -935,7 +977,7 @@ export function groundedIn(phrase, source, min = 4) {
     return p.length >= min && squashText(source).includes(p);
 }
 
-const HEDGE_RE = /(아직|거의|일부|반쯤|부분적|것 ?같|듯(?:하|싶|이|$)|모양이|지도 모른|려고 ?(?:했|한다|함)|하려|기로 ?(?:했|함)|\bnot yet\b|\balmost\b|\bnearly\b|\bpartly\b|\bpartially\b|\bseems?\b|\bappears? to\b|\bmight\b|\bmay\b|\bprobably\b|\bplans? to\b|\babout to\b|\bgoing to\b|まだ|ほぼ|ほとんど|一部|半分|たぶん|多分|おそらく|恐らく|かもしれな|かも知れな|ようだ|らしい|みたい|つもり|しようと|しかけ|还没|尚未|几乎|差点|一半|大概|也许|可能|好像|似乎|仿佛|打算|正要|快要)/i;
+const HEDGE_RE = /(아직|거의|일부|반쯤|부분적|것 ?같|듯(?:하|싶|이|$)|모양이|지도 모른|려고 ?(?:했|한다|함)|하려|기로 ?(?:했|함)|\bnot yet\b|\balmost\b|\bnearly\b|\bpartly\b|\bpartially\b|\bseems?\b|\bappears? to\b|\bmight\b|\bmay\b|\bprobably\b|\bplans? to\b|\babout to\b|\bgoing to\b|まだ|ほぼ|ほとんど|一部|半分|たぶん|多分|おそらく|恐らく|かもしれな|かも知れな|ようだ|らしい|みたい|つもり|しようと|しかけ|还没|尚未|几乎|差点|一半|大概|也许|(?:^|[^不])可能|好像|似乎|仿佛|打算|正要|快要)/i;
 /** 끝났다고 말하면서 말끝을 흐리는가 — 그런 판정으로는 닫지 않는다 */
 export function soundsHedged(text) {
     return HEDGE_RE.test(String(text ?? ''));
